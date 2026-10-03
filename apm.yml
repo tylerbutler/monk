@@ -17,3 +17,4 @@ devDependencies:
   apm:
     - tylerbutler/apm-base
     - obra/superpowers
+    - pbakaus/impeccable/plugin#skill-v4.1.2
