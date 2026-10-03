@@ -80,3 +80,74 @@ export const snapshotSchema = z.strictObject({
 });
 export type PlayerSnapshot = z.infer<typeof snapshotSchema>;
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
+
+const token = z.string().min(32).max(128);
+export const sessionCredentialsSchema = z.strictObject({
+  matchCode: z.string().regex(/^[A-Z2-9]{8}$/), hostToken: token.nullable(), playerToken: token.nullable(),
+});
+export type SessionCredentials = z.infer<typeof sessionCredentialsSchema>;
+export const clockSchema = z.strictObject({ offsetMs: z.number().finite(), uncertaintyMs: z.number().nonnegative().max(1000), measuredAtMs: time });
+export type ClockEstimate = z.infer<typeof clockSchema>;
+export type ClockProbeSample = { clientSendMs: number; serverReceiveMs: number; serverSendMs: number; clientReceiveMs: number };
+export const trialStatusSchema = z.strictObject({
+  playerIds: z.tuple([id, id]), readyIds: z.array(id).max(2),
+  collecting: z.boolean(), referenceM: z.number().finite().nonnegative().max(10000).nullable(),
+});
+export type TrialStatus = z.infer<typeof trialStatusSchema>;
+export const trialSampleSchema = z.strictObject({
+  atMs: time, distanceM: z.number().finite().nonnegative(),
+  uncertaintiesM: z.tuple([positive, positive]),
+  agesMs: z.tuple([time, time]), updateGapsMs: z.tuple([time, time]),
+  delayBoundsMs: z.tuple([z.tuple([z.number().finite(), z.number().finite()]), z.tuple([z.number().finite(), z.number().finite()])]),
+  clockUncertaintiesMs: z.tuple([time, time]),
+  referenceM: z.number().finite().nonnegative().nullable(),
+});
+export type TrialSample = z.infer<typeof trialSampleSchema>;
+const envelope = { version: z.literal(1) };
+export const clientMessageSchema = z.discriminatedUnion("type", [
+  z.strictObject({ ...envelope, type: z.literal("authenticate"), hostToken: token.nullable(), playerToken: token.nullable() }),
+  z.strictObject({ ...envelope, type: z.literal("clock_probe"), nonce: id, clientSendMs: time }),
+  z.strictObject({ ...envelope, type: z.literal("clock_confirm"), nonce: id, clientReceiveMs: time }),
+  z.strictObject({ ...envelope, type: z.literal("position"), report: positionSchema }),
+  z.strictObject({ ...envelope, type: z.literal("suspend"), reason: z.string().min(1).max(160) }),
+  z.strictObject({ ...envelope, type: z.literal("host_command"), commandId: id, command: hostCommandSchema }),
+  z.strictObject({ ...envelope, type: z.literal("snapshot_request") }),
+  z.strictObject({ ...envelope, type: z.literal("feedback_seen"), eventSeq: time }),
+  z.strictObject({ ...envelope, type: z.literal("trial_begin"), playerIds: z.tuple([id, id]), referenceM: z.number().nonnegative().max(10000).nullable() }),
+  z.strictObject({ ...envelope, type: z.literal("trial_ready"), consent: z.boolean() }),
+  z.strictObject({ ...envelope, type: z.literal("trial_end") }),
+]);
+export type ClientMessage = z.infer<typeof clientMessageSchema>;
+export const outcomeSchema = z.strictObject({ commandId: id, accepted: z.boolean(), reason: z.string() });
+export type CommandOutcome = z.infer<typeof outcomeSchema>;
+const stream = { ...envelope, streamId: id, streamSeq: time };
+const stateMessage = {
+  snapshot: snapshotSchema, trial: trialStatusSchema.nullable(), startChecking: z.boolean(),
+};
+export const serverMessageSchema = z.discriminatedUnion("type", [
+  z.strictObject({ ...stream, type: z.literal("authenticated"), playerId: id.nullable(), canHost: z.boolean(), expiresAtMs: time }),
+  z.strictObject({ ...stream, type: z.literal("clock_reply"), nonce: id, clientSendMs: time, serverReceiveMs: time, serverSendMs: time }),
+  z.strictObject({ ...stream, type: z.literal("clock_ready"), clock: clockSchema }),
+  z.strictObject({ ...stream, type: z.literal("snapshot"), ...stateMessage }),
+  z.strictObject({ ...stream, type: z.literal("update"), ...stateMessage, events: z.array(eventSchema), outcome: outcomeSchema.nullable() }),
+  z.strictObject({ ...stream, type: z.literal("trial_sample"), sample: trialSampleSchema }),
+  z.strictObject({ ...stream, type: z.literal("error"), code: id, reason: z.string(), commandId: id.nullable() }),
+]);
+export type ServerMessage = z.infer<typeof serverMessageSchema>;
+export type ServerBody = ServerMessage extends infer M ? M extends ServerMessage ? Omit<M, "version" | "streamId" | "streamSeq"> : never : never;
+export function parseClientMessage(input: unknown): ParseResult<ClientMessage> {
+  const parsed = clientMessageSchema.safeParse(input);
+  return parsed.success ? { ok: true, value: parsed.data } : { ok: false, error: "Invalid client message. Check its version, fields, and values." };
+}
+export function parseServerMessage(input: unknown): ParseResult<ServerMessage> {
+  const parsed = serverMessageSchema.safeParse(input);
+  return parsed.success ? { ok: true, value: parsed.data } : { ok: false, error: "Invalid server message. Reconnect to this match." };
+}
+export type ConnectionStatus = { state: "connecting" | "connected" | "reconnecting" | "failed"; reason: string | null };
+export type ConnectionHandlers = { onMessage(message: ServerMessage): void; onStatus(status: ConnectionStatus): void };
+export type MatchConnection = { send(message: ClientMessage): void; close(): void };
+export type LocationStatus = {
+  collecting: boolean; permission: "unknown" | "granted" | "denied";
+  visible: boolean; wakeLock: "unsupported" | "pending" | "held" | "released";
+  reason: string | null;
+};
