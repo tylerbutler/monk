@@ -97,6 +97,7 @@ Changing parameters resets approval. Normal mode pauses on a missing fresh
 faction, ends on conversion extinction, and rejects live manual changes.
 
 Both intended players acknowledge conversions only after visible rendering.
+The conversion text must fit inside its notification and the visible viewport.
 The host sees sample counts, missing acknowledgements, failures, and display-delay
 upper bounds. This is not one-way network latency. The later targets are 80%
 comprehension and 95% of conversions displayed to both players within one second;
@@ -104,7 +105,7 @@ neither target is claimed as achieved.
 
 ## Deployment is a separate operation
 
-The configured test origin is **https://monk-test.tylerbutler.com**.
+The deployed test origin is **https://monk-test.tylerbutler.com**.
 The physical trial is **pending**. CI does not deploy. Authenticate with the
 Cloudflare account specified in `wrangler.jsonc` and review the target:
 
