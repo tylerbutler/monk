@@ -1,0 +1,9 @@
+name = "monk_rules"
+version = "0.1.0"
+target = "javascript"
+
+[javascript]
+typescript_declarations = true
+
+[dependencies]
+gleam_stdlib = ">= 0.70.0 and < 2.0.0"

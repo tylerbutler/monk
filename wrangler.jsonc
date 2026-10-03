@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "monk-outdoor-playtest",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-10-03",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "./dist", "binding": "ASSETS", "run_worker_first": true },
+  "durable_objects": {
+    "bindings": [{ "name": "MATCHES", "class_name": "MatchAuthority" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MatchAuthority"] }]
+}
