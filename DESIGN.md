@@ -2,6 +2,12 @@
 
 **Status:** Draft for discussion. No implementation or playtest results yet.
 
+**First implementation scope:** See the
+[outdoor playtest specification](docs/superpowers/specs/2026-10-03-monk-outdoor-playtest-design.md).
+It defines the selected PWA architecture, Gleam rules engine, two-iPhone trial,
+and default-on testing mode. This document retains broader proposals that
+are outside that first build.
+
 **Source:** `monk.doc`, a concept document dated September 30, 2004.
 
 This document preserves the source concept, identifies gaps, and proposes a
