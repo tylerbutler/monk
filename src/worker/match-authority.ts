@@ -6,7 +6,7 @@ import { issueToken, verifyToken } from "./auth";
 import { commitRecord, loadRecord } from "./storage";
 import type { MatchRecord } from "./storage";
 import { actorSchema, parseClientMessage, serverMessageSchema } from "../shared/protocol";
-import type { ClockEstimate, ClockProbeSample, CommandOutcome, EngineEvent, Observation, ServerBody, TrialStatus, VerifiedActor } from "../shared/protocol";
+import type { ClockEstimate, ClockProbeSample, CommandOutcome, EngineEvent, FeedbackSummary, Observation, ServerBody, TrialStatus, VerifiedActor } from "../shared/protocol";
 import { estimateClock, normalizeObservation } from "../shared/clock";
 
 const attachmentSchema = z.strictObject({
@@ -28,6 +28,7 @@ export class MatchAuthority extends DurableObject<Env> {
   private measurements = new Map<string, Measurement>();
   private trial: TrialStatus | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private pendingStart: { commandId: string; actor: VerifiedActor; deadlineMs: number; caller: WebSocket } | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -71,11 +72,26 @@ export class MatchAuthority extends DurableObject<Env> {
   }
   private view(actor: VerifiedActor) {
     if (!this.engine) throw new Error("Match engine is unavailable.");
-    return { ...snapshotFor(this.engine, actor.playerId, Date.now()), canHost: actor.host };
+    return { ...snapshotFor(this.engine, actor.playerId, Date.now()), canHost: actor.host, feedback: this.feedbackSummary() };
+  }
+  private feedbackSummary(): FeedbackSummary {
+    const records = this.record?.feedback ?? [];
+    const recipients = records.flatMap(f => f.recipients);
+    const delays = recipients.flatMap(r => r.seenAfterMs === null ? [] : [r.seenAfterMs]).sort((a, b) => a - b);
+    const completed = records.filter(f => f.recipients.every(r => r.seenAfterMs !== null && r.seenAfterMs <= 1000)).length;
+    const failed = records.filter(f => !f.recipients.every(r => r.seenAfterMs !== null && r.seenAfterMs <= 1000) &&
+      (Date.now() - f.atMs >= 1000 || f.recipients.some(r => r.seenAfterMs !== null && r.seenAfterMs > 1000))).length;
+    return {
+      intended: recipients.length, acknowledged: delays.length,
+      missing: records.reduce((n, f) => n + (Date.now() - f.atMs >= 1000 ? f.recipients.filter(r => r.seenAfterMs === null).length : 0), 0),
+      conversions: records.length, conversionsWithinOneSecond: completed, conversionsFailed: failed,
+      conversionsPending: records.length - completed - failed,
+      p95UpperMs: delays.length && delays.length === recipients.length ? delays[Math.ceil(delays.length * .95) - 1] : null,
+    };
   }
   private snapshot(socket: WebSocket): void {
     const actor = this.attachment(socket).actor;
-    if (actor) this.send(socket, { type: "snapshot", snapshot: this.view(actor), trial: this.trialFor(actor), startChecking: false });
+    if (actor) this.send(socket, { type: "snapshot", snapshot: this.view(actor), trial: this.trialFor(actor), startChecking: !!this.pendingStart });
   }
   private broadcast(events: EngineEvent[], outcome: CommandOutcome | null = null, caller?: WebSocket): void {
     for (const socket of this.ctx.getWebSockets()) {
@@ -84,12 +100,18 @@ export class MatchAuthority extends DurableObject<Env> {
       const privateEvents = events.filter(e => actor.host || e.type === "lifecycle" ||
         e.attackerId === actor.playerId || e.targetId === actor.playerId);
       this.send(socket, { type: "update", snapshot: this.view(actor), events: privateEvents,
-        outcome: socket === caller ? outcome : null, trial: this.trialFor(actor), startChecking: false });
+        outcome: socket === caller ? outcome : null, trial: this.trialFor(actor), startChecking: !!this.pendingStart });
     }
   }
   private async accept(next: EngineTransition, outcome: CommandOutcome | null = null, sessions?: MatchRecord["sessions"]): Promise<void> {
     if (!this.record) throw new Error("Match record is unavailable.");
-    const record = { ...this.record, sessions: sessions ?? this.record.sessions, checkpoint: checkpointEngine(next.state, Date.now()),
+    const feedback = next.events.filter(e => e.type === "conversion" && e.attackerId && e.targetId).map(e => ({
+      eventSeq: e.eventSeq, atMs: e.atMs, recipients: [
+        { playerId: e.attackerId!, seenAfterMs: null }, { playerId: e.targetId!, seenAfterMs: null },
+      ],
+    }));
+    const record = { ...this.record, feedback: [...this.record.feedback, ...feedback],
+      sessions: sessions ?? this.record.sessions, checkpoint: checkpointEngine(next.state, Date.now()),
       outcomes: outcome ? [...this.record.outcomes, outcome] : this.record.outcomes };
     await commitRecord(this.ctx.storage, record, next.events);
     this.record = { ...record, events: [...record.events, ...next.events] };
@@ -106,13 +128,13 @@ export class MatchAuthority extends DurableObject<Env> {
   private async scheduleAlarm(): Promise<void> {
     if (!this.record) return;
     const phase = this.record.checkpoint.phase;
-    const recovering = phase === "running" || this.engine && snapshotFor(this.engine, null, Date.now()).resumeChecking;
+    const recovering = this.pendingStart || phase === "running" || this.engine && snapshotFor(this.engine, null, Date.now()).resumeChecking;
     await this.ctx.storage.setAlarm(Math.min(this.record.expiresAtMs, recovering ? Date.now() + 1000 : this.record.expiresAtMs));
   }
   private scheduleTick(): void {
     if (this.timer !== null || !this.engine) return;
     const snapshot = snapshotFor(this.engine, null, Date.now());
-    if (snapshot.phase !== "running" && !snapshot.resumeChecking && !this.trial?.collecting) return;
+    if (snapshot.phase !== "running" && !snapshot.resumeChecking && !this.trial?.collecting && !this.pendingStart) return;
     this.timer = setTimeout(() => {
       this.timer = null;
       this.ctx.waitUntil(this.serialize(() => this.tick()).catch(() => {
@@ -130,6 +152,25 @@ export class MatchAuthority extends DurableObject<Env> {
     const next = advanceEngine(this.engine, { nowMs: Date.now(), actor: null, commands: [], observations: [] });
     await this.accept(next);
     this.broadcast(next.events);
+    await this.resolveStart();
+  }
+  private async resolveStart(): Promise<void> {
+    const pending = this.pendingStart;
+    if (!pending || !this.engine || !this.record) return;
+    let engine = this.engine;
+    const timedOut = Date.now() >= pending.deadlineMs;
+    if (timedOut) {
+      for (const p of this.record.checkpoint.players) engine = suspendEngine(engine, p.id);
+    }
+    const next = advanceEngine(engine, { nowMs: Date.now(), actor: pending.actor,
+      commands: timedOut ? [] : [{ type: "start" }], observations: [] });
+    if (!timedOut && next.rejections.length) return;
+    const outcome = { commandId: pending.commandId, accepted: !timedOut,
+      reason: timedOut ? "Freshness check timed out. All required players must consent and provide usable fixes." : "Round started after fresh observations." };
+    await this.accept(next, outcome);
+    this.pendingStart = null; this.trial = null; this.measurements.clear();
+    this.broadcast(next.events, outcome, pending.caller);
+    await this.scheduleAlarm();
   }
   async fetch(request: Request): Promise<Response> {
     return this.serialize(async () => {
@@ -147,7 +188,7 @@ export class MatchAuthority extends DurableObject<Env> {
           matchCode: code, createdAtMs: now, expiresAtMs: now + 86400000,
           checkpoint: checkpointEngine(engine, now),
           sessions: [{ id: hostId, host: true, playerId: null, verifier: credential.verifier }],
-          events: [], outcomes: [],
+          events: [], outcomes: [], feedback: [],
         };
         await commitRecord(this.ctx.storage, record, []);
         this.record = record; this.engine = engine;
@@ -246,15 +287,28 @@ export class MatchAuthority extends DurableObject<Env> {
       if (message.type === "host_command") {
         if (!actor.host) { this.error(socket, "forbidden", "Only the host can send this command.", message.commandId); return; }
         const existing = this.record.outcomes.find(o => o.commandId === message.commandId);
-        if (existing) { this.send(socket, { type: "update", snapshot: this.view(actor), events: [], outcome: existing, trial: this.trialFor(actor), startChecking: false }); return; }
+        if (existing) { this.send(socket, { type: "update", snapshot: this.view(actor), events: [], outcome: existing, trial: this.trialFor(actor), startChecking: !!this.pendingStart }); return; }
+        if (this.pendingStart?.commandId === message.commandId) { this.snapshot(socket); return; }
+        if (message.command.type === "start" && this.record.checkpoint.phase === "lobby" && !this.pendingStart) {
+          const c = this.record.checkpoint;
+          const rosterReady = c.mode === "test" ? c.players.length >= 2 :
+            c.players.length === 6 && ["rock", "paper", "scissors"].every(f => c.players.filter(p => p.faction === f).length === 2);
+          if (c.parameters && c.playArea && rosterReady && (c.mode === "test" || c.approved)) {
+            for (const p of c.players) this.engine = suspendEngine(this.engine, p.id);
+            this.pendingStart = { commandId: message.commandId, actor, deadlineMs: Date.now() + 10000, caller: socket };
+            this.trial = null; this.measurements.clear();
+            await this.scheduleAlarm(); this.scheduleTick(); this.broadcast([]); return;
+          }
+        }
         if (this.record.outcomes.length >= 10000) { this.error(socket, "command_limit", "Command limit reached. End this match.", message.commandId); return; }
         const next = advanceEngine(this.engine, { nowMs: Date.now(), actor, commands: [message.command], observations: [] });
         const outcome = { commandId: message.commandId, accepted: !next.rejections.length, reason: next.rejections[0]?.reason ?? "Command accepted." };
         try { await this.accept(next, outcome); } catch { this.error(socket, "storage_failed", "State was not saved. Retry the same command ID.", message.commandId); return; }
-        if (message.command.type === "begin_resume" || message.command.type === "cancel_resume" ||
-          message.command.type === "pause" || message.command.type === "end" || message.command.type === "start") {
+        if (outcome.accepted && (message.command.type === "begin_resume" || message.command.type === "cancel_resume" ||
+          message.command.type === "pause" || message.command.type === "end" || message.command.type === "start")) {
           this.trial = null; this.measurements.clear();
         }
+        if (outcome.accepted && message.command.type === "end") this.pendingStart = null;
         this.broadcast(next.events, outcome, socket); return;
       }
       if (message.type === "clock_probe") {
@@ -306,7 +360,7 @@ export class MatchAuthority extends DurableObject<Env> {
         }
         const view = this.view(actor);
         const inTrial = this.trial?.collecting && this.trial.playerIds.includes(actor.playerId);
-        if (view.phase !== "running" && !view.resumeChecking && !inTrial) {
+        if (view.phase !== "running" && !view.resumeChecking && !inTrial && !this.pendingStart) {
           this.error(socket, "collection_stopped", "Location collection is stopped."); return;
         }
         const clockSession = this.clocks.get(socket);
@@ -331,6 +385,7 @@ export class MatchAuthority extends DurableObject<Env> {
           updateGapMs: old ? Math.max(0, Date.now() - old.receivedAtMs) : 0, clock: clockSession.clock });
         this.broadcast(next.events);
         if (inTrial) this.sendTrialSample();
+        await this.resolveStart();
         return;
       }
       if (message.type === "suspend" || message.type === "leave") {
@@ -344,6 +399,18 @@ export class MatchAuthority extends DurableObject<Env> {
         this.measurements.delete(actor.playerId);
         if (this.trial?.playerIds.includes(actor.playerId)) { this.trial = null; this.measurements.clear(); }
         this.broadcast(next.events); return;
+      }
+      if (message.type === "feedback_seen") {
+        const feedback = this.record.feedback.find(f => f.eventSeq === message.eventSeq);
+        if (!feedback || !actor.playerId || !feedback.recipients.some(r => r.playerId === actor.playerId)) {
+          this.error(socket, "feedback_invalid", "This feedback event does not belong to your player."); return;
+        }
+        const record = { ...this.record, feedback: this.record.feedback.map(f => f.eventSeq !== message.eventSeq ? f : {
+          ...f, recipients: f.recipients.map(r => r.playerId !== actor.playerId || r.seenAfterMs !== null ? r :
+            { ...r, seenAfterMs: Math.max(0, Date.now() - f.atMs) }),
+        }) };
+        try { await commitRecord(this.ctx.storage, record, []); } catch { this.error(socket, "storage_failed", "Feedback acknowledgement was not saved."); return; }
+        this.record = record; this.broadcast([]); return;
       }
       this.error(socket, "invalid_operation", "This operation cannot be used in the current state.");
     });
@@ -403,7 +470,7 @@ export class MatchAuthority extends DurableObject<Env> {
     await this.ctx.storage.deleteAll();
     this.record = null; this.engine = null;
     if (this.timer !== null) clearTimeout(this.timer);
-    this.timer = null; this.trial = null; this.measurements.clear(); this.reports.clear(); this.clocks.clear();
+    this.timer = null; this.trial = null; this.pendingStart = null; this.measurements.clear(); this.reports.clear(); this.clocks.clear();
   }
   async alarm(): Promise<void> {
     await this.serialize(async () => {

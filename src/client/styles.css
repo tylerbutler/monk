@@ -39,6 +39,14 @@ button:disabled { cursor: wait; opacity: .55; }
 .roster li { padding: .6rem 0; border-bottom: 1px solid var(--line); }
 .mode-label, .state-line { font-weight: 700; }
 .mode-label { color: var(--accent); }
+.own-faction { display: flex; align-items: center; gap: 1rem; margin: 1.5rem 0 .75rem; }
+.own-faction svg { width: 4rem; height: 4rem; }
+.own-faction strong { font-size: 2.5rem; line-height: 1.1; letter-spacing: -.025em; }
+.round-clock { font-size: 1.4rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+progress { width: 100%; height: 1.25rem; accent-color: var(--accent); }
+.host-controls { border-top: 1px solid var(--line); padding-top: 1rem; }
+.feedback { border-top: 2px solid var(--ink); }
+.feedback p:first-of-type { font-weight: 700; }
 .measurements { display: grid; grid-template-columns: 1fr auto; gap: .6rem 1rem; margin: 1.5rem 0; font-variant-numeric: tabular-nums; }
 .measurements dt { color: var(--muted); }
 .measurements dd { margin: 0; font-weight: 650; text-align: right; }

@@ -23,6 +23,8 @@ export function lobbyFixture(factions: Faction[], mode: MatchMode = "test"): Eng
   let state = createEngine({ id: "m1", hostId: "h1", createdAtMs: 0 });
   state = command(state, 0, { type: "configure", mode, parameters, approved: mode === "normal",
     deviceLimitations: "Synthetic tests only", playArea: "Marked test area" }).state;
+  if (mode === "normal") state = command(state, 0, { type: "configure", mode, parameters, approved: true,
+    deviceLimitations: "Synthetic tests only", playArea: "Marked test area" }).state;
   factions.forEach((faction, i) => {
     state = command(state, 0, { type: "join", playerId: `p${i + 1}`, faction, label: `Player ${i + 1}` }).state;
   });

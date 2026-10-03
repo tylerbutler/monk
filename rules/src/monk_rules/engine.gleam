@@ -189,7 +189,7 @@ fn apply_command(
               ..state,
               mode: mode,
               parameters: Some(parameters),
-              approved: approved && limitations != "",
+              approved: approved && limitations != "" && state.parameters == Some(parameters),
               limitations: limitations,
               play_area: play_area,
               remaining: parameters.duration,

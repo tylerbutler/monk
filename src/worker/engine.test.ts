@@ -151,6 +151,13 @@ it("calculates horizontal haversine distance", () => {
   expect(distanceBetween(fix("p1", 0, 0), fix("p2", 100, 0))).toBeCloseTo(100, 7);
 });
 
+it("resets parameter approval when settings change, even when approval is supplied", () => {
+  const state = lobbyFixture(["rock", "paper"], "normal");
+  const changed = command(state, 0, { type: "configure", mode: "normal",
+    parameters: { ...parameters, entryRadiusM: 11 }, approved: true, deviceLimitations: "Measured pair", playArea: "Marked test area" });
+  expect(snapshotFor(changed.state, "p1", 0).approved).toBe(false);
+});
+
 it("creates a lobby in testing mode", () => {
   const state = createEngine({ id: "m1", hostId: "h1", createdAtMs: 0 });
   expect(state.id).toBe("m1");

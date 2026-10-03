@@ -1,6 +1,6 @@
 import { SELF } from "cloudflare:test";
 import { sessionCredentialsSchema, parseServerMessage } from "../../src/shared/protocol";
-import type { ClientMessage, HostCommand, ServerMessage, SessionCredentials } from "../../src/shared/protocol";
+import type { ClientMessage, HostCommand, RuleParameters, ServerMessage, SessionCredentials } from "../../src/shared/protocol";
 import { parameters } from "../fixtures";
 
 export const sockets: WebSocket[] = [];
@@ -80,26 +80,24 @@ export async function hostCommand(client: Awaited<ReturnType<typeof connect>>, c
     if (message.outcome?.commandId === commandId) return message;
   }
 }
-export async function runningMatch(roundDurationMs = 600000) {
+export async function runningMatch(roundDurationMs = 600000, overrides: Partial<RuleParameters> = {}) {
   const credentials = await createMatch();
   const host = await connect({ ...await joinMatch(credentials.matchCode, credentials.hostToken), hostToken: credentials.hostToken });
   const other = await connect(await joinMatch(credentials.matchCode));
-  await hostCommand(host, { type: "configure", mode: "test", parameters: { ...parameters, roundDurationMs },
+  await hostCommand(host, { type: "configure", mode: "test", parameters: { ...parameters, ...overrides, roundDurationMs },
     approved: false, deviceLimitations: "Synthetic worker tests", playArea: "Synthetic test area" });
   host.send({ version: 1, type: "snapshot_request" });
   const snapshot = await host.next("snapshot");
   const ids: [string, string] = [snapshot.snapshot.roster[0].id, snapshot.snapshot.roster[1].id];
-  host.send({ version: 1, type: "trial_begin", playerIds: ids, referenceM: 100 });
-  for (;;) { if ((await host.next("update")).trial) break; }
-  host.send({ version: 1, type: "trial_ready", consent: true });
-  other.send({ version: 1, type: "trial_ready", consent: true });
-  for (;;) { if ((await host.next("update")).trial?.collecting) break; }
+  const commandId = crypto.randomUUID();
+  host.send({ version: 1, type: "host_command", commandId, command: { type: "start" } });
+  for (;;) { if ((await host.next("update")).startChecking) break; }
   await Promise.all([probe(host), probe(other)]);
   const capturedAtMs = Date.now();
   host.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
   other.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 100 / 6371000 * 180 / Math.PI, accuracyM: 1 } });
-  await host.next("trial_sample");
-  const started = await hostCommand(host, { type: "start" });
+  let started = await host.next("update");
+  while (started.outcome?.commandId !== commandId) started = await host.next("update");
   if (!started.outcome?.accepted) throw new Error(started.outcome?.reason);
   return { credentials, host, other, ids };
 }

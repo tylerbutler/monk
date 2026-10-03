@@ -1,8 +1,9 @@
 import { connectMatch } from "./connection";
 import { startLocation } from "./location";
 import { addTrialSample, exportTrialSummary, newTrialSummary } from "./trial";
+import { describeEvent, renderMatch } from "./views";
 import { deviceSchema, sessionCredentialsSchema } from "../shared/protocol";
-import type { ConnectionStatus, LocationStatus, MatchConnection, PlayerSnapshot, ServerMessage, SessionCredentials, TrialSample, TrialStatus, TrialSummary } from "../shared/protocol";
+import type { ConnectionStatus, EngineEvent, HostCommand, LocationStatus, MatchConnection, PlayerSnapshot, ServerMessage, SessionCredentials, TrialSample, TrialStatus, TrialSummary } from "../shared/protocol";
 
 function text(parent: HTMLElement, tag: string, value: string, className = ""): HTMLElement {
   const node = document.createElement(tag); node.textContent = value; node.className = className; parent.append(node); return node;
@@ -23,6 +24,10 @@ export function mountApp(root: HTMLElement): () => void {
   let connectionStatus: ConnectionStatus = { state: "connecting", reason: null };
   let location: LocationStatus = { collecting: false, permission: "unknown", visible: true, wakeLock: "unsupported", reason: null };
   let consent = false, clockReady = false, disposed = false;
+  let startChecking = false, commandStatus = "", feedback: EngineEvent[] = [];
+  const pendingCommands = new Map<string, HostCommand>();
+  const pendingFeedback = new Set<number>(), acknowledged = new Set<number>();
+  let feedbackFrame = false, audio: AudioContext | null = null;
   let stopLocation: (() => void) | null = null;
   let error = "";
   const retained = new Map<string, { value: string; checked: boolean }>();
@@ -41,7 +46,7 @@ export function mountApp(root: HTMLElement): () => void {
   function stopCollection() { const stop = stopLocation; stopLocation = null; stop?.(); }
   function reconcileCollection() {
     const needed = !!snapshot?.ownPlayerId && consent && clockReady && connectionStatus.state === "connected" &&
-      document.visibilityState === "visible" && (snapshot.phase === "running" || snapshot.resumeChecking ||
+      document.visibilityState === "visible" && (snapshot.phase === "running" || snapshot.resumeChecking || startChecking ||
         !!trial?.collecting && trial.readyIds.includes(snapshot.ownPlayerId));
     if (!needed) { stopCollection(); return; }
     if (!stopLocation) stopLocation = startLocation(fix => connection?.send({ version: 1, type: "position", report: fix }), status => {
@@ -58,8 +63,19 @@ export function mountApp(root: HTMLElement): () => void {
     if (disposed) return;
     if (message.type === "clock_ready") clockReady = true;
     if (message.type === "snapshot" || message.type === "update") {
-      snapshot = message.snapshot; trial = message.trial;
-      if (message.type === "update" && message.outcome && !message.outcome.accepted) error = message.outcome.reason;
+      snapshot = message.snapshot; trial = message.trial; startChecking = message.startChecking;
+      if (message.type === "update") {
+        if (message.outcome) {
+          pendingCommands.delete(message.outcome.commandId);
+          commandStatus = message.outcome.reason;
+          if (!message.outcome.accepted) error = message.outcome.reason;
+        }
+        for (const event of message.events) {
+          if (!feedback.some(e => e.eventSeq === event.eventSeq)) feedback = [...feedback, event].slice(-6);
+          if (event.type === "conversion" && (event.attackerId === snapshot.ownPlayerId || event.targetId === snapshot.ownPlayerId) &&
+            !acknowledged.has(event.eventSeq)) pendingFeedback.add(event.eventSeq);
+        }
+      }
     }
     if (message.type === "error") {
       error = message.reason;
@@ -86,6 +102,32 @@ export function mountApp(root: HTMLElement): () => void {
     });
     render();
   }
+  function sendCommand(command: HostCommand) {
+    const commandId = crypto.randomUUID();
+    pendingCommands.set(commandId, command); commandStatus = "Waiting for the authority response.";
+    connection?.send({ version: 1, type: "host_command", commandId, command });
+    render();
+  }
+  function acknowledgeVisibleFeedback() {
+    if (feedbackFrame || !pendingFeedback.size || document.visibilityState !== "visible") return;
+    feedbackFrame = true;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      feedbackFrame = false;
+      if (disposed || document.visibilityState !== "visible" || !root.isConnected) return;
+      for (const eventSeq of pendingFeedback) {
+        if (!root.querySelector(`[data-event-seq="${eventSeq}"]`)) continue;
+        connection?.send({ version: 1, type: "feedback_seen", eventSeq });
+        acknowledged.add(eventSeq); pendingFeedback.delete(eventSeq);
+        if (typeof navigator.vibrate === "function") navigator.vibrate(60);
+        if (audio?.state === "running") {
+          const oscillator = audio.createOscillator(), gain = audio.createGain();
+          oscillator.frequency.value = 600; gain.gain.value = .05;
+          oscillator.connect(gain); gain.connect(audio.destination);
+          oscillator.start(); oscillator.stop(audio.currentTime + .08);
+        }
+      }
+    }));
+  }
   async function request(path: string, body: object): Promise<SessionCredentials> {
     const response = await fetch(path, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -104,6 +146,7 @@ export function mountApp(root: HTMLElement): () => void {
     connection?.send({ version: 1, type: "leave" });
     connection?.close(); connection = null; credentials = null; snapshot = null; trial = null;
     latest = null; summary = null; retained.clear(); error = "";
+    pendingCommands.clear(); pendingFeedback.clear(); acknowledged.clear(); feedback = []; startChecking = false;
     sessionStorage.removeItem("monk-session"); render();
   }
   function readDevices(): TrialSummary {
@@ -218,11 +261,34 @@ export function mountApp(root: HTMLElement): () => void {
     } else {
       const top = document.createElement("div"); top.className = "match-heading"; root.append(top);
       text(top, "h2", `Match ${credentials.matchCode}`);
-      text(top, "p", snapshot?.mode === "normal" ? "Normal mode" : "Testing mode", "mode-label");
       if (!snapshot) text(root, "p", "Connecting to the private match. Location is not collected.");
       if (snapshot) {
         const section = document.createElement("section"); root.append(section);
-        text(section, "h3", snapshot.phase === "lobby" ? "Players" : `Round ${snapshot.phase}`);
+        renderMatch(section, snapshot, {
+          start: () => sendCommand({ type: "start" }), pause: () => sendCommand({ type: "pause" }),
+          beginResume: () => sendCommand({ type: "begin_resume" }), cancelResume: () => sendCommand({ type: "cancel_resume" }),
+          end: () => sendCommand({ type: "end" }), configure: sendCommand,
+          setFaction: (playerId, faction) => sendCommand({ type: "set_faction", playerId, faction }), leave,
+        });
+        if (startChecking) {
+          text(section, "p", "Freshness check before start. The round is not running. Consenting players must provide fresh fixes within 10 seconds.", "state-line");
+          for (const node of section.querySelectorAll<HTMLButtonElement | HTMLInputElement>(".configuration input, .configuration button, [data-action='start']")) node.disabled = true;
+        }
+        if (commandStatus) { const notice = text(section, "p", commandStatus, "state-line"); notice.setAttribute("role", "status"); }
+        for (const select of section.querySelectorAll<HTMLSelectElement>('[data-action="set-faction"]')) {
+          select.disabled = [...pendingCommands.values()].some(c => c.type === "set_faction");
+        }
+        if (snapshot.ownPlayerId && !consent && snapshot.phase !== "ended") {
+          button(section, "Allow location for this round", () => { consent = true; reconcileCollection(); render(); }, "round-consent");
+        }
+        if (snapshot.ownPlayerId && typeof AudioContext !== "undefined" && !audio) {
+          button(section, "Enable sound cues", async () => {
+            audio = new AudioContext();
+            try { await audio.resume(); } catch { showError("Sound could not start. Visual feedback stays on."); }
+            render();
+          }, "enable-audio", "secondary");
+        }
+        text(section, "h3", "Players");
         const roster = document.createElement("ul"); roster.className = "roster"; section.append(roster);
         for (const p of snapshot.roster) text(roster, "li", `${p.label} - ${p.faction}${p.id === snapshot.ownPlayerId ? " (you)" : ""}`);
         if (snapshot.canHost && !snapshot.ownPlayerId && snapshot.phase === "lobby") {
@@ -233,6 +299,14 @@ export function mountApp(root: HTMLElement): () => void {
           }, "host-join");
         }
         if (snapshot.phase === "lobby") trialView(root);
+        if (feedback.length) {
+          const events = document.createElement("section"); events.className = "feedback"; events.setAttribute("aria-label", "Match feedback"); root.append(events);
+          text(events, "h3", "Match feedback");
+          for (const event of [...feedback].reverse()) {
+            const line = text(events, "p", describeEvent(event, snapshot));
+            line.dataset.eventSeq = String(event.eventSeq);
+          }
+        }
       }
       if (connectionStatus.state === "failed") button(root, "Reconnect", () => { if (credentials) connect(credentials); }, "reconnect", "secondary");
       button(root, "Leave match", leave, "leave", "secondary");
@@ -250,6 +324,7 @@ export function mountApp(root: HTMLElement): () => void {
       if (value) { input.value = value.value; if (input instanceof HTMLInputElement) input.checked = value.checked; }
     }
     if (focused) root.querySelector<HTMLElement>(`[id="${focused}"]`)?.focus({ preventScroll: true });
+    acknowledgeVisibleFeedback();
   }
   function visibility() {
     if (document.visibilityState !== "visible") {
@@ -270,5 +345,9 @@ export function mountApp(root: HTMLElement): () => void {
     }
   } catch { error = "Stored session could not be loaded. Clear this browser session or join again."; }
   render();
-  return () => { disposed = true; stopCollection(); connection?.close(); document.removeEventListener("visibilitychange", visibility); root.replaceChildren(); };
+  return () => {
+    disposed = true; stopCollection(); connection?.close();
+    if (audio) void audio.close().catch(() => console.warn("monk", "audio_close_failed"));
+    document.removeEventListener("visibilitychange", visibility); root.replaceChildren();
+  };
 }

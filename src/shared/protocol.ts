@@ -67,6 +67,12 @@ export const checkpointSchema = z.strictObject({
 });
 export type EngineCheckpoint = z.infer<typeof checkpointSchema>;
 const progressSchema = z.strictObject({ attackerId: id, targetId: id, progress: z.number().min(0).max(1) });
+export const feedbackSummarySchema = z.strictObject({
+  intended: time, acknowledged: time, missing: time,
+  conversions: time, conversionsWithinOneSecond: time, conversionsFailed: time, conversionsPending: time,
+  p95UpperMs: z.number().nonnegative().nullable(),
+});
+export type FeedbackSummary = z.infer<typeof feedbackSummarySchema>;
 export const snapshotSchema = z.strictObject({
   matchId: id, phase: phaseSchema, mode: modeSchema,
   ownPlayerId: id.nullable(), ownFaction: factionSchema.nullable(),
@@ -77,6 +83,7 @@ export const snapshotSchema = z.strictObject({
   qualityReasons: z.array(z.string()), parameters: parametersSchema.nullable(),
   approved: z.boolean(), deviceLimitations: z.string(), playArea: z.string(),
   resumeChecking: z.boolean(), canHost: z.boolean(),
+  feedback: feedbackSummarySchema.optional(),
 });
 export type PlayerSnapshot = z.infer<typeof snapshotSchema>;
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };

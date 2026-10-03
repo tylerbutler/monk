@@ -2,12 +2,56 @@ import { afterEach, expect, it, vi } from "vitest";
 import { env } from "cloudflare:workers";
 import { SELF, reset, runInDurableObject } from "cloudflare:test";
 import { loadRecord } from "../../src/worker/storage";
-import { closeSockets, connect, createMatch, joinMatch, openSocket } from "./helpers";
+import { closeSockets, connect, createMatch, hostCommand, joinMatch, openSocket, probe, runningMatch } from "./helpers";
+import { parameters } from "../fixtures";
 
 afterEach(async () => {
   await closeSockets();
   vi.restoreAllMocks();
   await reset();
+});
+
+it("starts a two-phone round from a fresh consent check without a trial", async () => {
+  const credentials = await createMatch();
+  const host = await connect({ ...await joinMatch(credentials.matchCode), hostToken: credentials.hostToken });
+  const other = await connect(await joinMatch(credentials.matchCode));
+  await hostCommand(host, { type: "configure", mode: "test", parameters, approved: false,
+    deviceLimitations: "Synthetic pair", playArea: "Marked test area" });
+  host.send({ version: 1, type: "host_command", commandId: "start-check", command: { type: "start" } });
+  let check = await host.next("update");
+  while (!check.startChecking) check = await host.next("update");
+  expect(check.snapshot.phase).toBe("lobby");
+  expect(check.trial).toBeNull();
+  await Promise.all([probe(host), probe(other)]);
+  const capturedAtMs = Date.now();
+  host.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
+  other.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 0.001, accuracyM: 1 } });
+  let started = await host.next("update");
+  while (started.outcome?.commandId !== "start-check") started = await host.next("update");
+  expect(started).toMatchObject({ startChecking: false, outcome: { accepted: true }, snapshot: { phase: "running", mode: "test" } });
+});
+
+it("resolves a conversion and measures both visible-recipient acknowledgements", async () => {
+  const { host, other, ids } = await runningMatch(30000, { dwellMs: 300, graceMs: 200 });
+  await hostCommand(host, { type: "set_faction", playerId: ids[1], faction: "scissors" });
+  await new Promise(resolve => setTimeout(resolve, 220));
+  const capturedAtMs = Date.now();
+  host.send({ version: 1, type: "position", report: { seq: 2, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
+  other.send({ version: 1, type: "position", report: { seq: 2, capturedAtMs, latitude: 0, longitude: 4 / 6371000 * 180 / Math.PI, accuracyM: 1 } });
+  let converted = await host.next("update");
+  while (!converted.events.some(e => e.type === "conversion")) converted = await host.next("update");
+  const event = converted.events.find(e => e.type === "conversion");
+  if (!event) throw new Error("Missing conversion");
+  expect(converted.snapshot.phase).toBe("running");
+  expect(JSON.stringify(converted)).not.toMatch(/latitude|longitude/);
+  host.send({ version: 1, type: "feedback_seen", eventSeq: event.eventSeq });
+  other.send({ version: 1, type: "feedback_seen", eventSeq: event.eventSeq });
+  host.send({ version: 1, type: "snapshot_request" });
+  let snapshot = await host.next("snapshot");
+  while (snapshot.snapshot.feedback?.acknowledged !== 2) {
+    host.send({ version: 1, type: "snapshot_request" }); snapshot = await host.next("snapshot");
+  }
+  expect(snapshot.snapshot.feedback).toMatchObject({ intended: 2, acknowledged: 2, conversionsWithinOneSecond: 1 });
 });
 
 it("a join code grants no host authority, and wrong-match tokens fail", async () => {

@@ -13,6 +13,10 @@ export const recordSchema = z.strictObject({
   sessions: z.array(sessionSchema).max(101),
   events: z.array(eventSchema),
   outcomes: z.array(outcomeSchema).max(10000),
+  feedback: z.array(z.strictObject({
+    eventSeq: z.number().int().nonnegative(), atMs: z.number().int().nonnegative(),
+    recipients: z.array(z.strictObject({ playerId: z.string().min(1), seenAfterMs: z.number().nonnegative().nullable() })).length(2),
+  })).default([]),
 }).refine(r => r.expiresAtMs === r.createdAtMs + 86400000 &&
   r.checkpoint.id === r.matchCode && r.checkpoint.createdAtMs === r.createdAtMs &&
   r.events.every(e => e.eventSeq <= r.checkpoint.eventSeq), { message: "Inconsistent match record." });
