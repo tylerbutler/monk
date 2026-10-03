@@ -97,9 +97,9 @@ export type TrialStatus = z.infer<typeof trialStatusSchema>;
 export const trialSampleSchema = z.strictObject({
   atMs: time, distanceM: z.number().finite().nonnegative(),
   uncertaintiesM: z.tuple([positive, positive]),
-  agesMs: z.tuple([time, time]), updateGapsMs: z.tuple([time, time]),
+  agesMs: z.tuple([z.number().finite().nonnegative(), z.number().finite().nonnegative()]), updateGapsMs: z.tuple([time, time]),
   delayBoundsMs: z.tuple([z.tuple([z.number().finite(), z.number().finite()]), z.tuple([z.number().finite(), z.number().finite()])]),
-  clockUncertaintiesMs: z.tuple([time, time]),
+  clockUncertaintiesMs: z.tuple([z.number().finite().nonnegative(), z.number().finite().nonnegative()]),
   referenceM: z.number().finite().nonnegative().nullable(),
 });
 export type TrialSample = z.infer<typeof trialSampleSchema>;
@@ -110,6 +110,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   z.strictObject({ ...envelope, type: z.literal("clock_confirm"), nonce: id, clientReceiveMs: time }),
   z.strictObject({ ...envelope, type: z.literal("position"), report: positionSchema }),
   z.strictObject({ ...envelope, type: z.literal("suspend"), reason: z.string().min(1).max(160) }),
+  z.strictObject({ ...envelope, type: z.literal("leave") }),
   z.strictObject({ ...envelope, type: z.literal("host_command"), commandId: id, command: hostCommandSchema }),
   z.strictObject({ ...envelope, type: z.literal("snapshot_request") }),
   z.strictObject({ ...envelope, type: z.literal("feedback_seen"), eventSeq: time }),

@@ -2,14 +2,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import { env } from "cloudflare:workers";
 import { SELF, reset, runInDurableObject } from "cloudflare:test";
 import { loadRecord } from "../../src/worker/storage";
-import { connect, createMatch, joinMatch, openSocket, sockets } from "./helpers";
+import { closeSockets, connect, createMatch, joinMatch, openSocket } from "./helpers";
 
 afterEach(async () => {
-  await Promise.all(sockets.splice(0).map(s => new Promise<void>(resolve => {
-    if (s.readyState === WebSocket.CLOSED) { resolve(); return; }
-    s.addEventListener("close", () => resolve(), { once: true });
-    s.close();
-  })));
+  await closeSockets();
   vi.restoreAllMocks();
   await reset();
 });

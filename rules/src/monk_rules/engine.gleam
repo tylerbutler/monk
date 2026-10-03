@@ -334,7 +334,10 @@ pub fn step(state: Match, input: StepInput) -> StepResult {
   let initial =
     StepResult(
       ..initial,
-      state: Match(..initial.state, observations: observations),
+      state: Match(
+        ..initial.state,
+        observations: list.filter(observations, fn(p) { p.expires_at > now }),
+      ),
     )
   let applied =
     list.fold(input.commands, initial, fn(r, c) { apply_command(r, c, input) })

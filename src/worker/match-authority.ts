@@ -1,30 +1,52 @@
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
-import { advanceEngine, checkpointEngine, createEngine, restoreEngine, snapshotFor } from "./engine";
+import { advanceEngine, checkpointEngine, createEngine, distanceBetween, restoreEngine, snapshotFor, suspendEngine } from "./engine";
 import type { EngineState, EngineTransition } from "./engine";
 import { issueToken, verifyToken } from "./auth";
 import { commitRecord, loadRecord } from "./storage";
 import type { MatchRecord } from "./storage";
 import { actorSchema, parseClientMessage, serverMessageSchema } from "../shared/protocol";
-import type { CommandOutcome, EngineEvent, ServerBody, VerifiedActor } from "../shared/protocol";
+import type { ClockEstimate, ClockProbeSample, CommandOutcome, EngineEvent, Observation, ServerBody, TrialStatus, VerifiedActor } from "../shared/protocol";
+import { estimateClock, normalizeObservation } from "../shared/clock";
 
 const attachmentSchema = z.strictObject({
   actor: actorSchema.nullable(), streamId: z.string(), streamSeq: z.number().int().nonnegative(),
   authDeadlineMs: z.number(), expiresAtMs: z.number(),
 });
 type Connection = z.infer<typeof attachmentSchema>;
+type ClockSession = { probe: (Omit<ClockProbeSample, "clientReceiveMs"> & { nonce: string }) | null;
+  clock: ClockEstimate | null; wallMs: number; monotonicMs: number };
+type Measurement = { observation: Observation; receivedAtMs: number; updateGapMs: number; clock: ClockEstimate };
 
 export class MatchAuthority extends DurableObject<Env> {
   private record: MatchRecord | null = null;
   private engine: EngineState | null = null;
   private queue: Promise<void> = Promise.resolve();
   private authTimers = new Map<WebSocket, ReturnType<typeof setTimeout>>();
+  private clocks = new Map<WebSocket, ClockSession>();
+  private reports = new Map<string, { seq: number; capturedAtMs: number }>();
+  private measurements = new Map<string, Measurement>();
+  private trial: TrialStatus | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.blockConcurrencyWhile(async () => {
       this.record = await loadRecord(ctx.storage);
-      if (this.record) this.engine = restoreEngine(this.record.checkpoint, Date.now());
+      if (this.record) {
+        this.engine = restoreEngine(this.record.checkpoint, Date.now());
+        if (this.record.checkpoint.phase === "running") {
+          const checkpoint = checkpointEngine(this.engine, Date.now());
+          await commitRecord(ctx.storage, { ...this.record, checkpoint }, []);
+          this.record = { ...this.record, checkpoint };
+        }
+        for (const socket of ctx.getWebSockets()) {
+          const connection = this.attachment(socket);
+          socket.serializeAttachment({ ...connection, streamId: crypto.randomUUID(), streamSeq: 0 });
+          if (connection.actor) this.snapshot(socket);
+        }
+        await this.scheduleAlarm();
+      }
     });
   }
   private serialize<T>(operation: () => Promise<T>): Promise<T> {
@@ -53,7 +75,7 @@ export class MatchAuthority extends DurableObject<Env> {
   }
   private snapshot(socket: WebSocket): void {
     const actor = this.attachment(socket).actor;
-    if (actor) this.send(socket, { type: "snapshot", snapshot: this.view(actor), trial: null, startChecking: false });
+    if (actor) this.send(socket, { type: "snapshot", snapshot: this.view(actor), trial: this.trialFor(actor), startChecking: false });
   }
   private broadcast(events: EngineEvent[], outcome: CommandOutcome | null = null, caller?: WebSocket): void {
     for (const socket of this.ctx.getWebSockets()) {
@@ -62,16 +84,52 @@ export class MatchAuthority extends DurableObject<Env> {
       const privateEvents = events.filter(e => actor.host || e.type === "lifecycle" ||
         e.attackerId === actor.playerId || e.targetId === actor.playerId);
       this.send(socket, { type: "update", snapshot: this.view(actor), events: privateEvents,
-        outcome: socket === caller ? outcome : null, trial: null, startChecking: false });
+        outcome: socket === caller ? outcome : null, trial: this.trialFor(actor), startChecking: false });
     }
   }
-  private async accept(next: EngineTransition, outcome: CommandOutcome | null = null): Promise<void> {
+  private async accept(next: EngineTransition, outcome: CommandOutcome | null = null, sessions?: MatchRecord["sessions"]): Promise<void> {
     if (!this.record) throw new Error("Match record is unavailable.");
-    const record = { ...this.record, checkpoint: checkpointEngine(next.state, Date.now()),
+    const record = { ...this.record, sessions: sessions ?? this.record.sessions, checkpoint: checkpointEngine(next.state, Date.now()),
       outcomes: outcome ? [...this.record.outcomes, outcome] : this.record.outcomes };
     await commitRecord(this.ctx.storage, record, next.events);
     this.record = { ...record, events: [...record.events, ...next.events] };
     this.engine = next.state;
+    if (record.checkpoint.phase === "ended" || (record.checkpoint.phase === "paused" && !this.view({ id: "", host: false, playerId: null }).resumeChecking)) {
+      this.trial = null; this.measurements.clear();
+    }
+    await this.scheduleAlarm();
+    this.scheduleTick();
+  }
+  private trialFor(actor: VerifiedActor): TrialStatus | null {
+    return this.trial && (actor.host || (actor.playerId !== null && this.trial.playerIds.includes(actor.playerId))) ? this.trial : null;
+  }
+  private async scheduleAlarm(): Promise<void> {
+    if (!this.record) return;
+    const phase = this.record.checkpoint.phase;
+    const recovering = phase === "running" || this.engine && snapshotFor(this.engine, null, Date.now()).resumeChecking;
+    await this.ctx.storage.setAlarm(Math.min(this.record.expiresAtMs, recovering ? Date.now() + 1000 : this.record.expiresAtMs));
+  }
+  private scheduleTick(): void {
+    if (this.timer !== null || !this.engine) return;
+    const snapshot = snapshotFor(this.engine, null, Date.now());
+    if (snapshot.phase !== "running" && !snapshot.resumeChecking && !this.trial?.collecting) return;
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      this.ctx.waitUntil(this.serialize(() => this.tick()).catch(() => {
+        for (const socket of this.ctx.getWebSockets()) this.error(socket, "storage_failed", "Authority update failed. Play is not confirmed.");
+        this.scheduleTick();
+      }));
+    }, 250);
+  }
+  private async tick(): Promise<void> {
+    if (!this.record || !this.engine) return;
+    if (Date.now() >= this.record.expiresAtMs) { await this.expire(); return; }
+    for (const [id, measurement] of this.measurements) {
+      if (measurement.observation.expiresAtMs <= Date.now()) this.measurements.delete(id);
+    }
+    const next = advanceEngine(this.engine, { nowMs: Date.now(), actor: null, commands: [], observations: [] });
+    await this.accept(next);
+    this.broadcast(next.events);
   }
   async fetch(request: Request): Promise<Response> {
     return this.serialize(async () => {
@@ -147,7 +205,8 @@ export class MatchAuthority extends DurableObject<Env> {
   private async verify(token: string, host: boolean) {
     if (!this.record) return null;
     for (const session of this.record.sessions) {
-      if (session.host === host && await verifyToken(token, session.verifier)) return session;
+      if (session.host === host && (host || this.record.checkpoint.players.some(p => p.id === session.playerId)) &&
+        await verifyToken(token, session.verifier)) return session;
     }
     return null;
   }
@@ -187,20 +246,151 @@ export class MatchAuthority extends DurableObject<Env> {
       if (message.type === "host_command") {
         if (!actor.host) { this.error(socket, "forbidden", "Only the host can send this command.", message.commandId); return; }
         const existing = this.record.outcomes.find(o => o.commandId === message.commandId);
-        if (existing) { this.send(socket, { type: "update", snapshot: this.view(actor), events: [], outcome: existing, trial: null, startChecking: false }); return; }
+        if (existing) { this.send(socket, { type: "update", snapshot: this.view(actor), events: [], outcome: existing, trial: this.trialFor(actor), startChecking: false }); return; }
         if (this.record.outcomes.length >= 10000) { this.error(socket, "command_limit", "Command limit reached. End this match.", message.commandId); return; }
         const next = advanceEngine(this.engine, { nowMs: Date.now(), actor, commands: [message.command], observations: [] });
         const outcome = { commandId: message.commandId, accepted: !next.rejections.length, reason: next.rejections[0]?.reason ?? "Command accepted." };
         try { await this.accept(next, outcome); } catch { this.error(socket, "storage_failed", "State was not saved. Retry the same command ID.", message.commandId); return; }
+        if (message.command.type === "begin_resume" || message.command.type === "cancel_resume" ||
+          message.command.type === "pause" || message.command.type === "end" || message.command.type === "start") {
+          this.trial = null; this.measurements.clear();
+        }
         this.broadcast(next.events, outcome, socket); return;
       }
-      this.error(socket, "unsupported", "This operation is not available yet.");
+      if (message.type === "clock_probe") {
+        const serverReceiveMs = Date.now(), serverSendMs = Date.now();
+        this.clocks.set(socket, { clock: null, probe: { nonce: message.nonce, clientSendMs: message.clientSendMs, serverReceiveMs, serverSendMs },
+          wallMs: serverSendMs, monotonicMs: performance.now() });
+        this.send(socket, { type: "clock_reply", nonce: message.nonce, clientSendMs: message.clientSendMs, serverReceiveMs, serverSendMs }); return;
+      }
+      if (message.type === "clock_confirm") {
+        const session = this.clocks.get(socket);
+        if (!session?.probe || session.probe.nonce !== message.nonce) { this.error(socket, "clock_invalid", "Request a new clock probe."); return; }
+        const clock = estimateClock({ ...session.probe, clientReceiveMs: message.clientReceiveMs });
+        session.probe = null;
+        if (!clock.ok) { session.clock = null; this.error(socket, "clock_invalid", clock.error); return; }
+        session.clock = clock.value; session.wallMs = Date.now(); session.monotonicMs = performance.now();
+        this.send(socket, { type: "clock_ready", clock: clock.value }); return;
+      }
+      if (message.type === "trial_begin") {
+        if (!actor.host) { this.error(socket, "forbidden", "Only the host can select the trial pair."); return; }
+        if (this.record.checkpoint.phase !== "lobby" || message.playerIds[0] === message.playerIds[1] ||
+          !message.playerIds.every(id => this.record!.checkpoint.players.some(p => p.id === id))) {
+          this.error(socket, "trial_invalid", "Select two different joined players in the lobby."); return;
+        }
+        this.trial = { playerIds: message.playerIds, readyIds: [], collecting: false, referenceM: message.referenceM };
+        this.measurements.clear(); this.broadcast([]); return;
+      }
+      if (message.type === "trial_ready") {
+        if (!this.trial || !actor.playerId || !this.trial.playerIds.includes(actor.playerId)) {
+          this.error(socket, "trial_invalid", "You are not in the selected trial pair."); return;
+        }
+        if (!message.consent) { this.trial = null; this.measurements.clear(); }
+        else {
+          this.trial.readyIds = Array.from(new Set([...this.trial.readyIds, actor.playerId]));
+          this.trial.collecting = this.trial.readyIds.length === 2;
+          this.scheduleTick();
+        }
+        this.broadcast([]); return;
+      }
+      if (message.type === "trial_end") {
+        if (!actor.host && (!actor.playerId || !this.trial?.playerIds.includes(actor.playerId))) {
+          this.error(socket, "forbidden", "Only the trial pair or host can stop the trial."); return;
+        }
+        this.trial = null; this.measurements.clear();
+        this.broadcast([]); return;
+      }
+      if (message.type === "position") {
+        if (!actor.playerId || !this.record.checkpoint.players.some(p => p.id === actor.playerId)) {
+          this.error(socket, "forbidden", "Join as a player to report a location."); return;
+        }
+        const view = this.view(actor);
+        const inTrial = this.trial?.collecting && this.trial.playerIds.includes(actor.playerId);
+        if (view.phase !== "running" && !view.resumeChecking && !inTrial) {
+          this.error(socket, "collection_stopped", "Location collection is stopped."); return;
+        }
+        const clockSession = this.clocks.get(socket);
+        if (!clockSession?.clock || Math.abs((Date.now() - clockSession.wallMs) - (performance.now() - clockSession.monotonicMs)) > 100) {
+          if (clockSession) clockSession.clock = null;
+          this.error(socket, "clock_invalid", "Clock changed or is not ready. Request a new probe."); return;
+        }
+        const previous = this.reports.get(actor.playerId);
+        if (previous && message.report.seq <= previous.seq) { this.error(socket, "old_sequence", "Location sequence is out of order."); return; }
+        if (previous && message.report.capturedAtMs <= previous.capturedAtMs) { this.error(socket, "duplicate_fix", "Cached or repeated fixes do not refresh location."); return; }
+        const normalized = normalizeObservation(message.report, clockSession.clock, Date.now(), actor.playerId, inTrial ? 5000 : view.parameters?.freshnessMs ?? 0);
+        if (!normalized.ok) { this.error(socket, "fix_invalid", normalized.error); return; }
+        const gameplay = view.parameters ? normalizeObservation(message.report, clockSession.clock, Date.now(), actor.playerId, view.parameters.freshnessMs) : null;
+        const next = advanceEngine(this.engine, {
+          nowMs: Date.now(), actor: null, commands: [],
+          observations: gameplay?.ok ? [gameplay.value] : [],
+        });
+        try { await this.accept(next); } catch { this.error(socket, "storage_failed", "Fix was not applied. Retry after reconnecting."); return; }
+        const old = this.measurements.get(actor.playerId);
+        this.reports.set(actor.playerId, { seq: message.report.seq, capturedAtMs: message.report.capturedAtMs });
+        this.measurements.set(actor.playerId, { observation: normalized.value, receivedAtMs: Date.now(),
+          updateGapMs: old ? Math.max(0, Date.now() - old.receivedAtMs) : 0, clock: clockSession.clock });
+        this.broadcast(next.events);
+        if (inTrial) this.sendTrialSample();
+        return;
+      }
+      if (message.type === "suspend" || message.type === "leave") {
+        if (!actor.playerId) return;
+        const next = advanceEngine(suspendEngine(this.engine, actor.playerId), {
+          nowMs: Date.now(), actor, observations: [],
+          commands: message.type === "leave" ? [{ type: "leave", playerId: actor.playerId }] : [],
+        });
+        const sessions = message.type === "leave" ? this.record.sessions.filter(s => s.playerId !== actor.playerId) : this.record.sessions;
+        try { await this.accept(next, null, sessions); } catch { this.error(socket, "storage_failed", "Suspension was not saved. Stop local location collection."); return; }
+        this.measurements.delete(actor.playerId);
+        if (this.trial?.playerIds.includes(actor.playerId)) { this.trial = null; this.measurements.clear(); }
+        this.broadcast(next.events); return;
+      }
+      this.error(socket, "invalid_operation", "This operation cannot be used in the current state.");
     });
+  }
+  private sendTrialSample(): void {
+    if (!this.trial?.collecting) return;
+    const pair = this.trial.playerIds.map(id => this.measurements.get(id));
+    const a = pair[0], b = pair[1], now = Date.now();
+    if (!a || !b || a.observation.expiresAtMs <= now || b.observation.expiresAtMs <= now) return;
+    const bounds = (m: Measurement): [number, number] => {
+      const center = m.receivedAtMs - (m.observation.capturedAtMs + m.clock.offsetMs);
+      return [Math.max(0, center - m.clock.uncertaintyMs), center + m.clock.uncertaintyMs];
+    };
+    const sample = {
+      atMs: now, distanceM: distanceBetween(a.observation, b.observation),
+      uncertaintiesM: [a.observation.accuracyM, b.observation.accuracyM] as [number, number],
+      agesMs: [Math.max(0, now - (a.observation.capturedAtMs + a.clock.offsetMs - a.clock.uncertaintyMs)),
+        Math.max(0, now - (b.observation.capturedAtMs + b.clock.offsetMs - b.clock.uncertaintyMs))] as [number, number],
+      updateGapsMs: [a.updateGapMs, b.updateGapMs] as [number, number],
+      delayBoundsMs: [bounds(a), bounds(b)] as [[number, number], [number, number]],
+      clockUncertaintiesMs: [a.clock.uncertaintyMs, b.clock.uncertaintyMs] as [number, number],
+      referenceM: this.trial.referenceM,
+    };
+    for (const socket of this.ctx.getWebSockets()) {
+      const actor = this.attachment(socket).actor;
+      if (actor && this.trialFor(actor)) this.send(socket, { type: "trial_sample", sample });
+    }
   }
   async webSocketClose(socket: WebSocket): Promise<void> {
     const authTimer = this.authTimers.get(socket);
     if (authTimer !== undefined) clearTimeout(authTimer);
     this.authTimers.delete(socket);
+    this.clocks.delete(socket);
+    await this.serialize(async () => {
+      const actor = this.attachment(socket).actor;
+      if (actor?.playerId && this.record && this.engine) {
+        const others = this.ctx.getWebSockets().some(s => s !== socket &&
+          this.attachment(s).actor?.playerId === actor.playerId && s.readyState === WebSocket.OPEN);
+        if (!others) {
+          const next = advanceEngine(suspendEngine(this.engine, actor.playerId), { nowMs: Date.now(), actor: null, commands: [], observations: [] });
+          await this.accept(next);
+          this.measurements.delete(actor.playerId);
+          if (this.trial?.playerIds.includes(actor.playerId)) this.trial = null;
+          this.broadcast(next.events);
+        }
+      }
+    });
     socket.close(1000, "Connection closed");
   }
   async webSocketError(socket: WebSocket): Promise<void> {
@@ -212,11 +402,16 @@ export class MatchAuthority extends DurableObject<Env> {
     }
     await this.ctx.storage.deleteAll();
     this.record = null; this.engine = null;
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.timer = null; this.trial = null; this.measurements.clear(); this.reports.clear(); this.clocks.clear();
   }
   async alarm(): Promise<void> {
     await this.serialize(async () => {
       if (this.record && Date.now() >= this.record.expiresAtMs) await this.expire();
-      else if (this.record) await this.ctx.storage.setAlarm(this.record.expiresAtMs);
+      else if (this.record && this.engine) {
+        await this.tick();
+        await this.scheduleAlarm();
+      }
     });
   }
 }

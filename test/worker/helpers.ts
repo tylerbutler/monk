@@ -1,6 +1,7 @@
 import { SELF } from "cloudflare:test";
 import { sessionCredentialsSchema, parseServerMessage } from "../../src/shared/protocol";
-import type { ClientMessage, ServerMessage, SessionCredentials } from "../../src/shared/protocol";
+import type { ClientMessage, HostCommand, ServerMessage, SessionCredentials } from "../../src/shared/protocol";
+import { parameters } from "../fixtures";
 
 export const sockets: WebSocket[] = [];
 export async function createMatch(): Promise<SessionCredentials> {
@@ -55,4 +56,50 @@ export async function connect(credentials: SessionCredentials) {
   await client.next("authenticated");
   await client.next("snapshot");
   return client;
+}
+
+export async function probe(client: Awaited<ReturnType<typeof connect>>) {
+  const nonce = crypto.randomUUID();
+  client.send({ version: 1, type: "clock_probe", nonce, clientSendMs: Date.now() });
+  await client.next("clock_reply");
+  client.send({ version: 1, type: "clock_confirm", nonce, clientReceiveMs: Date.now() });
+  return client.next("clock_ready");
+}
+export async function closeSockets() {
+  await Promise.all(sockets.splice(0).map(s => new Promise<void>(resolve => {
+    if (s.readyState === WebSocket.CLOSED) { resolve(); return; }
+    s.addEventListener("close", () => resolve(), { once: true });
+    s.close();
+  })));
+}
+
+export async function hostCommand(client: Awaited<ReturnType<typeof connect>>, command: HostCommand, commandId = crypto.randomUUID()) {
+  client.send({ version: 1, type: "host_command", commandId, command });
+  for (;;) {
+    const message = await client.next("update");
+    if (message.outcome?.commandId === commandId) return message;
+  }
+}
+export async function runningMatch(roundDurationMs = 600000) {
+  const credentials = await createMatch();
+  const host = await connect({ ...await joinMatch(credentials.matchCode, credentials.hostToken), hostToken: credentials.hostToken });
+  const other = await connect(await joinMatch(credentials.matchCode));
+  await hostCommand(host, { type: "configure", mode: "test", parameters: { ...parameters, roundDurationMs },
+    approved: false, deviceLimitations: "Synthetic worker tests", playArea: "Synthetic test area" });
+  host.send({ version: 1, type: "snapshot_request" });
+  const snapshot = await host.next("snapshot");
+  const ids: [string, string] = [snapshot.snapshot.roster[0].id, snapshot.snapshot.roster[1].id];
+  host.send({ version: 1, type: "trial_begin", playerIds: ids, referenceM: 100 });
+  for (;;) { if ((await host.next("update")).trial) break; }
+  host.send({ version: 1, type: "trial_ready", consent: true });
+  other.send({ version: 1, type: "trial_ready", consent: true });
+  for (;;) { if ((await host.next("update")).trial?.collecting) break; }
+  await Promise.all([probe(host), probe(other)]);
+  const capturedAtMs = Date.now();
+  host.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
+  other.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 100 / 6371000 * 180 / Math.PI, accuracyM: 1 } });
+  await host.next("trial_sample");
+  const started = await hostCommand(host, { type: "start" });
+  if (!started.outcome?.accepted) throw new Error(started.outcome?.reason);
+  return { credentials, host, other, ids };
 }
