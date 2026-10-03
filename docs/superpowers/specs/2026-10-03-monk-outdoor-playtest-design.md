@@ -2,7 +2,10 @@
 
 Date: 2026-10-03
 
-Status: Conversational design approved. Written specification awaiting review.
+Status: Written specification approved on 2026-10-03.
+
+Implementation plan:
+[Outdoor playtest](../plans/2026-10-03-monk-outdoor-playtest.md).
 
 ## Purpose and scope
 
