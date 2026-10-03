@@ -261,3 +261,25 @@ it("does not acknowledge off-screen conversion text and waits for an on-screen c
     expect(app.frames.filter(f => JSON.parse(f).type === "feedback_seen")).toHaveLength(1);
   } finally { app.cleanup(); }
 });
+
+it("does not acknowledge conversion text clipped by its notification container", () => {
+  const snapshot = snapshotFor(runningFixture(["rock", "scissors"]), "p1", 0);
+  const app = browserApp(snapshot);
+  const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
+  bounds.mockImplementation(function (this: HTMLElement) {
+    return new DOMRect(16, 20, 300, this.classList.contains("conversion-notice") ? 20 : 60);
+  });
+  try {
+    const event: EngineEvent = { type: "conversion", attackerId: "p1", targetId: "p2", faction: "rock",
+      reason: null, hostId: null, oldFaction: null, eventSeq: 99, atMs: Date.now() };
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 5,
+      snapshot, trial: null, startChecking: false, events: [event], outcome: null });
+    app.raf.shift()?.(0); app.raf.shift()?.(16);
+    expect(app.frames.filter(f => JSON.parse(f).type === "feedback_seen")).toHaveLength(0);
+    bounds.mockReturnValue(new DOMRect(16, 20, 300, 60));
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 6,
+      snapshot, trial: null, startChecking: false });
+    app.raf.shift()?.(32); app.raf.shift()?.(48);
+    expect(app.frames.filter(f => JSON.parse(f).type === "feedback_seen")).toHaveLength(1);
+  } finally { app.cleanup(); }
+});

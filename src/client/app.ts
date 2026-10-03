@@ -126,8 +126,10 @@ export function mountApp(root: HTMLElement): () => void {
         const notice = root.querySelector<HTMLElement>(`.conversion-notice [data-event-seq="${eventSeq}"]`);
         if (!notice) continue;
         const bounds = notice.getBoundingClientRect(), viewport = window.visualViewport;
+        const clip = notice.parentElement?.getBoundingClientRect();
         const left = viewport?.offsetLeft ?? 0, top = viewport?.offsetTop ?? 0;
-        if (bounds.width <= 0 || bounds.height <= 0 || bounds.left < left || bounds.top < top ||
+        if (!clip || bounds.left < clip.left || bounds.top < clip.top || bounds.right > clip.right || bounds.bottom > clip.bottom ||
+          bounds.width <= 0 || bounds.height <= 0 || bounds.left < left || bounds.top < top ||
           bounds.right > left + (viewport?.width ?? window.innerWidth) ||
           bounds.bottom > top + (viewport?.height ?? window.innerHeight) ||
           getComputedStyle(notice).visibility === "hidden") continue;
