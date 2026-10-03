@@ -32,6 +32,7 @@ export function mountApp(root: HTMLElement): () => void {
   let stopLocation: (() => void) | null = null;
   let error = "";
   const retained = new Map<string, { value: string; checked: boolean }>();
+  const disclosures = new Map<string, boolean>();
 
   function showError(reason: string) { error = reason; render(); }
   function button(parent: HTMLElement, label: string, action: () => void | Promise<void>, name: string, className = "") {
@@ -162,7 +163,7 @@ export function mountApp(root: HTMLElement): () => void {
     stopCollection(); consent = false;
     connection?.send({ version: 1, type: "leave" });
     connection?.close(); connection = null; credentials = null; snapshot = null; trial = null;
-    latest = null; summary = null; retained.clear(); error = "";
+    latest = null; summary = null; retained.clear(); disclosures.clear(); error = "";
     pendingCommands.clear(); pendingFeedback.clear(); acknowledged.clear(); feedback = []; startChecking = false;
     conversionNotices = [];
     sessionStorage.removeItem("monk-session"); render();
@@ -178,11 +179,12 @@ export function mountApp(root: HTMLElement): () => void {
     return newTrialSummary({ devices: [a.data, b.data], conditions, candidates: snapshot?.parameters ? [snapshot.parameters] : [] });
   }
   function trialView(parent: HTMLElement) {
-    const section = document.createElement("section"); section.className = "trial"; parent.append(section);
-    text(section, "h2", "Two-iPhone location trial");
+    const section = document.createElement("details"); section.className = "trial"; section.id = "location-trial";
+    section.open = !!trial; parent.append(section);
+    text(section, "summary", "Two-iPhone location trial").id = "location-trial-toggle";
     text(section, "p", "Measure marked separations outdoors. Both selected players must agree before location starts. Diagnostic freshness is 5000 ms; it does not set gameplay values.");
-    const details = document.createElement("details");
-    details.open = !summary; text(details, "summary", "Device pair and conditions"); section.append(details);
+    const details = document.createElement("details"); details.id = "trial-devices";
+    details.open = !summary; text(details, "summary", "Device pair and conditions").id = "trial-devices-toggle"; section.append(details);
     const devices = document.createElement("div"); devices.className = "form-grid"; details.append(devices);
     for (const i of [0, 1]) {
       field(devices, `Phone ${i + 1} model`, `device-${i}`, "text");
@@ -266,6 +268,7 @@ export function mountApp(root: HTMLElement): () => void {
     for (const input of root.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-retain]")) {
       retained.set(input.id, { value: input.value, checked: input instanceof HTMLInputElement && input.checked });
     }
+    for (const details of root.querySelectorAll<HTMLDetailsElement>("details[id]")) disclosures.set(details.id, details.open);
     root.replaceChildren();
     const header = document.createElement("header"); header.className = "masthead"; root.append(header);
     text(header, "h1", "Monk"); text(header, "span", "Outdoor playtest", "edition");
@@ -307,6 +310,13 @@ export function mountApp(root: HTMLElement): () => void {
       text(top, "h2", `Match ${credentials.matchCode}`);
       if (!snapshot) text(root, "p", "Connecting to the private match. Location is not collected.");
       if (snapshot) {
+        if (snapshot.canHost && !snapshot.ownPlayerId && snapshot.phase === "lobby") {
+          button(top, "Join as a player on this phone", async () => {
+            if (!credentials) return;
+            const player = await request(`/api/matches/${credentials.matchCode}/join`, { hostToken: credentials.hostToken });
+            connect({ ...player, hostToken: credentials.hostToken });
+          }, "host-join");
+        }
         const section = document.createElement("section"); root.append(section);
         renderMatch(section, snapshot, {
           start: () => sendCommand({ type: "start" }), pause: () => sendCommand({ type: "pause" }),
@@ -335,13 +345,6 @@ export function mountApp(root: HTMLElement): () => void {
         text(section, "h3", "Players");
         const roster = document.createElement("ul"); roster.className = "roster"; section.append(roster);
         for (const p of snapshot.roster) text(roster, "li", `${p.label} - ${p.faction}${p.id === snapshot.ownPlayerId ? " (you)" : ""}`);
-        if (snapshot.canHost && !snapshot.ownPlayerId && snapshot.phase === "lobby") {
-          button(section, "Join as a player on this phone", async () => {
-            if (!credentials) return;
-            const player = await request(`/api/matches/${credentials.matchCode}/join`, { hostToken: credentials.hostToken });
-            connect({ ...player, hostToken: credentials.hostToken });
-          }, "host-join");
-        }
         if (snapshot.phase === "lobby") trialView(root);
         if (feedback.length) {
           const events = document.createElement("section"); events.className = "feedback"; events.setAttribute("aria-label", "Match feedback"); root.append(events);
@@ -366,6 +369,10 @@ export function mountApp(root: HTMLElement): () => void {
     for (const input of root.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-retain]")) {
       const value = retained.get(input.id);
       if (value) { input.value = value.value; if (input instanceof HTMLInputElement) input.checked = value.checked; }
+    }
+    for (const details of root.querySelectorAll<HTMLDetailsElement>("details[id]")) {
+      if (details.id === "location-trial" && trial) details.open = true;
+      else if (disclosures.has(details.id)) details.open = disclosures.get(details.id) === true;
     }
     if (focused) root.querySelector<HTMLElement>(`[id="${focused}"]`)?.focus({ preventScroll: true });
     acknowledgeVisibleFeedback();

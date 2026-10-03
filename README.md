@@ -80,10 +80,18 @@ Export, then select **Discard measurement summary** before changing phones,
 conditions, or parameter candidates. The app does not combine incompatible
 measurements or discard earlier blocks without that action.
 
-Enter provisional gameplay parameters after the measurements. No tracking
-defaults come from the synthetic fixture values. Round duration initially
-shows ten minutes. Retention must be at least entry radius, and all parameters
-must be positive and finite. Settings freeze while running or paused.
+For a quick Testing round, new matches prefill an **uncalibrated test preset**:
+entry 30 m, retention 40 m, maximum uncertainty 15 m, freshness 5000 ms,
+dwell 2000 ms, grace 3000 ms, and a ten-minute round. Enter the actual agreed
+play area and save before starting. The preset fills the form; it does not
+approve measured accuracy or override saved settings.
+
+Expand **Advanced settings** to adjust values, switch modes, or record device
+limits. Expand **Change player factions** for host faction controls, or
+**Two-iPhone location trial** for measurements. An invited or active trial opens
+its consent controls. Open sections and draft inputs stay open across authority
+updates. Retention must be at least entry radius, and parameters must be positive
+and finite. Settings freeze while running or paused.
 
 Use **Allow location for this round** on both phones. The host starts a
 ten-second freshness check; a prior trial is not required. A test round needs

@@ -49,7 +49,7 @@ it("freezes the paused clock and grace, shows checks as paused, and freezes sett
   expect(root.querySelector('[data-action="configure"]')).toBeNull();
   expect(root.querySelector('[data-action="cancel-resume"]')).not.toBeNull();
 });
-it("defaults the lobby to testing mode, leaves location parameters blank, and disables redundant factions", () => {
+it("defaults the lobby to testing mode and disables redundant factions", () => {
   const root = document.createElement("section");
   renderMatch(root, { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true }, actions);
   expect(root.querySelector<HTMLInputElement>('input[name="testingMode"]')?.checked).toBe(true);
@@ -94,14 +94,15 @@ function browserApp(snapshot: ReturnType<typeof snapshotFor>) {
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
   sessionStorage.clear();
   sessionStorage.setItem("monk-session", JSON.stringify({
-    matchCode: "ABCDEFGH", hostToken: snapshot.canHost ? "h".repeat(64) : null, playerToken: "p".repeat(64),
+    matchCode: "ABCDEFGH", hostToken: snapshot.canHost ? "h".repeat(64) : null,
+    playerToken: snapshot.ownPlayerId ? "p".repeat(64) : null,
   }));
   const root = document.createElement("main"); document.body.append(root);
   const cleanup = mountApp(root);
   function authenticate(current: Socket, streamId = "app-stream") {
     current.readyState = 1; current.dispatchEvent(new Event("open"));
     current.receive({ version: 1, type: "authenticated", streamId, streamSeq: 1,
-      playerId: "p1", canHost: snapshot.canHost, expiresAtMs: Date.now() + 86400000 });
+      playerId: snapshot.ownPlayerId, canHost: snapshot.canHost, expiresAtMs: Date.now() + 86400000 });
     current.receive({ version: 1, type: "snapshot", streamId, streamSeq: 2,
       snapshot, trial: null, startChecking: false });
     const probe = JSON.parse([...frames].reverse().find(f => JSON.parse(f).type === "clock_probe") ?? "{}");
@@ -281,5 +282,139 @@ it("does not acknowledge conversion text clipped by its notification container",
       snapshot, trial: null, startChecking: false });
     app.raf.shift()?.(32); app.raf.shift()?.(48);
     expect(app.frames.filter(f => JSON.parse(f).type === "feedback_seen")).toHaveLength(1);
+  } finally { app.cleanup(); }
+});
+
+it("saves a fresh unapproved testing preset after the host enters only the play area", () => {
+  const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true,
+    parameters: null, approved: false, deviceLimitations: "", playArea: "" };
+  const app = browserApp(snapshot);
+  try {
+    const form = app.root.querySelector<HTMLFormElement>(".configuration");
+    const playArea = app.root.querySelector<HTMLInputElement>("#playArea");
+    if (!form || !playArea) throw new Error("Round setup is missing");
+    expect(playArea.value).toBe("");
+    expect(app.root.querySelector<HTMLButtonElement>('[data-action="start"]')?.disabled).toBe(true);
+    playArea.value = "Marked lawn; keep away from the road";
+    form.requestSubmit();
+    const configured = app.frames.map(f => JSON.parse(f)).find(m => m.type === "host_command" && m.command.type === "configure");
+    expect(configured?.command).toMatchObject({
+      type: "configure", mode: "test", approved: false, playArea: "Marked lawn; keep away from the road",
+      parameters: { entryRadiusM: 30, retentionRadiusM: 40, maxAccuracyM: 15,
+        freshnessMs: 5000, dwellMs: 2000, graceMs: 3000, roundDurationMs: 600000 },
+    });
+    expect(configured.command.deviceLimitations).toMatch(/uncalibrated/i);
+    expect(app.root.querySelector('[data-action="approve"]')).toBeNull();
+  } finally { app.cleanup(); }
+});
+
+it("shows only the play-area input while advanced controls and measurements are collapsed", () => {
+  const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true };
+  const app = browserApp(snapshot);
+  try {
+    for (const id of ["advanced-settings", "faction-controls", "location-trial"]) {
+      expect(app.root.querySelector<HTMLDetailsElement>(`#${id}`)?.open).toBe(false);
+    }
+    const visible = [...app.root.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select")].filter(input => {
+      for (let parent = input.parentElement; parent; parent = parent.parentElement) {
+        if (parent instanceof HTMLDetailsElement && !parent.open) return false;
+      }
+      return true;
+    });
+    expect(visible.map(input => input.id)).toEqual(["playArea"]);
+    expect(app.root.querySelector<HTMLInputElement>("#device-0")?.value).toBe("");
+    expect(app.root.querySelector<HTMLInputElement>("#os-0")?.value).toBe("");
+    expect(app.root.querySelector('[data-action="approve"]')?.closest("details")?.id).toBe("advanced-settings");
+    expect(app.root.querySelector('[data-action="round-consent"]')).not.toBeNull();
+  } finally { app.cleanup(); }
+});
+
+it("keeps open disclosures and draft settings across authority updates", () => {
+  const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true };
+  const app = browserApp(snapshot);
+  try {
+    for (const id of ["advanced-settings", "faction-controls", "location-trial"]) {
+      const disclosure = app.root.querySelector<HTMLDetailsElement>(`#${id}`);
+      expect(disclosure).not.toBeNull();
+      if (disclosure) disclosure.open = true;
+    }
+    const entry = app.root.querySelector<HTMLInputElement>("#entryRadiusM");
+    if (!entry) throw new Error("Entry-radius input is missing");
+    entry.value = "45";
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
+      snapshot, trial: null, startChecking: false });
+    expect(app.root.querySelector<HTMLInputElement>("#entryRadiusM")?.value).toBe("45");
+    for (const id of ["advanced-settings", "faction-controls", "location-trial"]) {
+      const disclosure = app.root.querySelector<HTMLDetailsElement>(`#${id}`);
+      expect(disclosure?.open).toBe(true);
+      if (disclosure) disclosure.open = false;
+    }
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 6,
+      snapshot, trial: null, startChecking: false });
+    expect(app.root.querySelector<HTMLDetailsElement>("#advanced-settings")?.open).toBe(false);
+    expect(app.root.querySelector<HTMLDetailsElement>("#location-trial")?.open).toBe(false);
+  } finally { app.cleanup(); }
+});
+
+it("opens invalid advanced settings instead of hiding the field that needs correction", () => {
+  const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true,
+    parameters: null, approved: false, deviceLimitations: "", playArea: "" };
+  const app = browserApp(snapshot);
+  try {
+    const form = app.root.querySelector<HTMLFormElement>(".configuration");
+    const playArea = app.root.querySelector<HTMLInputElement>("#playArea");
+    const dwell = app.root.querySelector<HTMLInputElement>("#dwellMs");
+    if (!form || !playArea || !dwell) throw new Error("Round setup is missing");
+    playArea.value = "Marked lawn";
+    dwell.value = "0";
+    expect(form.reportValidity()).toBe(false);
+    expect(app.root.querySelector<HTMLDetailsElement>("#advanced-settings")?.open).toBe(true);
+    expect(app.frames.some(f => JSON.parse(f).type === "host_command")).toBe(false);
+  } finally { app.cleanup(); }
+});
+
+it("opens an invited measurement trial without hiding the player's consent action", () => {
+  const snapshot = snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0);
+  const app = browserApp(snapshot);
+  try {
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5, snapshot,
+      trial: { playerIds: ["p1", "p2"], readyIds: [], collecting: false, referenceM: 4 }, startChecking: false });
+    expect(app.root.querySelector<HTMLDetailsElement>("#location-trial")?.open).toBe(true);
+    expect(app.root.querySelector('[data-action="trial-ready"]')?.closest("details")?.open).toBe(true);
+    expect(app.frames.some(f => JSON.parse(f).type === "position")).toBe(false);
+  } finally { app.cleanup(); }
+});
+
+it.each(["test", "normal"] as const)("preserves saved %s settings and explicit Normal-mode approval", mode => {
+  const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"], mode), "p1", 0), canHost: true, approved: false };
+  const root = document.createElement("section");
+  const configure = vi.fn();
+  renderMatch(root, snapshot, { ...actions, configure });
+  expect(root.querySelector<HTMLInputElement>("#entryRadiusM")?.value).toBe("12");
+  expect(root.querySelector<HTMLInputElement>("#deviceLimitations")?.value).toBe("Synthetic tests only");
+  expect(root.querySelector<HTMLInputElement>("#playArea")?.value).toBe("Marked test area");
+  expect(root.querySelector<HTMLButtonElement>('[data-action="start"]')?.disabled).toBe(mode === "normal");
+  root.querySelector<HTMLButtonElement>('[data-action="approve"]')?.click();
+  expect(configure).toHaveBeenCalledWith({ type: "configure", mode, parameters: snapshot.parameters,
+    approved: true, deviceLimitations: "Synthetic tests only", playArea: "Marked test area" });
+});
+
+it("does not prefill location parameters for an unconfigured Normal-mode match", () => {
+  const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"], "normal"), "p1", 0), canHost: true,
+    parameters: null, approved: false, deviceLimitations: "", playArea: "" };
+  const root = document.createElement("section");
+  renderMatch(root, snapshot, actions);
+  expect(root.querySelector<HTMLInputElement>("#entryRadiusM")?.value).toBe("");
+  expect(root.querySelector<HTMLButtonElement>('[data-action="start"]')?.disabled).toBe(true);
+});
+
+it("offers the host's player join before the setup form", () => {
+  const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"]), null, 0), canHost: true };
+  const app = browserApp(snapshot);
+  try {
+    const join = app.root.querySelector<HTMLButtonElement>('[data-action="host-join"]');
+    const form = app.root.querySelector<HTMLFormElement>(".configuration");
+    if (!join || !form) throw new Error("Host join or setup is missing");
+    expect(join.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   } finally { app.cleanup(); }
 });

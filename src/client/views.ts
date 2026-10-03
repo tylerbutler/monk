@@ -8,6 +8,10 @@ export type MatchActions = {
 };
 const names = { rock: "Rock", paper: "Paper", scissors: "Scissors" };
 const targets = { rock: "Scissors", paper: "Rock", scissors: "Paper" };
+const testPreset: RuleParameters = {
+  entryRadiusM: 30, retentionRadiusM: 40, maxAccuracyM: 15,
+  freshnessMs: 5000, dwellMs: 2000, graceMs: 3000, roundDurationMs: 600000,
+};
 const symbols = {
   rock: "M5 4 16 2 22 10 19 21 7 22 2 13Z",
   paper: "M5 2H15L21 8V22H5ZM15 2V8H21M9 12H17M9 16H17",
@@ -88,7 +92,9 @@ export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions
     }
     if (snapshot.phase !== "lobby" && snapshot.phase !== "ended") control(controls, "End round", actions.end, "end", true);
     if (snapshot.phase === "lobby" || snapshot.mode === "test" && snapshot.phase !== "ended") {
-      text(controls, "p", "A live faction change clears both attack roles and gives the player a grace period.");
+      const factions = document.createElement("details"); factions.id = "faction-controls"; controls.append(factions);
+      text(factions, "summary", "Change player factions").id = "faction-controls-toggle";
+      text(factions, "p", "A live faction change clears both attack roles and gives the player a grace period.");
       for (const player of snapshot.roster) {
         const label = document.createElement("label"); label.textContent = player.label;
         const select = document.createElement("select"); select.dataset.action = "set-faction";
@@ -101,31 +107,41 @@ export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions
           const parsed = factionSchema.safeParse(select.value);
           if (parsed.success && parsed.data !== player.faction) actions.setFaction(player.id, parsed.data);
         });
-        label.append(select); controls.append(label);
+        label.append(select); factions.append(label);
       }
     }
     if (snapshot.phase === "lobby") {
       const form = document.createElement("form"); form.className = "configuration"; controls.append(form);
-      text(form, "h3", "Parameters for this round");
-      text(form, "p", "Enter measured or provisional values. No location defaults are supplied. Settings stay fixed during running and paused phases.");
-      const mode = input(form, "Testing mode (at least two active players)", "testingMode", "checkbox", "");
+      const preset = snapshot.mode === "test" && !snapshot.parameters;
+      const parameters = snapshot.parameters ?? (preset ? testPreset : null);
+      text(form, "h3", snapshot.mode === "test" ? "Test round setup" : "Round settings");
+      text(form, "p", preset ? "Enter your agreed play area, then save. The starter values are uncalibrated." :
+        "Keep the saved values or adjust Advanced settings. Settings freeze during running and paused rounds.");
+      input(form, "Agreed bounded play area and safe routes", "playArea", "text", snapshot.playArea);
+      const advanced = document.createElement("details"); advanced.id = "advanced-settings"; form.append(advanced);
+      advanced.open = snapshot.mode === "normal" && !snapshot.parameters;
+      text(advanced, "summary", "Advanced settings").id = "advanced-settings-toggle";
+      const mode = input(advanced, "Testing mode (at least two active players)", "testingMode", "checkbox", "");
       mode.checked = snapshot.mode === "test";
-      const grid = document.createElement("div"); grid.className = "form-grid"; form.append(grid);
+      const grid = document.createElement("div"); grid.className = "form-grid"; advanced.append(grid);
       const fields: [keyof RuleParameters, string][] = [
         ["entryRadiusM", "Entry radius (m)"], ["retentionRadiusM", "Retention radius (m)"],
         ["maxAccuracyM", "Maximum uncertainty (m)"], ["freshnessMs", "Fix freshness (ms)"],
         ["dwellMs", "Continuous dwell (ms)"], ["graceMs", "Grace period (ms)"], ["roundDurationMs", "Round duration (minutes)"],
       ];
       for (const [name, label] of fields) {
-        const value = name === "roundDurationMs" ? String((snapshot.parameters?.roundDurationMs ?? 600000) / 60000) :
-          snapshot.parameters ? String(snapshot.parameters[name]) : "";
+        const value = name === "roundDurationMs" ? String((parameters?.roundDurationMs ?? 600000) / 60000) :
+          parameters ? String(parameters[name]) : "";
         input(grid, label, name, "number", value);
       }
-      input(form, "Device and measurement limitations", "deviceLimitations", "text", snapshot.deviceLimitations);
-      input(form, "Agreed bounded play area and safe routes", "playArea", "text", snapshot.playArea);
+      input(advanced, "Device and measurement limitations", "deviceLimitations", "text",
+        snapshot.deviceLimitations || (preset ? "Uncalibrated test preset; phone accuracy not measured." : ""));
       const submit = document.createElement("button"); submit.type = "submit"; submit.dataset.action = "configure";
       submit.textContent = "Save round settings"; form.append(submit);
       const validation = text(form, "p", "", "error"); validation.hidden = true; validation.setAttribute("role", "alert");
+      form.addEventListener("invalid", event => {
+        if (event.target instanceof HTMLInputElement && advanced.contains(event.target)) advanced.open = true;
+      }, true);
       form.addEventListener("submit", event => {
         event.preventDefault();
         const values = new FormData(form);
@@ -136,12 +152,13 @@ export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions
           deviceLimitations: String(values.get("deviceLimitations") ?? ""), playArea: String(values.get("playArea") ?? ""),
         });
         if (!parsed.success) {
+          advanced.open = true;
           validation.hidden = false; validation.textContent = "Use positive finite values, whole milliseconds, retention at least entry, and an agreed play area."; return;
         }
         validation.hidden = true; actions.configure(parsed.data);
       });
       if (snapshot.parameters && !snapshot.approved) {
-        control(controls, "Approve measured parameters and device limits", () => {
+        control(snapshot.mode === "test" ? advanced : controls, "Approve measured parameters and device limits", () => {
           if (snapshot.parameters) actions.configure({ type: "configure", mode: snapshot.mode,
             parameters: snapshot.parameters, approved: true, deviceLimitations: snapshot.deviceLimitations, playArea: snapshot.playArea });
         }, "approve", true);

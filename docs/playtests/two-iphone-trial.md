@@ -15,8 +15,9 @@ Open Monk on both phones. On the first phone, create a match, then select
 **Join as a player on this phone**. Join the second phone with the eight-character
 code. The code does not give host control.
 
-Keep both screens on and apps visible. Enter both phone models, iOS versions,
-browser modes, and outdoor conditions. Do not enter names or coordinates.
+Keep both screens on and apps visible. Expand **Two-iPhone location trial**.
+Enter both phone models, iOS versions, browser modes, and outdoor conditions.
+Do not enter names or coordinates.
 Use Safari tabs first. Repeat with **Add to Home Screen** and open the installed
 PWA. Installation does not enable offline play.
 
@@ -45,11 +46,15 @@ is reported evidence, not a guaranteed physical boundary.
 
 ## Try a two-player testing round
 
-After exporting the measurements, stop the location trial. On the host phone,
-enter provisional entry and retention radii, maximum uncertainty, freshness,
-dwell, grace, and round duration. Keep **Testing mode** checked. Set the agreed
-play area and describe the device and measurement limits. Save the settings.
-The interface labels these values **Uncalibrated**.
+Stop any active location trial before starting a round. New Testing-mode matches
+prefill uncalibrated starter values: entry 30 m, retention 40 m, maximum
+uncertainty 15 m, freshness 5000 ms, dwell 2000 ms, grace 3000 ms, and a ten-minute
+round. Set the agreed play area and save. These values do not establish GPS
+accuracy; you can try a Testing round before taking measurements.
+
+Expand **Advanced settings** to use measured or other provisional values and
+describe the device limits. Keep **Testing mode** checked for two-player rounds.
+Saved settings take priority over the preset.
 
 Both players select **Allow location for this round**. The host selects
 **Check fresh locations and start**. The ten-second check requests fresh fixes;
@@ -61,8 +66,9 @@ Try safe approaches and departures. Check outgoing and incoming attack
 progress, interruption reasons, faction symbols, and post-change grace.
 Conversion notifications stay on screen until you dismiss them. An off-screen
 history entry does not count as visible feedback.
-On the host phone, change a player's faction. This is a manual change, not
-a conversion; it must clear both attack roles and give grace only once.
+On the host phone, expand **Change player factions** to change a faction.
+This is a manual change, not a conversion; it must clear both attack roles
+and give grace only once.
 Pause the round and verify that time and grace stay fixed. Request a resume
 check. Cancel it once, then repeat and provide fresh fixes on both phones.
 Leave without a score or gameplay penalty.
