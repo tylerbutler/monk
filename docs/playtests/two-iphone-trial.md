@@ -6,7 +6,8 @@ versions, browser modes, and outdoor conditions.
 
 ## Before collection
 
-Use a deployed HTTPS origin. A plain HTTP LAN address cannot replace it.
+Use **https://monk-test.tylerbutler.com** after deployment. A plain HTTP LAN
+address cannot replace it.
 Agree on a bounded outdoor area and safe routes. Mark known separations with
 a tape measure. Do not run, touch other players, enter roads, or trespass.
 
@@ -33,6 +34,10 @@ PWA. Installation does not enable offline play.
    the grouped measurements. No raw locations, session credentials, player
    names, or per-fix movement records are included.
 
+One summary keeps the compatible reference-separation blocks. Before changing
+phones, conditions, or parameter candidates, export the current summary and
+select **Discard measurement summary**. Start a new summary for the new setup.
+
 Recommendations are provisional. Diagnostic freshness is 5000 ms; it is not
 a gameplay value. Evaluate candidate radii, uncertainty, freshness, dwell,
 and grace with the actual phone pair before a normal round. GPS uncertainty
@@ -54,6 +59,8 @@ then start a new check.
 
 Try safe approaches and departures. Check outgoing and incoming attack
 progress, interruption reasons, faction symbols, and post-change grace.
+Conversion notifications stay on screen until you dismiss them. An off-screen
+history entry does not count as visible feedback.
 On the host phone, change a player's faction. This is a manual change, not
 a conversion; it must clear both attack roles and give grace only once.
 Pause the round and verify that time and grace stay fixed. Request a resume

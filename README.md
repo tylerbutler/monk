@@ -60,6 +60,9 @@ clock, visibility, connection, and wake-lock failures appear in the interface.
 Pausing, leaving, hiding, and ending stop local collection. Late browser
 callbacks after stopping are discarded.
 
+After a backward clock change, the app waits for capture times beyond the
+old clock range. A new clock probe does not make cached fixes fresh.
+
 ## Two-iPhone field trial
 
 Follow [the physical trial checklist](docs/playtests/two-iphone-trial.md).
@@ -71,6 +74,11 @@ both must consent. Enter phone models, iOS versions, browser/PWA modes, outdoor
 conditions, and known reference separations. Export grouped summaries only
 when you choose to keep them. They contain no raw positions, session credentials,
 player names, or movement history.
+
+A summary keeps compatible measurement blocks at different marked separations.
+Export, then select **Discard measurement summary** before changing phones,
+conditions, or parameter candidates. The app does not combine incompatible
+measurements or discard earlier blocks without that action.
 
 Enter provisional gameplay parameters after the measurements. No tracking
 defaults come from the synthetic fixture values. Round duration initially
@@ -96,9 +104,9 @@ neither target is claimed as achieved.
 
 ## Deployment is a separate operation
 
-Deployment and the physical trial are **pending**. CI does not deploy.
-After explicit deployment approval, authenticate with your own Cloudflare
-account and review the target account:
+The configured test origin is **https://monk-test.tylerbutler.com**.
+The physical trial is **pending**. CI does not deploy. Authenticate with the
+Cloudflare account specified in `wrangler.jsonc` and review the target:
 
 ```sh
 npx wrangler login
@@ -110,6 +118,35 @@ Wrangler creates the SQLite-backed `MatchAuthority` Durable Object binding
 and serves `dist/` through `ASSETS`. Do not put account credentials or local
 secrets in source or CI. Validate the resulting HTTPS origin and manifest
 assets before inviting the two phones.
+
+Wrangler runs `scripts/cloudflare-build.sh` before local serving, dry-run
+bundling, and deployment. The script uses the pinned installed Gleam compiler.
+On the Linux x86_64 Workers Builds image, it can install the missing compiler
+in the ignored `.wrangler/toolchains/` directory. It verifies the official
+release archive's SHA-256 checksum before extraction. `.node-version` selects
+the same Node version as `mise.toml`.
+
+### Connect GitHub later
+
+Push the approved branch to the repository you want to connect. In Cloudflare,
+open **Workers & Pages > monk-outdoor-playtest > Settings > Builds > Connect**.
+Use these settings:
+
+| Setting | Value |
+| --- | --- |
+| Worker name | `monk-outdoor-playtest` |
+| Root directory | Repository root |
+| Build command | `npm ci` |
+| Deploy command | `npm run deploy` |
+| Production branch | The branch approved for this test site |
+
+Keep the Worker name equal to `wrangler.jsonc`. The deploy command runs the
+Gleam and browser builds through Wrangler's build hook; Cloudflare's image
+does not preinstall Gleam. Leave preview branch builds disabled initially:
+Cloudflare does not generate preview URLs for Workers with Durable Objects.
+
+No repository is connected by this configuration. The existing GitHub workflow
+runs software checks without Cloudflare secrets or automatic deployment.
 
 ## Authority and privacy
 
