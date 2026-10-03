@@ -5,6 +5,9 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/")) {
+      if (url.protocol !== "https:" && !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
+        return Response.json({ error: "HTTPS is required for private match sessions." }, { status: 426 });
+      }
       if (url.search || (request.headers.has("origin") && request.headers.get("origin") !== url.origin)) {
         return Response.json({ error: "Same-origin requests without URL credentials are required." }, { status: 403 });
       }

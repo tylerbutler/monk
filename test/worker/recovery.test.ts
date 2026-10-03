@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { env } from "cloudflare:workers";
-import { evictDurableObject, reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { SELF, evictDurableObject, reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { advanceEngine, checkpointEngine, restoreEngine, snapshotFor } from "../../src/worker/engine";
 import { loadRecord } from "../../src/worker/storage";
 import { command, pulse, runningFixture } from "../fixtures";
@@ -155,6 +155,10 @@ it("deletes data and closes clients at the 24-hour deadline; alarm retry is idem
   await runDurableObjectAlarm(stub);
   expect(await client.next("error")).toMatchObject({ code: "expired" });
   expect(await runInDurableObject(stub, (_, state) => loadRecord(state.storage))).toBeNull();
+  const expired = await SELF.fetch(`https://monk.test/api/matches/${credentials.matchCode}/socket`, {
+    headers: { Upgrade: "websocket", Origin: "https://monk.test" },
+  });
+  expect(expired.status).not.toBe(101);
   await runInDurableObject(stub, instance => instance.alarm());
   expect(await runInDurableObject(stub, (_, state) => loadRecord(state.storage))).toBeNull();
 });

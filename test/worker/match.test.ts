@@ -125,8 +125,11 @@ it("closed rosters reject new joins and corrupt records are not treated as new m
   expect(response.status).toBe(409);
   const stub = env.MATCHES.get(env.MATCHES.idFromName(host.matchCode));
   await runInDurableObject(stub, async (_, state) => {
+    const original = await loadRecord(state.storage);
+    if (!original) throw new Error("Missing match fixture");
     await state.storage.put("record", { broken: true });
     await expect(loadRecord(state.storage)).rejects.toThrow("Stored match record is invalid");
+    await state.storage.put("record", original);
   });
 });
 it("rejects cross-origin sockets and credentials in URLs", async () => {
@@ -135,6 +138,28 @@ it("rejects cross-origin sockets and credentials in URLs", async () => {
     const response = await SELF.fetch(`https://monk.test/api/matches/${host.matchCode}/socket${suffix}`, {
       headers: { Upgrade: "websocket", Origin: origin },
     });
+
     expect(response.status).toBe(403);
   }
+});
+
+it("counts missing feedback as a failed conversion rather than reporting successful latency", async () => {
+  const { host, other, ids } = await runningMatch(30000, { dwellMs: 300, graceMs: 200 });
+  await hostCommand(host, { type: "set_faction", playerId: ids[1], faction: "scissors" });
+  await new Promise(resolve => setTimeout(resolve, 220));
+  const capturedAtMs = Date.now();
+  host.send({ version: 1, type: "position", report: { seq: 2, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
+  other.send({ version: 1, type: "position", report: { seq: 2, capturedAtMs, latitude: 0, longitude: 4 / 6371000 * 180 / Math.PI, accuracyM: 1 } });
+  let update = await host.next("update");
+  while (!update.events.some(e => e.type === "conversion")) update = await host.next("update");
+  const event = update.events.find(e => e.type === "conversion");
+  if (!event) throw new Error("Conversion missing");
+  host.send({ version: 1, type: "feedback_seen", eventSeq: event.eventSeq });
+  await new Promise(resolve => setTimeout(resolve, 1050));
+  host.send({ version: 1, type: "snapshot_request" });
+  const snapshot = await host.next("snapshot");
+  expect(snapshot.snapshot.feedback).toMatchObject({
+    intended: 2, acknowledged: 1, missing: 1, conversionsFailed: 1,
+    conversionsWithinOneSecond: 0, p95UpperMs: null,
+  });
 });

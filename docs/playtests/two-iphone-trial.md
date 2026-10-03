@@ -38,6 +38,51 @@ a gameplay value. Evaluate candidate radii, uncertainty, freshness, dwell,
 and grace with the actual phone pair before a normal round. GPS uncertainty
 is reported evidence, not a guaranteed physical boundary.
 
+## Try a two-player testing round
+
+After exporting the measurements, stop the location trial. On the host phone,
+enter provisional entry and retention radii, maximum uncertainty, freshness,
+dwell, grace, and round duration. Keep **Testing mode** checked. Set the agreed
+play area and describe the device and measurement limits. Save the settings.
+The interface labels these values **Uncalibrated**.
+
+Both players select **Allow location for this round**. The host selects
+**Check fresh locations and start**. The ten-second check requests fresh fixes;
+it does not run the gameplay clock. A trial is not a start prerequisite.
+If it times out, check consent, clock, connection, and reported uncertainty,
+then start a new check.
+
+Try safe approaches and departures. Check outgoing and incoming attack
+progress, interruption reasons, faction symbols, and post-change grace.
+On the host phone, change a player's faction. This is a manual change, not
+a conversion; it must clear both attack roles and give grace only once.
+Pause the round and verify that time and grace stay fixed. Request a resume
+check. Cancel it once, then repeat and provide fresh fixes on both phones.
+Leave without a score or gameplay penalty.
+
+## Record limits and later work
+
+Keep the grouped export only with participant agreement. Record the tested
+phone pair, software/mode, marked separations, sample counts, errors, update
+gaps, and failures. Do not add raw coordinates or player names to the report.
+Repeat the same route and separations in tab and installed-PWA modes.
+
+Parameter candidates in an export are the settings saved before that trial
+block. To compare another candidate set, save the new settings and run another
+block. False-entry samples and interruptions evaluate the location gates;
+dwell and grace balance still need gameplay observations.
+
+Before a normal round, obtain six consenting participants and approve a saved
+measured parameter set with its device limits. A change to parameters resets
+that approval. Initial two-iPhone measurements do not prove mixed-device or
+Android accuracy.
+
+Later tests measure whether 80% of players can explain eligibility and sampled
+conversions, and whether 95% of accepted conversions appear on both visible
+interfaces within one second. Count missing acknowledgements as failures.
+Authority-to-acknowledgement time is a conservative display-delay upper bound,
+not one-way network latency. These targets are not initial trial results.
+
 ## Install icons
 
 Source artwork is `public/icons/icon.svg`. Regenerate the PNG assets with

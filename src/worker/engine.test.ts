@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { advanceEngine, checkpointEngine, createEngine, distanceBetween, isSuperior, restoreEngine, snapshotFor } from "./engine";
+import { advanceEngine, checkpointEngine, createEngine, distanceBetween, isSuperior, restoreEngine, snapshotFor, suspendEngine } from "./engine";
 import { command, fix, host, lobbyFixture, parameters, pulse, runningFixture } from "../../test/fixtures";
 
 it("calls Gleam faction rules", () => {
@@ -156,6 +156,14 @@ it("resets parameter approval when settings change, even when approval is suppli
   const changed = command(state, 0, { type: "configure", mode: "normal",
     parameters: { ...parameters, entryRadiusM: 11 }, approved: true, deviceLimitations: "Measured pair", playArea: "Marked test area" });
   expect(snapshotFor(changed.state, "p1", 0).approved).toBe(false);
+});
+it("excludes stale, uncertain and suspended nearby players", () => {
+  let state = pulse(runningFixture(["rock", "paper", "scissors"]), 0, [0, 4, 6]).state;
+  expect(snapshotFor(state, "p1", 0).nearby).toEqual({ rock: 0, paper: 1, scissors: 1 });
+  state = suspendEngine(state, "p2");
+  const next = advanceEngine(state, { nowMs: 500, actor: null, commands: [],
+    observations: [{ ...fix("p3", 6, 500), accuracyM: 4 }] });
+  expect(snapshotFor(next.state, "p1", 500).nearby).toEqual({ rock: 0, paper: 0, scissors: 0 });
 });
 
 it("creates a lobby in testing mode", () => {
