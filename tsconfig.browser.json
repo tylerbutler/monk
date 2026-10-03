@@ -1,6 +1,6 @@
 {
   "extends": "./tsconfig.json",
-  "compilerOptions": { "lib": ["ES2023", "DOM", "DOM.Iterable"], "types": [] },
+  "compilerOptions": { "lib": ["ES2023", "DOM", "DOM.Iterable"], "types": ["vite/client"] },
   "include": ["src/client/**/*.ts", "src/shared/**/*.ts"],
   "exclude": ["**/*.test.ts"]
 }

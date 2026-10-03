@@ -152,3 +152,34 @@ export type LocationStatus = {
   visible: boolean; wakeLock: "unsupported" | "pending" | "held" | "released";
   reason: string | null;
 };
+
+const distributionSchema = z.strictObject({
+  count: time, min: z.number().finite().nullable(), max: z.number().finite().nullable(),
+  mean: z.number().finite().nullable(), bounds: z.array(z.number().finite()), counts: z.array(time),
+});
+export type Distribution = z.infer<typeof distributionSchema>;
+const referenceSummarySchema = z.strictObject({
+  referenceM: z.number().nonnegative().nullable(), count: time,
+  signedErrorM: distributionSchema, absoluteErrorM: distributionSchema,
+  uncertaintiesM: z.tuple([distributionSchema, distributionSchema]),
+  agesMs: z.tuple([distributionSchema, distributionSchema]),
+  updateGapsMs: z.tuple([distributionSchema, distributionSchema]),
+  captureToReceiptLowerMs: z.tuple([distributionSchema, distributionSchema]),
+  captureToReceiptUpperMs: z.tuple([distributionSchema, distributionSchema]),
+  clockUncertaintiesMs: z.tuple([distributionSchema, distributionSchema]),
+});
+export const deviceSchema = z.strictObject({
+  model: z.string().trim().min(1).max(80), os: z.string().trim().min(1).max(80),
+  mode: z.enum(["Safari tab", "Installed PWA", "Other browser"]),
+});
+export const trialReportSchema = z.strictObject({
+  version: z.literal(1), devices: z.tuple([deviceSchema, deviceSchema]),
+  conditions: z.string().trim().min(1).max(500), sampleCount: time,
+  references: z.array(referenceSummarySchema),
+  candidates: z.array(z.strictObject({
+    parameters: parametersSchema, falseEntrySamples: time, interruptions: time, eligibleSamples: time,
+  })),
+  limitations: z.array(z.string()),
+});
+export type TrialReport = z.infer<typeof trialReportSchema>;
+export type TrialSummary = TrialReport & { runtime: { lastAtMs: number | null; inside: boolean[] } };
