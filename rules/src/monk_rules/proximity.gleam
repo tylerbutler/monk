@@ -48,4 +48,15 @@ pub fn upper_distance(state: Match, a: String, b: String) -> Float {
     Ok(x), Ok(y) -> distance_between(x, y) +. x.accuracy +. y.accuracy
     _, _ -> 1_000_000_000.0
   }
+
+}
+
+pub fn estimated_distance(state: Match, a: String, b: String) -> Float {
+  case
+    list.find(state.observations, fn(p) { p.id == a }),
+    list.find(state.observations, fn(p) { p.id == b })
+  {
+    Ok(x), Ok(y) -> distance_between(x, y)
+    _, _ -> 1_000_000_000.0
+  }
 }

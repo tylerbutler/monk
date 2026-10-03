@@ -69,6 +69,40 @@ it("detects backward wall-clock changes without sending a fix", () => {
   expect(states.at(-1)?.reason).toMatch(/clock/i);
   stop();
 });
+it("keeps the clock epoch across collection restarts and quarantines old cached fixes after resynchronization", () => {
+  const fixes: PositionReport[] = [], states: LocationStatus[] = [];
+  const stop = startLocation(f => fixes.push(f), s => states.push(s));
+  onWatch(position(10000));
+  stop();
+  vi.advanceTimersByTime(3000);
+  vi.setSystemTime(12000);
+  const stopAgain = startLocation(f => fixes.push(f), s => states.push(s));
+  onWatch(position(11000));
+  expect(fixes).toHaveLength(1);
+  expect(states.at(-1)?.reason).toMatch(/clock/i);
+  stopAgain();
+  const stopAfterProbe = startLocation(f => fixes.push(f), s => states.push(s));
+  onWatch(position(11000));
+  expect(fixes).toHaveLength(1);
+  vi.advanceTimersByTime(1001);
+  onWatch(position(13001));
+  expect(fixes.map(f => f.capturedAtMs)).toEqual([10000, 13001]);
+  stopAfterProbe();
+});
+it.each(["fix", "error"])("does not release an outstanding fallback when a watch %s arrives", kind => {
+  const stop = startLocation(() => {}, () => {});
+  onWatch(position(10000));
+  vi.advanceTimersByTime(1000);
+  expect(fallback).toHaveBeenCalledTimes(1);
+  if (kind === "fix") onWatch(position(10000));
+  else onError({ code: 2, message: "Unavailable", PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 });
+  vi.advanceTimersByTime(2000);
+  expect(fallback).toHaveBeenCalledTimes(1);
+  onFallback(position(13000));
+  vi.advanceTimersByTime(1000);
+  expect(fallback).toHaveBeenCalledTimes(2);
+  stop();
+});
 it("reports a released wake lock and releases a late-acquired lock after stop", async () => {
   class Lock extends EventTarget {
     released = false;

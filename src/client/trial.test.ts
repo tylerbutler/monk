@@ -30,3 +30,13 @@ it("does not count duplicate samples and records candidate false entries and int
   expect(report.candidates[0]).toMatchObject({ falseEntrySamples: 1, interruptions: 1 });
   expect(report.limitations.join(" ")).toMatch(/provisional|device/i);
 });
+it("clears retention eligibility after a freshness gap before evaluating re-entry", () => {
+  const initial = addTrialSample(newTrialSummary({
+    devices: twoIphoneSummary.devices, conditions: "Open outdoor area", candidates: [parameters],
+  }), { ...sample, updateGapsMs: [0, 0] });
+  const afterGap = addTrialSample(initial, {
+    ...sample, atMs: 7000, distanceM: 11, updateGapsMs: [6000, 6000],
+  });
+  expect(afterGap.candidates[0]).toMatchObject({ interruptions: 1, eligibleSamples: 1 });
+  expect(afterGap.runtime.inside).toEqual([false]);
+});

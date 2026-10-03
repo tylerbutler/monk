@@ -51,6 +51,14 @@ it("locks the nearest target and resolves exact ties by player ID", () => {
   state = pulse(state, 500, [0, 5, 1]).state;
   expect(snapshotFor(state, "p1", 500).outgoing?.targetId).toBe("p2");
 });
+it("ranks eligible targets by horizontal distance rather than uncertainty bounds", () => {
+  const next = advanceEngine(runningFixture(["rock", "scissors", "scissors"]), {
+    nowMs: 500, actor: null, commands: [], observations: [
+      fix("p1", 0, 500), { ...fix("p2", 3, 500), accuracyM: 3 }, fix("p3", 4, 500),
+    ],
+  });
+  expect(snapshotFor(next.state, "p1", 500).outgoing?.targetId).toBe("p2");
+});
 
 it("accepts only one competing attacker and retains snapshot factions in an RPS chain", () => {
   let competing = runningFixture(["rock", "rock", "scissors"]);

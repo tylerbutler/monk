@@ -1,9 +1,16 @@
+import { z } from "zod";
 import type { LocationStatus, PositionReport } from "../shared/protocol";
+
+const clockStateSchema = z.strictObject({
+  wallMs: z.number().int().nonnegative(), monotonicMs: z.number().finite().nonnegative(),
+  captureAfterMs: z.number().int().min(-1),
+});
 
 export function startLocation(onFix: (fix: PositionReport) => void, onStatus: (status: LocationStatus) => void): () => void {
   let active = true, pending = false, watcher: number | null = null;
   let lock: WakeLockSentinel | null = null;
-  let wall = Date.now(), mono = performance.now(), lastReceiptMs = wall;
+  let wall = Date.now(), mono = performance.timeOrigin + performance.now(), lastReceiptMs = wall;
+  let captureAfterMs = -1;
   let sequence = 0, lastCaptureMs = -1;
   const status: LocationStatus = {
     collecting: true, permission: "unknown", visible: document.visibilityState === "visible",
@@ -20,15 +27,19 @@ export function startLocation(onFix: (fix: PositionReport) => void, onStatus: (s
     publish(reason);
   }
   function clockValid(): boolean {
-    const now = Date.now(), elapsed = performance.now() - mono;
-    if (Math.abs((now - wall) - elapsed) > 100) { stop("Phone clock changed. Wait for a new clock check."); return false; }
-    wall = now; mono = performance.now();
+    const now = Date.now(), monotonicMs = performance.timeOrigin + performance.now();
+    const elapsed = Math.max(0, monotonicMs - mono);
+    const changed = monotonicMs < mono || Math.abs((now - wall) - elapsed) > 100;
+    if (changed && now < wall + elapsed) captureAfterMs = Math.max(captureAfterMs, Math.ceil(wall + elapsed));
+    wall = now; mono = monotonicMs;
+    try { sessionStorage.setItem("monk-clock-state", JSON.stringify({ wallMs: wall, monotonicMs: mono, captureAfterMs })); }
+    catch { stop("Session storage is unavailable. Allow storage before reporting location."); return false; }
+    if (changed) { stop("Phone clock changed. Wait for a new clock check and a new capture timestamp."); return false; }
     return true;
   }
   function receive(position: GeolocationPosition) {
     if (!active || document.visibilityState !== "visible" || !clockValid()) return;
-    pending = false;
-    if (!Number.isSafeInteger(position.timestamp) || position.timestamp <= lastCaptureMs ||
+    if (!Number.isSafeInteger(position.timestamp) || position.timestamp <= Math.max(lastCaptureMs, captureAfterMs) ||
       position.timestamp > Date.now() || Date.now() - position.timestamp >= 5000) {
       publish("Location is cached or stale. Wait for a new fix."); return;
     }
@@ -47,7 +58,6 @@ export function startLocation(onFix: (fix: PositionReport) => void, onStatus: (s
   }
   function fail(error: GeolocationPositionError) {
     if (!active) return;
-    pending = false;
     if (error.code === 1) {
       status.permission = "denied"; stop("Location permission denied. Allow location in browser settings."); return;
     }
@@ -62,7 +72,8 @@ export function startLocation(onFix: (fix: PositionReport) => void, onStatus: (s
     if (!active || !clockValid() || document.visibilityState !== "visible") return;
     if (!pending && Date.now() - lastReceiptMs >= 1000) {
       pending = true;
-      navigator.geolocation.getCurrentPosition(receive, fail, { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 });
+      navigator.geolocation.getCurrentPosition(position => { pending = false; receive(position); },
+        error => { pending = false; fail(error); }, { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 });
     }
   }, 1000);
   document.addEventListener("visibilitychange", visibility);
@@ -70,6 +81,11 @@ export function startLocation(onFix: (fix: PositionReport) => void, onStatus: (s
     sequence = Number(sessionStorage.getItem("monk-position-seq") ?? "0");
     lastCaptureMs = Number(sessionStorage.getItem("monk-last-capture") ?? "-1");
     if (!Number.isSafeInteger(sequence) || sequence < 0 || !Number.isSafeInteger(lastCaptureMs)) throw new Error("Invalid sequence");
+    const storedClock = sessionStorage.getItem("monk-clock-state");
+    if (storedClock) {
+      const saved = clockStateSchema.parse(JSON.parse(storedClock));
+      wall = saved.wallMs; mono = saved.monotonicMs; captureAfterMs = saved.captureAfterMs;
+    }
   } catch { stop("Session storage is unavailable or invalid. Clear this session before reporting location."); return () => stop(); }
   if (!navigator.geolocation || !status.visible) {
     stop(!status.visible ? "App is hidden. Keep it visible to collect location." : "Geolocation is not supported."); return () => stop();

@@ -25,6 +25,7 @@ export function mountApp(root: HTMLElement): () => void {
   let location: LocationStatus = { collecting: false, permission: "unknown", visible: true, wakeLock: "unsupported", reason: null };
   let consent = false, clockReady = false, disposed = false;
   let startChecking = false, commandStatus = "", feedback: EngineEvent[] = [];
+  let conversionNotices: EngineEvent[] = [];
   const pendingCommands = new Map<string, HostCommand>();
   const pendingFeedback = new Set<number>(), acknowledged = new Set<number>();
   let feedbackFrame = false, audio: AudioContext | null = null;
@@ -61,6 +62,9 @@ export function mountApp(root: HTMLElement): () => void {
   }
   function receive(message: ServerMessage) {
     if (disposed) return;
+    if (message.type === "authenticated") {
+      for (const [commandId, command] of pendingCommands) connection?.send({ version: 1, type: "host_command", commandId, command });
+    }
     if (message.type === "clock_ready") clockReady = true;
     if (message.type === "snapshot" || message.type === "update") {
       snapshot = message.snapshot; trial = message.trial; startChecking = message.startChecking;
@@ -73,7 +77,10 @@ export function mountApp(root: HTMLElement): () => void {
         for (const event of message.events) {
           if (!feedback.some(e => e.eventSeq === event.eventSeq)) feedback = [...feedback, event].slice(-6);
           if (event.type === "conversion" && (event.attackerId === snapshot.ownPlayerId || event.targetId === snapshot.ownPlayerId) &&
-            !acknowledged.has(event.eventSeq)) pendingFeedback.add(event.eventSeq);
+            !acknowledged.has(event.eventSeq)) {
+            pendingFeedback.add(event.eventSeq);
+            if (!conversionNotices.some(e => e.eventSeq === event.eventSeq)) conversionNotices = [...conversionNotices, event].slice(-6);
+          }
         }
       }
     }
@@ -88,6 +95,7 @@ export function mountApp(root: HTMLElement): () => void {
     reconcileCollection(); render();
   }
   function connect(next: SessionCredentials) {
+    if (credentials?.matchCode !== next.matchCode) { pendingCommands.clear(); commandStatus = ""; }
     connection?.close(); stopCollection();
     credentials = next; snapshot = null; trial = null; clockReady = false; error = "";
     try { sessionStorage.setItem("monk-session", JSON.stringify(next)); }
@@ -115,7 +123,14 @@ export function mountApp(root: HTMLElement): () => void {
       feedbackFrame = false;
       if (disposed || document.visibilityState !== "visible" || !root.isConnected) return;
       for (const eventSeq of pendingFeedback) {
-        if (!root.querySelector(`[data-event-seq="${eventSeq}"]`)) continue;
+        const notice = root.querySelector<HTMLElement>(`.conversion-notice [data-event-seq="${eventSeq}"]`);
+        if (!notice) continue;
+        const bounds = notice.getBoundingClientRect(), viewport = window.visualViewport;
+        const left = viewport?.offsetLeft ?? 0, top = viewport?.offsetTop ?? 0;
+        if (bounds.width <= 0 || bounds.height <= 0 || bounds.left < left || bounds.top < top ||
+          bounds.right > left + (viewport?.width ?? window.innerWidth) ||
+          bounds.bottom > top + (viewport?.height ?? window.innerHeight) ||
+          getComputedStyle(notice).visibility === "hidden") continue;
         connection?.send({ version: 1, type: "feedback_seen", eventSeq });
         acknowledged.add(eventSeq); pendingFeedback.delete(eventSeq);
         if (typeof navigator.vibrate === "function") navigator.vibrate(60);
@@ -147,6 +162,7 @@ export function mountApp(root: HTMLElement): () => void {
     connection?.close(); connection = null; credentials = null; snapshot = null; trial = null;
     latest = null; summary = null; retained.clear(); error = "";
     pendingCommands.clear(); pendingFeedback.clear(); acknowledged.clear(); feedback = []; startChecking = false;
+    conversionNotices = [];
     sessionStorage.removeItem("monk-session"); render();
   }
   function readDevices(): TrialSummary {
@@ -196,7 +212,15 @@ export function mountApp(root: HTMLElement): () => void {
         if (!a || !b || a === b || (referenceM !== null && (!Number.isFinite(referenceM) || referenceM < 0))) {
           throw new Error("Select two different joined players and a valid reference separation.");
         }
-        summary = next; latest = null;
+        if (summary?.sampleCount) {
+          const prior = [summary.devices, summary.conditions, summary.candidates.map(c => c.parameters)];
+          const requested = [next.devices, next.conditions, next.candidates.map(c => c.parameters)];
+          if (JSON.stringify(prior) !== JSON.stringify(requested)) {
+            throw new Error("Export, then discard the existing summary before changing devices, conditions, or parameter candidates.");
+          }
+          summary = { ...summary, runtime: next.runtime };
+        } else summary = next;
+        latest = null;
         connection?.send({ version: 1, type: "trial_begin", playerIds: [a, b], referenceM });
       }, "trial-begin");
     }
@@ -229,6 +253,9 @@ export function mountApp(root: HTMLElement): () => void {
         const url = URL.createObjectURL(blob), anchor = document.createElement("a");
         anchor.href = url; anchor.download = "monk-two-iphone-summary.json"; anchor.click(); URL.revokeObjectURL(url);
       }, "export-trial", "secondary");
+      if (!trial) button(section, "Discard measurement summary", () => {
+        summary = null; latest = null; render();
+      }, "discard-trial", "secondary");
     }
   }
   function render() {
@@ -240,6 +267,21 @@ export function mountApp(root: HTMLElement): () => void {
     root.replaceChildren();
     const header = document.createElement("header"); header.className = "masthead"; root.append(header);
     text(header, "h1", "Monk"); text(header, "span", "Outdoor playtest", "edition");
+    if (snapshot && conversionNotices.length) {
+      const notice = document.createElement("aside"); notice.className = "conversion-notice";
+      notice.setAttribute("role", "status"); notice.setAttribute("aria-live", pendingFeedback.size ? "polite" : "off");
+      notice.setAttribute("aria-label", "Conversion notification"); root.append(notice);
+      const shown = conversionNotices.slice(-2);
+      for (const event of [...shown].reverse()) {
+        const line = text(notice, "p", describeEvent(event, snapshot)); line.dataset.eventSeq = String(event.eventSeq);
+      }
+      button(notice, "Dismiss notification", () => {
+        const ids = new Set(shown.map(e => e.eventSeq));
+        conversionNotices = conversionNotices.filter(e => !ids.has(e.eventSeq));
+        for (const id of ids) pendingFeedback.delete(id);
+        render();
+      }, "dismiss-conversion", "secondary");
+    }
     if (error) { const alert = text(root, "p", error, "error"); alert.setAttribute("role", "alert"); }
     if (!credentials) {
       text(root, "h2", "Play together. Change sides.");
@@ -318,7 +360,7 @@ export function mountApp(root: HTMLElement): () => void {
     const safety = document.createElement("footer"); root.append(safety);
     text(safety, "h3", "Location and safe play");
     text(safety, "p", "Agree on a bounded outdoor area and safe routes. No running or touching is needed. You can leave without a gameplay penalty. Keep this app visible and the screen on.");
-    text(safety, "p", "Location is used only for a consenting trial, active round, or fresh resume check. Opponent coordinates are not shown. Locations are not retained in match records or exports. Matches and credentials expire within 24 hours.");
+    text(safety, "p", "Location is used only for a consenting trial, active round, or fresh start or resume check. Opponent coordinates are not shown. Locations are not retained in match records or exports. Matches and credentials expire within 24 hours.");
     for (const input of root.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-retain]")) {
       const value = retained.get(input.id);
       if (value) { input.value = value.value; if (input instanceof HTMLInputElement) input.checked = value.checked; }

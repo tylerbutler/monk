@@ -168,8 +168,8 @@ pub fn resolve(result: StepResult, now: Int) -> StepResult {
                 list.sort(candidates, fn(b, c) {
                   case
                     float_order(
-                      proximity.upper_distance(r.state, a.id, b.id),
-                      proximity.upper_distance(r.state, a.id, c.id),
+                      proximity.estimated_distance(r.state, a.id, b.id),
+                      proximity.estimated_distance(r.state, a.id, c.id),
                     )
                   {
                     Eq -> string.compare(b.id, c.id)

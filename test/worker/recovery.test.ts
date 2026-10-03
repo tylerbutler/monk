@@ -57,6 +57,25 @@ it("declined consent and leaving stop the trial", async () => {
   while (update.trial !== null) update = await host.next("update");
   expect(update.trial).toBeNull();
 });
+it("retains coordinate-free receipt gaps after trial observations expire", async () => {
+  const { a, b, host, credentials } = await trial();
+  a.send({ version: 1, type: "trial_ready", consent: true });
+  b.send({ version: 1, type: "trial_ready", consent: true });
+  for (;;) { if ((await host.next("update")).trial?.collecting) break; }
+  await Promise.all([probe(a), probe(b)]);
+  const capturedAtMs = Date.now();
+  a.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
+  b.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 0.0001, accuracyM: 1 } });
+  await host.next("trial_sample");
+  await new Promise(resolve => setTimeout(resolve, 5250));
+  const fresh = Date.now();
+  a.send({ version: 1, type: "position", report: { seq: 2, capturedAtMs: fresh, latitude: 0, longitude: 0, accuracyM: 1 } });
+  b.send({ version: 1, type: "position", report: { seq: 2, capturedAtMs: fresh, latitude: 0, longitude: 0.0001, accuracyM: 1 } });
+  const next = await host.next("trial_sample");
+  expect(next.sample.updateGapsMs.every(g => g >= 5000)).toBe(true);
+  const stub = env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode));
+  expect(JSON.stringify(await runInDurableObject(stub, (_, state) => loadRecord(state.storage)))).not.toMatch(/latitude|longitude/);
+}, 12000);
 
 it("round and grace deadlines run without new messages", async () => {
   const { host, ids } = await runningMatch(750);

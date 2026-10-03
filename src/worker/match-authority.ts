@@ -26,6 +26,7 @@ export class MatchAuthority extends DurableObject<Env> {
   private clocks = new Map<WebSocket, ClockSession>();
   private reports = new Map<string, { seq: number; capturedAtMs: number }>();
   private measurements = new Map<string, Measurement>();
+  private lastReceipts = new Map<string, number>();
   private trial: TrialStatus | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private pendingStart: { commandId: string; actor: VerifiedActor; deadlineMs: number; caller: WebSocket } | null = null;
@@ -117,13 +118,16 @@ export class MatchAuthority extends DurableObject<Env> {
     this.record = { ...record, events: [...record.events, ...next.events] };
     this.engine = next.state;
     if (record.checkpoint.phase === "ended" || (record.checkpoint.phase === "paused" && !this.view({ id: "", host: false, playerId: null }).resumeChecking)) {
-      this.trial = null; this.measurements.clear();
+      this.trial = null; this.clearMeasurements();
     }
     await this.scheduleAlarm();
     this.scheduleTick();
   }
   private trialFor(actor: VerifiedActor): TrialStatus | null {
     return this.trial && (actor.host || (actor.playerId !== null && this.trial.playerIds.includes(actor.playerId))) ? this.trial : null;
+  }
+  private clearMeasurements(): void {
+    this.measurements.clear(); this.lastReceipts.clear();
   }
   private async scheduleAlarm(): Promise<void> {
     if (!this.record) return;
@@ -168,7 +172,7 @@ export class MatchAuthority extends DurableObject<Env> {
     const outcome = { commandId: pending.commandId, accepted: !timedOut,
       reason: timedOut ? "Freshness check timed out. All required players must consent and provide usable fixes." : "Round started after fresh observations." };
     await this.accept(next, outcome);
-    this.pendingStart = null; this.trial = null; this.measurements.clear();
+    this.pendingStart = null; this.trial = null; this.clearMeasurements();
     this.broadcast(next.events, outcome, pending.caller);
     await this.scheduleAlarm();
   }
@@ -296,7 +300,7 @@ export class MatchAuthority extends DurableObject<Env> {
           if (c.parameters && c.playArea && rosterReady && (c.mode === "test" || c.approved)) {
             for (const p of c.players) this.engine = suspendEngine(this.engine, p.id);
             this.pendingStart = { commandId: message.commandId, actor, deadlineMs: Date.now() + 10000, caller: socket };
-            this.trial = null; this.measurements.clear();
+            this.trial = null; this.clearMeasurements();
             await this.scheduleAlarm(); this.scheduleTick(); this.broadcast([]); return;
           }
         }
@@ -306,7 +310,7 @@ export class MatchAuthority extends DurableObject<Env> {
         try { await this.accept(next, outcome); } catch { this.error(socket, "storage_failed", "State was not saved. Retry the same command ID.", message.commandId); return; }
         if (outcome.accepted && (message.command.type === "begin_resume" || message.command.type === "cancel_resume" ||
           message.command.type === "pause" || message.command.type === "end" || message.command.type === "start")) {
-          this.trial = null; this.measurements.clear();
+          this.trial = null; this.clearMeasurements();
         }
         if (outcome.accepted && message.command.type === "end") this.pendingStart = null;
         this.broadcast(next.events, outcome, socket); return;
@@ -333,13 +337,13 @@ export class MatchAuthority extends DurableObject<Env> {
           this.error(socket, "trial_invalid", "Select two different joined players in the lobby."); return;
         }
         this.trial = { playerIds: message.playerIds, readyIds: [], collecting: false, referenceM: message.referenceM };
-        this.measurements.clear(); this.broadcast([]); return;
+        this.clearMeasurements(); this.broadcast([]); return;
       }
       if (message.type === "trial_ready") {
         if (!this.trial || !actor.playerId || !this.trial.playerIds.includes(actor.playerId)) {
           this.error(socket, "trial_invalid", "You are not in the selected trial pair."); return;
         }
-        if (!message.consent) { this.trial = null; this.measurements.clear(); }
+        if (!message.consent) { this.trial = null; this.clearMeasurements(); }
         else {
           this.trial.readyIds = Array.from(new Set([...this.trial.readyIds, actor.playerId]));
           this.trial.collecting = this.trial.readyIds.length === 2;
@@ -351,7 +355,7 @@ export class MatchAuthority extends DurableObject<Env> {
         if (!actor.host && (!actor.playerId || !this.trial?.playerIds.includes(actor.playerId))) {
           this.error(socket, "forbidden", "Only the trial pair or host can stop the trial."); return;
         }
-        this.trial = null; this.measurements.clear();
+        this.trial = null; this.clearMeasurements();
         this.broadcast([]); return;
       }
       if (message.type === "position") {
@@ -379,10 +383,11 @@ export class MatchAuthority extends DurableObject<Env> {
           observations: gameplay?.ok ? [gameplay.value] : [],
         });
         try { await this.accept(next); } catch { this.error(socket, "storage_failed", "Fix was not applied. Retry after reconnecting."); return; }
-        const old = this.measurements.get(actor.playerId);
+        const receivedAtMs = Date.now(), previousReceiptMs = this.lastReceipts.get(actor.playerId);
         this.reports.set(actor.playerId, { seq: message.report.seq, capturedAtMs: message.report.capturedAtMs });
-        this.measurements.set(actor.playerId, { observation: normalized.value, receivedAtMs: Date.now(),
-          updateGapMs: old ? Math.max(0, Date.now() - old.receivedAtMs) : 0, clock: clockSession.clock });
+        this.lastReceipts.set(actor.playerId, receivedAtMs);
+        this.measurements.set(actor.playerId, { observation: normalized.value, receivedAtMs,
+          updateGapMs: previousReceiptMs === undefined ? 0 : Math.max(0, receivedAtMs - previousReceiptMs), clock: clockSession.clock });
         this.broadcast(next.events);
         if (inTrial) this.sendTrialSample();
         await this.resolveStart();
@@ -397,7 +402,8 @@ export class MatchAuthority extends DurableObject<Env> {
         const sessions = message.type === "leave" ? this.record.sessions.filter(s => s.playerId !== actor.playerId) : this.record.sessions;
         try { await this.accept(next, null, sessions); } catch { this.error(socket, "storage_failed", "Suspension was not saved. Stop local location collection."); return; }
         this.measurements.delete(actor.playerId);
-        if (this.trial?.playerIds.includes(actor.playerId)) { this.trial = null; this.measurements.clear(); }
+        this.lastReceipts.delete(actor.playerId);
+        if (this.trial?.playerIds.includes(actor.playerId)) { this.trial = null; this.clearMeasurements(); }
         this.broadcast(next.events); return;
       }
       if (message.type === "feedback_seen") {
@@ -453,7 +459,8 @@ export class MatchAuthority extends DurableObject<Env> {
           const next = advanceEngine(suspendEngine(this.engine, actor.playerId), { nowMs: Date.now(), actor: null, commands: [], observations: [] });
           await this.accept(next);
           this.measurements.delete(actor.playerId);
-          if (this.trial?.playerIds.includes(actor.playerId)) this.trial = null;
+          this.lastReceipts.delete(actor.playerId);
+          if (this.trial?.playerIds.includes(actor.playerId)) { this.trial = null; this.clearMeasurements(); }
           this.broadcast(next.events);
         }
       }
@@ -470,7 +477,7 @@ export class MatchAuthority extends DurableObject<Env> {
     await this.ctx.storage.deleteAll();
     this.record = null; this.engine = null;
     if (this.timer !== null) clearTimeout(this.timer);
-    this.timer = null; this.trial = null; this.pendingStart = null; this.measurements.clear(); this.reports.clear(); this.clocks.clear();
+    this.timer = null; this.trial = null; this.pendingStart = null; this.clearMeasurements(); this.reports.clear(); this.clocks.clear();
   }
   async alarm(): Promise<void> {
     await this.serialize(async () => {

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { connectMatch } from "./connection";
-import type { ServerMessage } from "../shared/protocol";
+import type { ConnectionStatus, ServerMessage } from "../shared/protocol";
 import { snapshotFor } from "../worker/engine";
 import { lobbyFixture } from "../../test/fixtures";
 
@@ -60,5 +60,27 @@ it("retries a lost command reply using the same command ID", () => {
   const commands = socket.frames.map(f => JSON.parse(f)).filter(m => m.type === "host_command");
   expect(commands).toHaveLength(2);
   expect(commands[1]).toEqual(commands[0]);
+  connection.close();
+});
+it("keeps an authoritative ten-second start check connected until its outcome arrives", () => {
+  const statuses: ConnectionStatus[] = [];
+  const connection = connectMatch(credentials, { onMessage() {}, onStatus: s => statuses.push(s) });
+  const socket = instances[0]; auth(socket); socket.receive(snapshot("stream-a", 2));
+  socket.receive({ version: 1, type: "clock_ready", streamId: "stream-a", streamSeq: 3,
+    clock: { offsetMs: 0, uncertaintyMs: 0, measuredAtMs: Date.now() } });
+  connection.send({ version: 1, type: "host_command", commandId: "slow-start", command: { type: "start" } });
+  for (let seq = 4; seq <= 13; seq++) {
+    vi.advanceTimersByTime(1000);
+    const current = snapshot("stream-a", seq);
+    if (current.type !== "snapshot") throw new Error("Invalid test snapshot");
+    socket.receive({ ...current, startChecking: true });
+  }
+  expect(statuses.filter(s => s.state === "failed")).toHaveLength(0);
+  socket.receive({ version: 1, type: "update", streamId: "stream-a", streamSeq: 14,
+    snapshot: snapshotFor(lobbyFixture(["rock", "paper"]), null, 0), trial: null, startChecking: false, events: [],
+    outcome: { commandId: "slow-start", accepted: false, reason: "Freshness check timed out." } });
+  const count = socket.frames.filter(f => JSON.parse(f).type === "host_command").length;
+  vi.advanceTimersByTime(1500);
+  expect(socket.frames.filter(f => JSON.parse(f).type === "host_command")).toHaveLength(count);
   connection.close();
 });

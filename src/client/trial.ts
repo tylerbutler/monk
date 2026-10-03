@@ -53,10 +53,11 @@ export function addTrialSample(summary: TrialSummary, raw: TrialSample): TrialSu
   };
   const inside = summary.candidates.map((c, i) => {
     const p = c.parameters;
+    const continuous = summary.runtime.inside[i] && sample.updateGapsMs.every(g => g < p.freshnessMs);
     return sample.uncertaintiesM.every(u => u <= p.maxAccuracyM) &&
       sample.agesMs.every(age => age < p.freshnessMs) &&
       sample.distanceM + sample.uncertaintiesM[0] + sample.uncertaintiesM[1] <=
-      (summary.runtime.inside[i] ? p.retentionRadiusM : p.entryRadiusM);
+      (continuous ? p.retentionRadiusM : p.entryRadiusM);
   });
   return {
     ...summary, sampleCount: summary.sampleCount + 1,

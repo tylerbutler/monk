@@ -5,7 +5,7 @@ import { describeEvent, renderMatch } from "./views";
 import type { MatchActions } from "./views";
 import { snapshotFor } from "../worker/engine";
 import { command, lobbyFixture, pulse, runningFixture } from "../../test/fixtures";
-import type { EngineEvent, ServerMessage } from "../shared/protocol";
+import type { EngineEvent, ServerMessage, TrialSample, TrialStatus } from "../shared/protocol";
 
 const actions: MatchActions = {
   start: vi.fn(), pause: vi.fn(), beginResume: vi.fn(), cancelResume: vi.fn(), end: vi.fn(),
@@ -78,34 +78,43 @@ it("distinguishes conversions, host changes, attack starts, and interruption rea
 
 function browserApp(snapshot: ReturnType<typeof snapshotFor>) {
   let socket: Socket;
+  const sockets: Socket[] = [];
   const frames: string[] = [], raf: FrameRequestCallback[] = [];
   class Socket extends EventTarget {
     static OPEN = 1;
     readyState = 0;
-    constructor() { super(); socket = this; }
+    constructor() { super(); socket = this; sockets.push(this); }
     send(frame: string) { frames.push(frame); }
     close() { this.readyState = 3; }
     receive(message: ServerMessage) { this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(message) })); }
   }
   vi.stubGlobal("WebSocket", Socket);
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { raf.push(callback); return raf.length; });
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(16, 20, 300, 60));
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
   sessionStorage.clear();
-  sessionStorage.setItem("monk-session", JSON.stringify({ matchCode: "ABCDEFGH", hostToken: null, playerToken: "p".repeat(64) }));
+  sessionStorage.setItem("monk-session", JSON.stringify({
+    matchCode: "ABCDEFGH", hostToken: snapshot.canHost ? "h".repeat(64) : null, playerToken: "p".repeat(64),
+  }));
   const root = document.createElement("main"); document.body.append(root);
   const cleanup = mountApp(root);
+  function authenticate(current: Socket, streamId = "app-stream") {
+    current.readyState = 1; current.dispatchEvent(new Event("open"));
+    current.receive({ version: 1, type: "authenticated", streamId, streamSeq: 1,
+      playerId: "p1", canHost: snapshot.canHost, expiresAtMs: Date.now() + 86400000 });
+    current.receive({ version: 1, type: "snapshot", streamId, streamSeq: 2,
+      snapshot, trial: null, startChecking: false });
+    const probe = JSON.parse([...frames].reverse().find(f => JSON.parse(f).type === "clock_probe") ?? "{}");
+    current.receive({ version: 1, type: "clock_reply", streamId, streamSeq: 3,
+      nonce: probe.nonce, clientSendMs: probe.clientSendMs, serverReceiveMs: Date.now(), serverSendMs: Date.now() });
+    current.receive({ version: 1, type: "clock_ready", streamId, streamSeq: 4,
+      clock: { offsetMs: 0, uncertaintyMs: 0, measuredAtMs: Date.now() } });
+  }
   const current = socket!;
-  current.readyState = 1; current.dispatchEvent(new Event("open"));
-  current.receive({ version: 1, type: "authenticated", streamId: "app-stream", streamSeq: 1,
-    playerId: "p1", canHost: false, expiresAtMs: Date.now() + 86400000 });
-  current.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 2,
-    snapshot, trial: null, startChecking: false });
-  const probe = JSON.parse(frames.find(f => JSON.parse(f).type === "clock_probe") ?? "{}");
-  current.receive({ version: 1, type: "clock_reply", streamId: "app-stream", streamSeq: 3,
-    nonce: probe.nonce, clientSendMs: probe.clientSendMs, serverReceiveMs: Date.now(), serverSendMs: Date.now() });
-  current.receive({ version: 1, type: "clock_ready", streamId: "app-stream", streamSeq: 4,
-    clock: { offsetMs: 0, uncertaintyMs: 0, measuredAtMs: Date.now() } });
-  return { root, socket: current, frames, raf, cleanup: () => { cleanup(); root.remove(); sessionStorage.clear(); vi.unstubAllGlobals(); } };
+  authenticate(current);
+  return { root, socket: current, sockets, frames, raf, authenticate, cleanup: () => {
+    cleanup(); root.remove(); sessionStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+  } };
 }
 
 it("collects one fresh resume-check fix with prior consent without showing running, then stops on cancel", () => {
@@ -155,6 +164,99 @@ it("keeps visible conversion feedback without audio/haptics and acknowledges onl
     expect(app.frames.filter(f => JSON.parse(f).type === "feedback_seen")).toHaveLength(0);
     Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
     app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 6, snapshot, trial: null, startChecking: false });
+    app.raf.shift()?.(32); app.raf.shift()?.(48);
+    expect(app.frames.filter(f => JSON.parse(f).type === "feedback_seen")).toHaveLength(1);
+  } finally { app.cleanup(); }
+});
+
+it("reconnects unresolved host changes with their original ID and releases controls on the outcome", async () => {
+  vi.useFakeTimers();
+  const snapshot = { ...snapshotFor(runningFixture(["rock", "scissors"]), "p1", 0), canHost: true };
+  const app = browserApp(snapshot);
+  try {
+    const select = app.root.querySelector<HTMLSelectElement>('[data-action="set-faction"]');
+    if (!select) throw new Error("Host faction control missing");
+    select.value = "paper"; select.dispatchEvent(new Event("change"));
+    const original = app.frames.map(f => JSON.parse(f)).find(m => m.type === "host_command");
+    vi.advanceTimersByTime(7500);
+    const reconnect = app.root.querySelector<HTMLButtonElement>('[data-action="reconnect"]');
+    expect(reconnect).not.toBeNull();
+    reconnect?.click();
+    const replacement = app.sockets.at(-1);
+    if (!replacement || replacement === app.socket) throw new Error("Replacement connection missing");
+    const before = app.frames.length;
+    app.authenticate(replacement, "reconnected-stream");
+    const resent = app.frames.slice(before).map(f => JSON.parse(f)).find(m => m.type === "host_command");
+    expect(resent).toEqual(original);
+    replacement.receive({ version: 1, type: "update", streamId: "reconnected-stream", streamSeq: 5,
+      snapshot, trial: null, startChecking: false, events: [],
+      outcome: { commandId: original.commandId, accepted: true, reason: "Original change accepted." } });
+    expect(app.root.querySelector<HTMLSelectElement>('[data-action="set-faction"]')?.disabled).toBe(false);
+  } finally { app.cleanup(); vi.useRealTimers(); }
+});
+
+it("preserves grouped measurements between reference blocks and requires explicit discard for different device details", () => {
+  const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true };
+  const app = browserApp(snapshot);
+  const sample: TrialSample = { atMs: 10000, distanceM: 8, uncertaintiesM: [1, 1],
+    agesMs: [20, 30], updateGapsMs: [1000, 1200], delayBoundsMs: [[0, 20], [5, 30]],
+    clockUncertaintiesMs: [5, 5], referenceM: 4 };
+  let seq = 4;
+  function update(trial: TrialStatus | null) {
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: ++seq,
+      snapshot, trial, startChecking: false, events: [], outcome: null });
+  }
+  function field(id: string, value: string) {
+    const input = app.root.querySelector<HTMLInputElement>(`#${id}`);
+    if (!input) throw new Error(`Missing trial field: ${id}`);
+    input.value = value;
+  }
+  try {
+    for (const [id, value] of [["device-0", "iPhone 15"], ["os-0", "iOS 18"], ["device-1", "iPhone 16"],
+      ["os-1", "iOS 18"], ["conditions", "Open outdoor area"], ["referenceM", "4"]]) field(id, value);
+    app.root.querySelector<HTMLButtonElement>('[data-action="trial-begin"]')?.click();
+    update({ playerIds: ["p1", "p2"], readyIds: ["p1", "p2"], collecting: true, referenceM: 4 });
+    app.socket.receive({ version: 1, type: "trial_sample", streamId: "app-stream", streamSeq: ++seq, sample });
+    expect(app.root.textContent).toContain("1 samples");
+    app.root.querySelector<HTMLButtonElement>('[data-action="trial-end"]')?.click();
+    update(null);
+    field("referenceM", "20");
+    app.root.querySelector<HTMLButtonElement>('[data-action="trial-begin"]')?.click();
+    update({ playerIds: ["p1", "p2"], readyIds: ["p1", "p2"], collecting: true, referenceM: 20 });
+    expect(app.root.textContent).toContain("1 samples");
+    app.socket.receive({ version: 1, type: "trial_sample", streamId: "app-stream", streamSeq: ++seq,
+      sample: { ...sample, atMs: 11000, referenceM: 20 } });
+    expect(app.root.textContent).toContain("2 samples");
+    update(null);
+    field("device-0", "Different phone");
+    app.root.querySelector<HTMLButtonElement>('[data-action="trial-begin"]')?.click();
+    expect(app.root.textContent).toContain("Export");
+    expect(app.root.textContent).toContain("2 samples");
+    const discard = app.root.querySelector<HTMLButtonElement>('[data-action="discard-trial"]');
+    expect(discard).not.toBeNull();
+    discard?.click();
+    expect(app.root.querySelector('[data-action="export-trial"]')).toBeNull();
+  } finally { app.cleanup(); }
+});
+
+it("does not acknowledge off-screen conversion text and waits for an on-screen conversion notice", () => {
+  const snapshot = snapshotFor(runningFixture(["rock", "scissors"]), "p1", 0);
+  const app = browserApp(snapshot);
+  const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
+  bounds.mockReturnValue(new DOMRect(16, 2000, 300, 60));
+  try {
+    const event: EngineEvent = { type: "conversion", attackerId: "p1", targetId: "p2", faction: "rock",
+      reason: null, hostId: null, oldFaction: null, eventSeq: 99, atMs: Date.now() };
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 5,
+      snapshot, trial: null, startChecking: false, events: [event], outcome: null });
+    app.raf.shift()?.(0); app.raf.shift()?.(16);
+    expect(app.frames.filter(f => JSON.parse(f).type === "feedback_seen")).toHaveLength(0);
+    bounds.mockImplementation(function (this: HTMLElement) {
+      return new DOMRect(16, this.closest(".conversion-notice") ? 20 : 2000, 300, 60);
+    });
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 6,
+      snapshot, trial: null, startChecking: false });
+    expect(app.root.querySelector(".conversion-notice")?.textContent).toContain("converted");
     app.raf.shift()?.(32); app.raf.shift()?.(48);
     expect(app.frames.filter(f => JSON.parse(f).type === "feedback_seen")).toHaveLength(1);
   } finally { app.cleanup(); }

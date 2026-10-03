@@ -47,6 +47,9 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
       if (message.type === "snapshot") {
         if (message.streamSeq <= cursor) return;
         cursor = message.streamSeq; needsSnapshot = false;
+        if (message.startChecking) {
+          for (const command of pending.values()) if (command.message.command.type === "start") command.attempts = 1;
+        }
         handlers.onMessage(message);
         if (changed && authenticated) requestProbe();
         return;
@@ -75,7 +78,12 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
         if (probeTimeout !== null) clearTimeout(probeTimeout);
         probeTimeout = null; status("connected", null);
       }
-      if (message.type === "update" && message.outcome) pending.delete(message.outcome.commandId);
+      if (message.type === "update") {
+        if (message.outcome) pending.delete(message.outcome.commandId);
+        if (message.startChecking) {
+          for (const command of pending.values()) if (command.message.command.type === "start") command.attempts = 1;
+        }
+      }
       if (message.type === "error") {
         if (message.code === "clock_invalid") requestProbe();
         if (message.code === "expired" || message.code === "unauthorized" || message.code === "auth_timeout") {
