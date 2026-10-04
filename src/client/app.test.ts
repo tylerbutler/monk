@@ -94,6 +94,17 @@ it("shows a north-up radar with player identities and location quality", () => {
   expect(root.textContent).not.toMatch(/latitude|longitude/);
 });
 
+it("does not invent a fresh age for unknown radar timestamps", () => {
+  const root = document.createElement("section");
+  const snapshot = snapshotFor(pulse(runningFixture(["rock", "paper"]), 0, [0, 21]).state, "p1", 0);
+  if (!snapshot.radar?.reference || !snapshot.radar.players[0].position) throw new Error("Missing radar fixture");
+  snapshot.radar.reference.ageMs = null;
+  snapshot.radar.players[0].position.ageMs = null;
+  renderMatch(root, snapshot, actions);
+  expect(root.textContent).toContain("Fix age unknown");
+  expect(root.textContent).not.toContain("Fix age 0.0 s");
+});
+
 it("does not place unknown locations or keep radar markers while paused", () => {
   const root = document.createElement("section");
   const state = pulse(runningFixture(["rock", "paper"]), 0, [0, 21]).state;

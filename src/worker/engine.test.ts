@@ -54,10 +54,10 @@ it.each([
   expect(JSON.stringify(snapshot)).not.toMatch(/latitude|longitude|capturedAtMs|expiresAtMs/);
 });
 
-it("removes expired, suspended, and inaccurate radar positions", () => {
+it("keeps approximate and expired radar points while filtering expired influence", () => {
   const fresh = pulse(runningFixture(["rock", "scissors"]), 0, [0, 21]).state;
   expect(snapshotFor(fresh, "p1", 1499).radar?.players[0].position).not.toBeNull();
-  expect(snapshotFor(fresh, "p1", 1500).radar?.reference).toBeNull();
+  expect(snapshotFor(fresh, "p1", 1500).radar?.reference).toMatchObject({ playerId: "p1", active: false });
   const influencing = pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state;
   expect(snapshotFor(influencing, "p1", 1500).outgoing).toBeNull();
   expect(snapshotFor(influencing, "p2", 1500).incoming).toHaveLength(0);
@@ -65,13 +65,13 @@ it("removes expired, suspended, and inaccurate radar positions", () => {
     nowMs: 1500, actor: null, commands: [], observations: [fix("p1", 0, 1500)],
   }).state;
   expect(snapshotFor(staleTarget, "p1", 1500).radar?.players[0]).toMatchObject({
-    position: null, reason: expect.stringMatching(/stale|unavailable/i),
+    position: null, reason: expect.stringMatching(/waiting/i),
   });
   const inaccurate = advanceEngine(fresh, {
     nowMs: 100, actor: null, commands: [], observations: [{ ...fix("p2", 21, 100), accuracyM: 4 }],
   }).state;
   expect(snapshotFor(inaccurate, "p1", 100).radar?.players[0]).toMatchObject({
-    position: null, reason: expect.stringMatching(/uncertainty/i),
+    position: { distanceM: 20, active: false }, reason: expect.stringMatching(/approximate/i),
   });
   expect(snapshotFor(suspendEngine(fresh, "p2"), "p1", 100).radar?.players[0].position).toBeNull();
 });
@@ -88,22 +88,36 @@ it("reports radar age from normalized expiry rather than the phone clock", () =>
   });
 });
 
-it("uses a named fresh reference only for an authorized spectator host", () => {
+it("uses a named peer reference for authorized viewers without a position", () => {
   const fresh = pulse(runningFixture(["rock", "scissors", "paper"]), 0, [0, 20, 40]).state;
   expect(snapshotFor(fresh, null, 100, true).radar?.reference?.playerId).toBe("p1");
   expect(snapshotFor(suspendEngine(fresh, "p1"), null, 100, true).radar?.reference?.playerId).toBe("p2");
   expect(snapshotFor(fresh, null, 100).radar).toBeNull();
   expect(snapshotFor(fresh, "unknown-player", 100).radar).toBeNull();
-  expect(snapshotFor(suspendEngine(fresh, "p1"), "p1", 100, true).radar?.reference).toBeNull();
+  expect(snapshotFor(suspendEngine(fresh, "p1"), "p1", 100, true).radar?.reference?.playerId).toBe("p2");
 });
 
-it("keeps radar positions out of inactive phases and normal-mode rounds", () => {
+it("shows waiting radar in lobby and paused phases, but not ended rooms", () => {
   const fresh = pulse(runningFixture(["rock", "scissors"]), 0, [0, 21]).state;
-  expect(snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0).radar).toBeNull();
-  expect(snapshotFor(command(fresh, 100, { type: "pause" }).state, "p1", 100).radar).toBeNull();
+  expect(snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0).radar?.reference).toBeNull();
+  expect(snapshotFor(command(fresh, 100, { type: "pause" }).state, "p1", 100).radar?.reference).toBeNull();
   expect(snapshotFor(command(fresh, 100, { type: "end" }).state, "p1", 100).radar).toBeNull();
-  expect(snapshotFor(runningFixture(["rock", "rock", "paper", "paper", "scissors", "scissors"], "normal"), "p1", 0).radar).toBeNull();
-  expect(snapshotFor(restoreEngine(checkpointEngine(fresh, 100), 200), "p1", 200).radar).toBeNull();
+  expect(snapshotFor(runningFixture(["rock", "rock", "paper", "paper", "scissors", "scissors"], "normal"), "p1", 0).radar?.reference?.playerId).toBe("p1");
+  expect(snapshotFor(restoreEngine(checkpointEngine(fresh, 100), 200), "p1", 200).radar?.reference).toBeNull();
+});
+
+it("projects retained old and unknown-age positions without exposing coordinates", () => {
+  const state = lobbyFixture(["rock", "paper", "scissors"]);
+  const positions = new Map([
+    ["p2", { report: { seq: 1, capturedAtMs: 100, latitude: 0, longitude: 0, accuracyM: 30, reportedAgeMs: 60000 },
+      receivedAtMs: 100000, sharing: true }],
+    ["p3", { report: { seq: 1, capturedAtMs: 100, latitude: 0, longitude: 20 / 6371000 * 180 / Math.PI,
+      accuracyM: 1, reportedAgeMs: null }, receivedAtMs: 100000, sharing: true }],
+  ]);
+  const radar = snapshotFor(state, "p1", 101000, false, positions).radar;
+  expect(radar).toMatchObject({ reference: { playerId: "p2", ageMs: 61000, accuracyM: 30, active: false },
+    players: [{ playerId: "p1", position: null }, { playerId: "p3", position: { distanceM: 20, ageMs: null, active: false } }] });
+  expect(JSON.stringify(radar)).not.toMatch(/latitude|longitude|capturedAtMs|receivedAtMs/);
 });
 
 it("requires continuous dwell", () => {

@@ -47,6 +47,7 @@ function factionIcon(parent: Element, faction: Faction) {
 function renderRadar(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean) {
   const radar = snapshot.radar;
   if (!radar) return;
+  const age = (ms: number | null) => ms === null ? "unknown" : `${(ms / 1000).toFixed(1)} s`;
   const section = document.createElement("section"); section.className = "player-radar";
   section.setAttribute("aria-label", "Player radar"); root.append(section);
   text(section, "h3", "Player radar");
@@ -106,7 +107,7 @@ function renderRadar(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean)
   const details = document.createElement("div"); layout.append(details);
   if (reference) {
     text(details, "p", reference.playerId === snapshot.ownPlayerId ? "Reference: you" : `Reference: ${label(reference.playerId)}`, "state-line");
-    text(details, "p", `GPS uncertainty ${reference.accuracyM} m. Fix age ${(reference.ageMs / 1000).toFixed(1)} s.`, "radar-note");
+    text(details, "p", `GPS uncertainty ${reference.accuracyM} m. Fix age ${age(reference.ageMs)}.`, "radar-note");
   } else text(details, "p", live ? radar.reason ?? "Reference location is unavailable." :
     "Live player updates are unavailable. Waiting for a fresh server update.", "warning");
   const list = document.createElement("ol"); list.className = "radar-players"; details.append(list);
@@ -119,7 +120,7 @@ function renderRadar(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean)
     if (live && p.position) {
       text(row, "p", p.position.distanceM === 0 ? "Within about 5 m." :
         `about ${p.position.distanceM} m ${directions[p.position.bearingDegrees / 45]}`);
-      text(row, "p", `GPS uncertainty ${p.position.accuracyM} m. Fix age ${(p.position.ageMs / 1000).toFixed(1)} s.`, "radar-note");
+      text(row, "p", `GPS uncertainty ${p.position.accuracyM} m. Fix age ${age(p.position.ageMs)}.`, "radar-note");
       if (snapshot.outgoing?.targetId === p.playerId) text(row, "p", "You are influencing this player.", "influence-label");
       if (snapshot.incoming.some(a => a.attackerId === p.playerId)) text(row, "p", "This player is influencing you.", "influence-label");
     } else text(row, "p", live ? p.reason ?? "Location is unavailable." : "Live location is unavailable.", "radar-note");

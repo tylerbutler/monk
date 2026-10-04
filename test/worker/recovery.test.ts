@@ -46,17 +46,18 @@ it("runs an optional lobby trial after migrating unset parameters and obtaining 
   expect(update.snapshot.parameters).toMatchObject({ entryRadiusM: 30, freshnessMs: 30000 });
   await Promise.all([probe(a), probe(b)]);
   const capturedAtMs = Date.now();
-  a.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
-  b.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 4 / 6371000 * 180 / Math.PI, accuracyM: 1 } });
+  a.send({ version: 1, type: "position", report: { reportedAgeMs: 0, seq: 1, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
+  b.send({ version: 1, type: "position", report: { reportedAgeMs: 0, seq: 1, capturedAtMs, latitude: 0, longitude: 4 / 6371000 * 180 / Math.PI, accuracyM: 1 } });
   const sample = await host.next("trial_sample");
   expect(sample.sample.distanceM).toBeCloseTo(4, 6);
   expect(JSON.stringify(sample)).not.toMatch(/latitude|longitude/);
   stranger.send({ version: 1, type: "snapshot_request" });
   await stranger.next("snapshot");
   expect(stranger.messages.filter(m => m.type === "trial_sample")).toHaveLength(0);
-  a.send({ version: 1, type: "position", report: { seq: 2, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
-  expect(await a.next("error")).toMatchObject({ code: "duplicate_fix" });
-  a.send({ version: 1, type: "position", report: { seq: 0, capturedAtMs: capturedAtMs + 1, latitude: 0, longitude: 0, accuracyM: 1 } });
+  a.send({ version: 1, type: "position", report: { reportedAgeMs: 0, seq: 2, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
+  a.send({ version: 1, type: "snapshot_request" });
+  expect((await a.next("snapshot")).snapshot.radar?.reference?.ageMs).toBeGreaterThanOrEqual(0);
+  a.send({ version: 1, type: "position", report: { reportedAgeMs: 0, seq: 0, capturedAtMs: capturedAtMs + 1, latitude: 0, longitude: 0, accuracyM: 1 } });
   expect(await a.next("error")).toMatchObject({ code: "old_sequence" });
 });
 
@@ -74,13 +75,13 @@ it("retains coordinate-free receipt gaps after trial observations expire", async
   for (;;) { if ((await host.next("update")).trial?.collecting) break; }
   await Promise.all([probe(a), probe(b)]);
   const capturedAtMs = Date.now();
-  a.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
-  b.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 0.0001, accuracyM: 1 } });
+  a.send({ version: 1, type: "position", report: { reportedAgeMs: 0, seq: 1, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
+  b.send({ version: 1, type: "position", report: { reportedAgeMs: 0, seq: 1, capturedAtMs, latitude: 0, longitude: 0.0001, accuracyM: 1 } });
   await host.next("trial_sample");
   await new Promise(resolve => setTimeout(resolve, 5250));
   const fresh = Date.now();
-  a.send({ version: 1, type: "position", report: { seq: 2, capturedAtMs: fresh, latitude: 0, longitude: 0, accuracyM: 1 } });
-  b.send({ version: 1, type: "position", report: { seq: 2, capturedAtMs: fresh, latitude: 0, longitude: 0.0001, accuracyM: 1 } });
+  a.send({ version: 1, type: "position", report: { reportedAgeMs: 0, seq: 2, capturedAtMs: fresh, latitude: 0, longitude: 0, accuracyM: 1 } });
+  b.send({ version: 1, type: "position", report: { reportedAgeMs: 0, seq: 2, capturedAtMs: fresh, latitude: 0, longitude: 0.0001, accuracyM: 1 } });
   const next = await host.next("trial_sample");
   expect(next.sample.updateGapsMs.every(g => g >= 5000)).toBe(true);
   const stub = env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode));

@@ -93,8 +93,8 @@ export async function runningMatch(roundDurationMs = 600000, overrides: Partial<
   if (!started.outcome?.accepted) throw new Error(started.outcome?.reason);
   await Promise.all([probe(host), probe(other)]);
   const capturedAtMs = Date.now();
-  host.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
-  other.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 100 / 6371000 * 180 / Math.PI, accuracyM: 1 } });
+  host.send({ version: 1, type: "position", report: { reportedAgeMs: 0, seq: 1, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
+  other.send({ version: 1, type: "position", report: { reportedAgeMs: 0, seq: 1, capturedAtMs, latitude: 0, longitude: 100 / 6371000 * 180 / Math.PI, accuracyM: 1 } });
   for (;;) { if ((await host.next("update")).snapshot.roster.every(p => p.active)) break; }
   return { credentials, host, other, ids };
 }

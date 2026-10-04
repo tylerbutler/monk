@@ -8,6 +8,8 @@ import type { MatchRecord } from "./storage";
 import { actorSchema, gamePreset, locationInactivityMs, parseClientMessage, serverMessageSchema } from "../shared/protocol";
 import type { ClockEstimate, ClockProbeSample, CommandOutcome, EngineEvent, FeedbackSummary, Observation, ServerBody, TrialStatus, VerifiedActor } from "../shared/protocol";
 import { estimateClock, normalizeObservation } from "../shared/clock";
+import { gameObservation } from "./locations";
+import type { KnownPosition } from "./locations";
 
 const attachmentSchema = z.strictObject({
   actor: actorSchema.nullable(), streamId: z.string(), streamSeq: z.number().int().nonnegative(),
@@ -25,6 +27,7 @@ export class MatchAuthority extends DurableObject<Env> {
   private authTimers = new Map<WebSocket, ReturnType<typeof setTimeout>>();
   private clocks = new Map<WebSocket, ClockSession>();
   private reports = new Map<string, { seq: number; capturedAtMs: number }>();
+  private lastKnownPositions = new Map<string, KnownPosition>();
   private measurements = new Map<string, Measurement>();
   private lastReceipts = new Map<string, number>();
   private trial: TrialStatus | null = null;
@@ -70,7 +73,7 @@ export class MatchAuthority extends DurableObject<Env> {
   }
   private view(actor: VerifiedActor) {
     if (!this.engine) throw new Error("Match engine is unavailable.");
-    return { ...snapshotFor(this.engine, actor.playerId, Date.now(), actor.host), feedback: this.feedbackSummary() };
+    return { ...snapshotFor(this.engine, actor.playerId, Date.now(), actor.host, this.lastKnownPositions), feedback: this.feedbackSummary() };
   }
   private feedbackSummary(): FeedbackSummary {
     const records = this.record?.feedback ?? [];
@@ -114,6 +117,7 @@ export class MatchAuthority extends DurableObject<Env> {
     await commitRecord(this.ctx.storage, record, next.events);
     this.record = { ...record, events: [...record.events, ...next.events] };
     this.engine = next.state;
+    if (record.checkpoint.phase === "ended") { this.lastKnownPositions.clear(); this.reports.clear(); }
     if (record.checkpoint.phase === "ended" || (record.checkpoint.phase === "paused" && !this.view({ id: "", host: false, playerId: null }).resumeChecking)) {
       this.trial = null; this.clearMeasurements();
     }
@@ -295,7 +299,12 @@ export class MatchAuthority extends DurableObject<Env> {
           (message.command.mode !== "test" || message.command.parameters.freshnessMs !== locationInactivityMs);
         const next: EngineTransition = unsupported
           ? { state: this.engine, events: [], rejections: [{ reason: "Use multiplayer rules with a 30-second location inactivity limit." }] }
-          : advanceEngine(this.engine, { nowMs: Date.now(), actor, commands: [message.command], observations: [] });
+          : advanceEngine(this.engine, { nowMs: Date.now(), actor, commands: [message.command],
+            observations: message.command.type === "start" || message.command.type === "begin_resume"
+              ? [...this.lastKnownPositions].flatMap(([id, position]) => {
+                const observation = gameObservation(position, id, Date.now());
+                return observation ? [observation] : [];
+              }) : [] });
         const outcome = { commandId: message.commandId, accepted: !next.rejections.length, reason: next.rejections[0]?.reason ?? "Command accepted." };
         try { await this.accept(next, outcome); } catch { this.error(socket, "storage_failed", "State was not saved. Retry the same command ID.", message.commandId); return; }
         if (outcome.accepted && (message.command.type === "begin_resume" || message.command.type === "cancel_resume" ||
@@ -353,32 +362,39 @@ export class MatchAuthority extends DurableObject<Env> {
         }
         const view = this.view(actor);
         const inTrial = this.trial?.collecting && this.trial.playerIds.includes(actor.playerId);
-        if (view.phase !== "running" && !view.resumeChecking && !inTrial) {
-          this.error(socket, "collection_stopped", "Location collection is stopped."); return;
-        }
-        const clockSession = this.clocks.get(socket);
-        if (!clockSession?.clock || Math.abs((Date.now() - clockSession.wallMs) - (performance.now() - clockSession.monotonicMs)) > 100) {
-          if (clockSession) clockSession.clock = null;
-          this.error(socket, "clock_invalid", "Clock changed or is not ready. Request a new probe."); return;
-        }
+        if (view.phase === "ended") { this.error(socket, "collection_stopped", "This room has ended."); return; }
         const previous = this.reports.get(actor.playerId);
         if (previous && message.report.seq <= previous.seq) { this.error(socket, "old_sequence", "Location sequence is out of order."); return; }
-        if (previous && message.report.capturedAtMs <= previous.capturedAtMs) { this.error(socket, "duplicate_fix", "Cached or repeated fixes do not refresh location."); return; }
-        const normalized = normalizeObservation(message.report, clockSession.clock, Date.now(), actor.playerId, inTrial ? 5000 : view.parameters?.freshnessMs ?? 0);
-        if (!normalized.ok) { this.error(socket, "fix_invalid", normalized.error); return; }
-        const gameplay = view.parameters ? normalizeObservation(message.report, clockSession.clock, Date.now(), actor.playerId, view.parameters.freshnessMs) : null;
-        const next = advanceEngine(this.engine, {
-          nowMs: Date.now(), actor: null, commands: [],
-          observations: gameplay?.ok ? [gameplay.value] : [],
+        const receivedAtMs = Date.now(), prior = this.lastKnownPositions.get(actor.playerId);
+        const repeated = prior?.report.capturedAtMs === message.report.capturedAtMs;
+        const known: KnownPosition = repeated && prior ? { ...prior, sharing: true } :
+          { report: message.report, receivedAtMs, sharing: true };
+        const gameplay = gameObservation(known, actor.playerId, receivedAtMs);
+        const next = advanceEngine(gameplay ? this.engine : suspendEngine(this.engine, actor.playerId), {
+          nowMs: receivedAtMs, actor: null, commands: [], observations: gameplay ? [gameplay] : [],
         });
         try { await this.accept(next); } catch { this.error(socket, "storage_failed", "Fix was not applied. Retry after reconnecting."); return; }
-        const receivedAtMs = Date.now(), previousReceiptMs = this.lastReceipts.get(actor.playerId);
-        this.reports.set(actor.playerId, { seq: message.report.seq, capturedAtMs: message.report.capturedAtMs });
-        this.lastReceipts.set(actor.playerId, receivedAtMs);
-        this.measurements.set(actor.playerId, { observation: normalized.value, receivedAtMs,
-          updateGapMs: previousReceiptMs === undefined ? 0 : Math.max(0, receivedAtMs - previousReceiptMs), clock: clockSession.clock });
+        if (this.record.checkpoint.phase !== "ended") {
+          this.reports.set(actor.playerId, { seq: message.report.seq, capturedAtMs: message.report.capturedAtMs });
+          this.lastKnownPositions.set(actor.playerId, known);
+        }
         this.broadcast(next.events);
-        if (inTrial) this.sendTrialSample();
+        if (inTrial && this.trial && !repeated) {
+          const clockSession = this.clocks.get(socket);
+          if (!clockSession?.clock || Math.abs((Date.now() - clockSession.wallMs) - (performance.now() - clockSession.monotonicMs)) > 100) {
+            this.error(socket, "diagnostic_clock_unavailable", "Location was shared. A clock check is needed only for measurements.");
+          } else {
+            const normalized = normalizeObservation(message.report, clockSession.clock, receivedAtMs, actor.playerId, 5000);
+            if (!normalized.ok) this.error(socket, "diagnostic_fix_invalid", `Location was shared. Measurement unavailable: ${normalized.error}`);
+            else {
+              const previousReceiptMs = this.lastReceipts.get(actor.playerId);
+              this.lastReceipts.set(actor.playerId, receivedAtMs);
+              this.measurements.set(actor.playerId, { observation: normalized.value, receivedAtMs,
+                updateGapMs: previousReceiptMs === undefined ? 0 : Math.max(0, receivedAtMs - previousReceiptMs), clock: clockSession.clock });
+              this.sendTrialSample();
+            }
+          }
+        }
         return;
       }
       if (message.type === "suspend" || message.type === "leave") {
@@ -389,6 +405,11 @@ export class MatchAuthority extends DurableObject<Env> {
         });
         const sessions = message.type === "leave" ? this.record.sessions.filter(s => s.playerId !== actor.playerId) : this.record.sessions;
         try { await this.accept(next, null, sessions); } catch { this.error(socket, "storage_failed", "Suspension was not saved. Stop local location collection."); return; }
+        if (message.type === "leave") { this.lastKnownPositions.delete(actor.playerId); this.reports.delete(actor.playerId); }
+        else {
+          const known = this.lastKnownPositions.get(actor.playerId);
+          if (known) this.lastKnownPositions.set(actor.playerId, { ...known, sharing: false });
+        }
         this.measurements.delete(actor.playerId);
         this.lastReceipts.delete(actor.playerId);
         if (this.trial?.playerIds.includes(actor.playerId)) { this.trial = null; this.clearMeasurements(); }
@@ -446,6 +467,8 @@ export class MatchAuthority extends DurableObject<Env> {
         if (!others) {
           const next = advanceEngine(suspendEngine(this.engine, actor.playerId), { nowMs: Date.now(), actor: null, commands: [], observations: [] });
           await this.accept(next);
+          const known = this.lastKnownPositions.get(actor.playerId);
+          if (known) this.lastKnownPositions.set(actor.playerId, { ...known, sharing: false });
           this.measurements.delete(actor.playerId);
           this.lastReceipts.delete(actor.playerId);
           if (this.trial?.playerIds.includes(actor.playerId)) { this.trial = null; this.clearMeasurements(); }
@@ -465,7 +488,7 @@ export class MatchAuthority extends DurableObject<Env> {
     await this.ctx.storage.deleteAll();
     this.record = null; this.engine = null;
     if (this.timer !== null) clearTimeout(this.timer);
-    this.timer = null; this.trial = null; this.clearMeasurements(); this.reports.clear(); this.clocks.clear();
+    this.timer = null; this.trial = null; this.clearMeasurements(); this.reports.clear(); this.clocks.clear(); this.lastKnownPositions.clear();
   }
   async alarm(): Promise<void> {
     await this.serialize(async () => {

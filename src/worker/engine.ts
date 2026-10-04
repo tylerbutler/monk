@@ -4,6 +4,8 @@ import { toList } from "../../rules/build/dev/javascript/monk_rules/gleam.mjs";
 import { None, Some } from "../../rules/build/dev/javascript/gleam_stdlib/gleam/option.mjs";
 import { checkpointSchema, engineInputSchema, eventSchema, snapshotSchema } from "../shared/protocol";
 import type { DomainCommand, EngineCheckpoint, EngineEvent, EngineInput, Faction, Observation, PlayerSnapshot, RuleParameters } from "../shared/protocol";
+import { gameObservation, positionAgeMs } from "./locations";
+import type { KnownPosition } from "./locations";
 
 export type EngineState = ReturnType<typeof rules.new_match>;
 const factions = { rock: d.Faction$Rock(), paper: d.Faction$Paper(), scissors: d.Faction$Scissors() };
@@ -76,50 +78,56 @@ export function restoreEngine(raw: EngineCheckpoint, nowMs: number): EngineState
     option(c.parameters && toParameters(c.parameters)), c.approved, c.deviceLimitations,
     toList(c.players.map(p => d.Player$Player(p.id, p.label, factions[p.faction], p.graceMs))), c.remainingMs, c.eventSeq), nowMs);
 }
-function radarFor(state: EngineState, c: EngineCheckpoint, playerId: string | null, nowMs: number, canHost: boolean): PlayerSnapshot["radar"] {
-  if (c.mode !== "test" || c.phase !== "running" || !c.parameters ||
-    (playerId === null ? !canHost : !c.players.some(p => p.id === playerId))) return null;
-  const observations = new Map(state.observations.toArray().map(p => [p.id, p]));
-  const maxAccuracy = c.parameters.maxAccuracyM;
-  const freshnessMs = c.parameters.freshnessMs;
-  function reason(id: string): string | null {
-    const p = observations.get(id);
-    if (!p || p.expires_at <= nowMs) return "Location is stale or unavailable.";
-    return p.accuracy > maxAccuracy ? "GPS uncertainty is above the round limit." : null;
-  }
-  const referenceId = playerId ?? c.players.find(p => reason(p.id) === null)?.id;
-  const reference = referenceId && reason(referenceId) === null ? observations.get(referenceId) : null;
-  // Expiry includes the phone clock offset and its uncertainty.
-  const quality = (p: d.Position$) => ({
-    ageMs: Math.max(0, freshnessMs - (p.expires_at - nowMs)), accuracyM: Math.ceil(p.accuracy),
+function radarFor(state: EngineState, c: EngineCheckpoint, playerId: string | null, nowMs: number, canHost: boolean,
+  retained?: ReadonlyMap<string, KnownPosition>): PlayerSnapshot["radar"] {
+  if (c.phase === "ended" || !c.parameters || !canHost && !c.players.some(p => p.id === playerId)) return null;
+  const maxAccuracy = c.parameters.maxAccuracyM, freshnessMs = c.parameters.freshnessMs;
+  const positions = retained ?? new Map(state.observations.toArray().map(p => [p.id, {
+    report: { seq: p.seq, capturedAtMs: p.captured_at, latitude: p.latitude, longitude: p.longitude,
+      accuracyM: p.accuracy, reportedAgeMs: Math.max(0, freshnessMs - (p.expires_at - nowMs)) },
+    receivedAtMs: nowMs, sharing: p.expires_at > nowMs,
+  }]));
+  const ownId = c.players.find(p => p.id === playerId)?.id;
+  const referenceId = ownId && positions.has(ownId) ? ownId : c.players.find(p => positions.has(p.id))?.id;
+  const reference = referenceId ? positions.get(referenceId) : undefined;
+  const quality = (p: KnownPosition, id: string) => ({
+    ageMs: positionAgeMs(p, nowMs), accuracyM: Math.ceil(p.report.accuracyM),
+    active: gameObservation(p, id, nowMs) !== null && p.report.accuracyM <= maxAccuracy,
   });
+  function reason(p: KnownPosition, id: string): string | null {
+    if (p.report.accuracyM > maxAccuracy) return "Location is approximate.";
+    if (positionAgeMs(p, nowMs) === null) return "Location age is unknown.";
+    return quality(p, id).active ? null : "Last-known position.";
+  }
   return {
-    reference: reference ? { playerId: reference.id, ...quality(reference) } : null,
-    reason: reference ? null : referenceId ? reason(referenceId) : "No player has a usable reference location.",
+    reference: reference && referenceId ? { playerId: referenceId, ...quality(reference, referenceId) } : null,
+    reason: reference ? null : "Waiting for a player to share location.",
     players: c.players.filter(p => p.id !== referenceId).map(player => {
-      const unavailable = reason(player.id);
-      const p = observations.get(player.id);
-      if (!reference || unavailable || !p) return {
-        playerId: player.id, position: null, reason: unavailable ?? "Reference location is unavailable.",
+      const p = positions.get(player.id);
+      if (!reference || !referenceId || !p) return {
+        playerId: player.id, position: null, reason: "Waiting for location.",
       };
       const radians = Math.PI / 180;
-      const a = reference.latitude * radians, b = p.latitude * radians;
-      const delta = (p.longitude - reference.longitude) * radians;
+      const a = reference.report.latitude * radians, b = p.report.latitude * radians;
+      const delta = (p.report.longitude - reference.report.longitude) * radians;
       const bearing = Math.atan2(Math.sin(delta) * Math.cos(b),
         Math.cos(a) * Math.sin(b) - Math.sin(a) * Math.cos(b) * Math.cos(delta)) / radians;
       return {
-        playerId: player.id, reason: null,
+        playerId: player.id, reason: reason(p, player.id),
         position: {
-          distanceM: Math.round(proximity.distance_between(reference, p) / 5) * 5,
+          distanceM: Math.round(distanceBetween(
+            { ...reference.report, playerId: referenceId, expiresAtMs: nowMs },
+            { ...p.report, playerId: player.id, expiresAtMs: nowMs }) / 5) * 5,
           bearingDegrees: Math.round(((bearing + 360) % 360) / 45) * 45 % 360,
-          ...quality(p),
+          ...quality(p, player.id),
         },
       };
     }),
   };
 }
 
-export function snapshotFor(state: EngineState, playerId: string | null, nowMs: number, canHost = false): PlayerSnapshot {
+export function snapshotFor(state: EngineState, playerId: string | null, nowMs: number, canHost = false,
+  positions?: ReadonlyMap<string, KnownPosition>): PlayerSnapshot {
   const v = rules.view_for(state, option(playerId), nowMs);
   const c = fromCheckpoint(v.state);
   const own = nullable(v.own);
@@ -142,7 +150,7 @@ export function snapshotFor(state: EngineState, playerId: string | null, nowMs: 
     qualityReasons: v.quality.toArray(), parameters: c.parameters, approved: c.approved,
     deviceLimitations: c.deviceLimitations,
     resumeChecking: v.resume_checking, canHost,
-    radar: radarFor(state, c, playerId, nowMs, canHost),
+    radar: radarFor(state, c, playerId, nowMs, canHost, positions),
   });
 }
 export function distanceBetween(a: Observation, b: Observation): number {

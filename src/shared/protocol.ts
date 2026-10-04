@@ -27,6 +27,7 @@ export const testDeviceLimitations = "Uncalibrated test preset; phone accuracy n
 export const positionSchema = z.strictObject({
   seq: time, capturedAtMs: time, latitude: z.number().finite().min(-90).max(90),
   longitude: z.number().finite().min(-180).max(180), accuracyM: positive.max(100000),
+  reportedAgeMs: time.nullable().optional(),
 });
 export type PositionReport = z.infer<typeof positionSchema>;
 export const observationSchema = positionSchema.extend({ playerId: id, expiresAtMs: time });
@@ -80,7 +81,7 @@ export const feedbackSummarySchema = z.strictObject({
   p95UpperMs: z.number().nonnegative().nullable(),
 });
 export type FeedbackSummary = z.infer<typeof feedbackSummarySchema>;
-const radarQualitySchema = z.strictObject({ ageMs: time, accuracyM: positive.int() });
+const radarQualitySchema = z.strictObject({ ageMs: time.nullable(), accuracyM: positive.int(), active: z.boolean() });
 const radarSchema = z.strictObject({
   reference: radarQualitySchema.extend({ playerId: id }).nullable(),
   reason: z.string().nullable(),

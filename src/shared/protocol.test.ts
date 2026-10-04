@@ -30,3 +30,13 @@ it("rejects invalid tracking parameters", () => {
   expect(parametersSchema.safeParse({ entryRadiusM: 12, retentionRadiusM: 10,
     maxAccuracyM: 3, freshnessMs: 1500, dwellMs: 3000, graceMs: 2000, roundDurationMs: 600000 }).success).toBe(false);
 });
+it.each([0, 29999, 30000, 60000, null])("accepts known or unknown position age %s", reportedAgeMs => {
+  expect(parseClientMessage({ version: 1, type: "position", report: {
+    seq: 1, capturedAtMs: 1, latitude: 0, longitude: 0, accuracyM: 100, reportedAgeMs,
+  } }).ok).toBe(true);
+});
+it.each([-1, 0.5, Infinity, NaN, Number.MAX_SAFE_INTEGER + 1])("rejects invalid position age %s", reportedAgeMs => {
+  expect(parseClientMessage({ version: 1, type: "position", report: {
+    seq: 1, capturedAtMs: 1, latitude: 0, longitude: 0, accuracyM: 1, reportedAgeMs,
+  } }).ok).toBe(false);
+});

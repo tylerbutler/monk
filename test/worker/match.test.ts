@@ -112,7 +112,136 @@ it("sends player-relative radar updates without retaining positions", async () =
   const record = await runInDurableObject(stub, (_, state) => loadRecord(state.storage));
   expect(JSON.stringify(record)).not.toMatch(/radar|latitude|longitude|bearingDegrees|distanceM/);
   const paused = await hostCommand(host, { type: "pause" });
-  expect(paused.snapshot.radar).toBeNull();
+  expect(paused.snapshot.radar?.reference?.playerId).toBe(ids[0]);
+});
+
+it("shares cached and approximate locations in lobby and pause without clock probes", async () => {
+  const credentials = await createMatch();
+  const host = await connect(credentials);
+  const peer = await connect(await joinMatch(credentials.matchCode));
+  const capturedAtMs = Date.now() - 60000;
+  host.send({ version: 1, type: "position", report: {
+    seq: 1, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 60, reportedAgeMs: 60000,
+  } });
+  peer.send({ version: 1, type: "position", report: {
+    seq: 1, capturedAtMs: Date.now(), latitude: 0, longitude: 0.0001, accuracyM: 1, reportedAgeMs: null,
+  } });
+  host.send({ version: 1, type: "snapshot_request" });
+  let snapshot = (await host.next("snapshot")).snapshot;
+  expect(snapshot.phase).toBe("lobby");
+  expect(snapshot.radar?.reference).toMatchObject({ accuracyM: 60, active: false });
+  expect(snapshot.radar?.reference?.ageMs).toBeGreaterThanOrEqual(60000);
+  expect(snapshot.radar?.players[0].position).toMatchObject({ ageMs: null, active: false });
+  await hostCommand(host, { type: "start" });
+  await hostCommand(host, { type: "pause" });
+  host.send({ version: 1, type: "position", report: {
+    seq: 2, capturedAtMs: Date.now(), latitude: 0, longitude: 0.0002, accuracyM: 1, reportedAgeMs: 0,
+  } });
+  host.send({ version: 1, type: "snapshot_request" });
+  snapshot = (await host.next("snapshot")).snapshot;
+  expect(snapshot).toMatchObject({ phase: "paused", outgoing: null, incoming: [],
+    radar: { reference: { ageMs: expect.any(Number), active: true } } });
+  expect(snapshot.roster.some(p => p.active)).toBe(true);
+  const record = await runInDurableObject(env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode)),
+    (_, state) => state.storage.get("record"));
+  expect(JSON.stringify(record)).not.toMatch(/latitude|longitude|radar|reportedAgeMs/);
+});
+
+it("expires both influence roles at thirty seconds and keeps last-known points after suspension", async () => {
+  let now = Date.now();
+  vi.spyOn(Date, "now").mockImplementation(() => now);
+  const { host, other, ids } = await runningMatch(600000, { dwellMs: 60000, graceMs: 1 });
+  await hostCommand(host, { type: "set_faction", playerId: ids[1], faction: "scissors" });
+  now += 2;
+  const capturedAtMs = now;
+  const send = (seq: number, capturedAt: number, reportedAgeMs: number) => {
+    host.send({ version: 1, type: "position", report: { seq, capturedAtMs: capturedAt,
+      latitude: 0, longitude: 0, accuracyM: 1, reportedAgeMs } });
+    other.send({ version: 1, type: "position", report: { seq, capturedAtMs: capturedAt,
+      latitude: 0, longitude: 4 / 6371000 * 180 / Math.PI, accuracyM: 1, reportedAgeMs } });
+    host.send({ version: 1, type: "snapshot_request" });
+  };
+  send(2, capturedAtMs, 0);
+  expect((await host.next("snapshot")).snapshot.outgoing?.targetId).toBe(ids[1]);
+  now += 29999;
+  send(3, capturedAtMs, 0);
+  let snapshot = (await host.next("snapshot")).snapshot;
+  expect(snapshot.radar?.reference).toMatchObject({ ageMs: 29999, active: true });
+  expect(snapshot.outgoing).not.toBeNull();
+  now += 1;
+  host.send({ version: 1, type: "snapshot_request" });
+  snapshot = (await host.next("snapshot")).snapshot;
+  expect(snapshot).toMatchObject({ phase: "running", outgoing: null,
+    radar: { reference: { ageMs: 30000, active: false }, players: [{ position: { distanceM: 5, active: false } }] } });
+  other.send({ version: 1, type: "snapshot_request" });
+  expect((await other.next("snapshot")).snapshot.incoming).toEqual([]);
+  send(4, now, 0);
+  expect((await host.next("snapshot")).snapshot.outgoing?.progress).toBe(0);
+  host.send({ version: 1, type: "suspend", reason: "Sharing stopped." });
+  host.send({ version: 1, type: "snapshot_request" });
+  snapshot = (await host.next("snapshot")).snapshot;
+  expect(snapshot.outgoing).toBeNull();
+  expect(snapshot.radar?.reference).toMatchObject({ playerId: ids[0], active: false });
+  host.send({ version: 1, type: "position", report: { seq: 5, capturedAtMs: now,
+    latitude: 0, longitude: 0, accuracyM: 1, reportedAgeMs: 0 } });
+  now += 30000;
+  host.send({ version: 1, type: "snapshot_request" });
+  expect((await host.next("snapshot")).snapshot.radar?.reference).toMatchObject({ ageMs: 30000, active: false });
+});
+
+it("retains disconnected points, removes leaving players and clears positions at end", async () => {
+  const { host, other, ids } = await runningMatch();
+  await new Promise<void>(resolve => { other.socket.addEventListener("close", () => resolve(), { once: true }); other.socket.close(); });
+  host.send({ version: 1, type: "snapshot_request" });
+  expect((await host.next("snapshot")).snapshot.radar?.players[0]).toMatchObject({
+    playerId: ids[1], position: { distanceM: 100, active: false },
+  });
+  host.send({ version: 1, type: "leave" });
+  host.send({ version: 1, type: "snapshot_request" });
+  const left = (await host.next("snapshot")).snapshot;
+  expect(left.roster.some(p => p.id === ids[0])).toBe(false);
+  expect(left.radar?.reference?.playerId).toBe(ids[1]);
+  expect(JSON.stringify(left.radar)).not.toContain(ids[0]);
+  expect((await hostCommand(host, { type: "end" })).snapshot.radar).toBeNull();
+});
+
+it("continues a valid encounter while a third player has no location", async () => {
+  const { credentials, host, other, ids } = await runningMatch(30000, { dwellMs: 300, graceMs: 1 });
+  await joinMatch(credentials.matchCode);
+  await hostCommand(host, { type: "set_faction", playerId: ids[1], faction: "scissors" });
+  await new Promise(resolve => setTimeout(resolve, 5));
+  const capturedAtMs = Date.now();
+  host.send({ version: 1, type: "position", report: { seq: 2, capturedAtMs,
+    latitude: 0, longitude: 0, accuracyM: 1, reportedAgeMs: 0 } });
+  other.send({ version: 1, type: "position", report: { seq: 2, capturedAtMs,
+    latitude: 0, longitude: 4 / 6371000 * 180 / Math.PI, accuracyM: 1, reportedAgeMs: 0 } });
+  let converted = await host.next("update");
+  while (!converted.events.some(e => e.type === "conversion")) converted = await host.next("update");
+  expect(converted.snapshot.phase).toBe("running");
+  expect(converted.snapshot.roster).toHaveLength(3);
+  expect(converted.snapshot.roster.filter(p => p.active)).toHaveLength(2);
+});
+
+it("does not publish an unsaved location and accepts a lower phone timestamp", async () => {
+  const credentials = await createMatch();
+  const host = await connect(credentials);
+  const stub = env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode));
+  const restore = await runInDurableObject(stub, (_, state) => {
+    const spy = vi.spyOn(state.storage, "transaction").mockRejectedValueOnce(new Error("disk failure"));
+    return () => spy.mockRestore();
+  });
+  host.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs: 100000,
+    latitude: 0, longitude: 0, accuracyM: 1, reportedAgeMs: 0 } });
+  expect((await host.next("error")).code).toBe("storage_failed");
+  restore();
+  host.send({ version: 1, type: "snapshot_request" });
+  expect((await host.next("snapshot")).snapshot.radar?.reference).toBeNull();
+  host.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs: 100000,
+    latitude: 0, longitude: 0, accuracyM: 1, reportedAgeMs: 0 } });
+  host.send({ version: 1, type: "position", report: { seq: 2, capturedAtMs: 90000,
+    latitude: 0, longitude: 0.0001, accuracyM: 1, reportedAgeMs: 0 } });
+  host.send({ version: 1, type: "snapshot_request" });
+  expect((await host.next("snapshot")).snapshot.radar?.reference?.active).toBe(true);
 });
 
 it("resolves a conversion and measures both visible-recipient acknowledgements", async () => {
@@ -120,8 +249,8 @@ it("resolves a conversion and measures both visible-recipient acknowledgements",
   await hostCommand(host, { type: "set_faction", playerId: ids[1], faction: "scissors" });
   await new Promise(resolve => setTimeout(resolve, 220));
   const capturedAtMs = Date.now();
-  host.send({ version: 1, type: "position", report: { seq: 2, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
-  other.send({ version: 1, type: "position", report: { seq: 2, capturedAtMs, latitude: 0, longitude: 4 / 6371000 * 180 / Math.PI, accuracyM: 1 } });
+  host.send({ version: 1, type: "position", report: { reportedAgeMs: 0, seq: 2, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
+  other.send({ version: 1, type: "position", report: { reportedAgeMs: 0, seq: 2, capturedAtMs, latitude: 0, longitude: 4 / 6371000 * 180 / Math.PI, accuracyM: 1 } });
   let converted = await host.next("update");
   while (!converted.events.some(e => e.type === "conversion")) converted = await host.next("update");
   const event = converted.events.find(e => e.type === "conversion");
@@ -232,8 +361,8 @@ it("counts missing feedback as a failed conversion rather than reporting success
   await hostCommand(host, { type: "set_faction", playerId: ids[1], faction: "scissors" });
   await new Promise(resolve => setTimeout(resolve, 220));
   const capturedAtMs = Date.now();
-  host.send({ version: 1, type: "position", report: { seq: 2, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
-  other.send({ version: 1, type: "position", report: { seq: 2, capturedAtMs, latitude: 0, longitude: 4 / 6371000 * 180 / Math.PI, accuracyM: 1 } });
+  host.send({ version: 1, type: "position", report: { reportedAgeMs: 0, seq: 2, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
+  other.send({ version: 1, type: "position", report: { reportedAgeMs: 0, seq: 2, capturedAtMs, latitude: 0, longitude: 4 / 6371000 * 180 / Math.PI, accuracyM: 1 } });
   let update = await host.next("update");
   while (!update.events.some(e => e.type === "conversion")) update = await host.next("update");
   const event = update.events.find(e => e.type === "conversion");
