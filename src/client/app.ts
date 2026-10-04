@@ -3,7 +3,8 @@ import { requestLocationPermission, startLocation } from "./location";
 import { startCompass } from "./compass";
 import type { CompassState } from "./compass";
 import { addTrialSample, exportTrialSummary, newTrialSummary } from "./trial";
-import { describeEvent, renderActivity, renderMatch, setRadarHeading } from "./views";
+import { describeEvent } from "./views";
+import { destroyMatch, renderActivity, renderMatch, setRadarHeading } from "./match-view.svelte";
 import { deviceSchema, sessionCredentialsSchema } from "../shared/protocol";
 import type { ConnectionStatus, EngineEvent, HostCommand, LocationStatus, MatchConnection, PlayerSnapshot, ServerMessage, SessionCredentials, TrialSample, TrialStatus, TrialSummary } from "../shared/protocol";
 
@@ -20,6 +21,8 @@ function field(parent: HTMLElement, label: string, name: string, type = "text", 
 }
 
 export function mountApp(root: HTMLElement): () => void {
+  const game = document.createElement("div");
+  game.className = "match-view";
   let credentials: SessionCredentials | null = null, connection: MatchConnection | null = null;
   let snapshot: PlayerSnapshot | null = null, trial: TrialStatus | null = null;
   let snapshotLive = false, snapshotReceivedAt = performance.now();
@@ -52,12 +55,7 @@ export function mountApp(root: HTMLElement): () => void {
   }
   function applyCompass() {
     if (disposed) return;
-    setRadarHeading(root, compass.headingDegrees);
-    const toggle = root.querySelector<HTMLButtonElement>('[data-action="compass"]');
-    if (toggle) toggle.setAttribute("aria-pressed", String(compass.enabled));
-    const status = root.querySelector<HTMLElement>("[data-compass-status]");
-    const label = compass.reason ?? (compass.enabled ? "Heading-up is on." : "North-up. Compass is off.");
-    if (status && status.textContent !== label) status.textContent = label;
+    setRadarHeading(game, compass.headingDegrees, compass);
   }
   function compassChanged(state: CompassState) {
     compass = state;
@@ -192,6 +190,7 @@ export function mountApp(root: HTMLElement): () => void {
     if (credentials?.matchCode !== next.matchCode) { pendingCommands.clear(); commandStatus = ""; consent = false; }
     cancelPermissionCheck(); stopCollection(); connection?.close();
     stopLiveUpdates();
+    destroyMatch(game);
     credentials = next; snapshot = null; trial = null; trialConsent = false; clockReady = false; error = ""; diagnosticStatus = "";
     try { sessionStorage.setItem("monk-session", JSON.stringify(next)); }
     catch { throw new Error("Session storage is unavailable. Allow storage to keep private credentials."); }
@@ -265,6 +264,7 @@ export function mountApp(root: HTMLElement): () => void {
     latest = null; summary = null; retained.clear(); disclosures.clear(); error = "";
     pendingCommands.clear(); pendingFeedback.clear(); acknowledged.clear(); feedback = [];
     conversionNotices = []; inviteStatus = "";
+    destroyMatch(game);
     sessionStorage.removeItem("monk-session"); render();
   }
   function readDevices(): TrialSummary {
@@ -370,6 +370,7 @@ export function mountApp(root: HTMLElement): () => void {
   }
   function render() {
     if (disposed) return;
+    const playing = snapshot?.phase === "running" || snapshot?.phase === "paused";
     if (!snapshot?.radar || snapshot.phase === "ended") { stopCompass?.(); stopCompass = null; }
     const active = document.activeElement;
     const focused = active instanceof HTMLElement ? active.id : "";
@@ -379,12 +380,15 @@ export function mountApp(root: HTMLElement): () => void {
       retained.set(input.id, { value: input.value, checked: input instanceof HTMLInputElement && input.checked });
     }
     for (const details of root.querySelectorAll<HTMLDetailsElement>("details[id]")) {
-      if (details.id === "room-invite" && details.dataset.phase !== (snapshot?.phase ?? "")) disclosures.delete(details.id);
+      if (details.id === "room-invite" && details.dataset.phase !== (snapshot?.phase ?? "") ||
+        details.id === "safe-play" && details.dataset.context !== (playing ? "game" : "setup")) disclosures.delete(details.id);
       else disclosures.set(details.id, details.open);
     }
     root.replaceChildren();
+    root.classList.toggle("in-game", playing);
     const header = document.createElement("header"); header.className = "masthead"; root.append(header);
     text(header, "h1", "Monk");
+    if (playing && credentials) text(header, "span", `Room ${credentials.matchCode}`, "room-code");
     if (snapshot && conversionNotices.length) {
       const notice = document.createElement("aside"); notice.className = "conversion-notice";
       notice.setAttribute("role", "status"); notice.setAttribute("aria-live", pendingFeedback.size ? "polite" : "off");
@@ -423,13 +427,17 @@ export function mountApp(root: HTMLElement): () => void {
         finally { submit.disabled = false; }
       });
     } else {
-      const top = document.createElement("div"); top.className = "match-heading"; root.append(top);
-      text(top, "h2", `Room ${credentials.matchCode}`);
+      const top = document.createElement("div"); top.className = "match-heading";
+      if (!playing) root.append(top);
+      const roomTools = document.createElement("details"); roomTools.id = "room-tools";
+      const tools = playing ? roomTools : top;
+      if (playing) { top.append(roomTools); text(roomTools, "summary", "Room & options").id = "room-tools-toggle"; }
+      text(tools, "h2", `Room ${credentials.matchCode}`);
       if (snapshot?.phase !== "ended") {
         const invite = new URL("/", window.location.origin); invite.searchParams.set("room", credentials.matchCode);
         const invites = document.createElement("details"); invites.id = "room-invite"; invites.open = snapshot?.phase === "lobby";
         invites.dataset.phase = snapshot?.phase ?? "";
-        top.append(invites); text(invites, "summary", "Invite players").id = "room-invite-toggle";
+        tools.append(invites); text(invites, "summary", "Invite players").id = "room-invite-toggle";
         const link = document.createElement("a"); link.href = invite.href; link.textContent = invite.href;
         link.className = "invite-link"; link.dataset.inviteLink = ""; link.target = "_blank"; link.rel = "noopener";
         link.id = "room-invite-link";
@@ -445,74 +453,69 @@ export function mountApp(root: HTMLElement): () => void {
       if (!snapshot) text(root, "p", "Connecting to the private match. Location is not collected.");
       if (snapshot) {
         if (snapshot.canHost && !snapshot.ownPlayerId && snapshot.phase !== "ended") {
-          button(top, "Join as a player on this phone", async () => {
+          button(tools, "Join as a player on this phone", async () => {
             if (!credentials) return;
             const player = await request(`/api/matches/${credentials.matchCode}/join`, { hostToken: credentials.hostToken });
             connect({ ...player, hostToken: credentials.hostToken });
           }, "host-join");
         }
-        const section = document.createElement("section"); root.append(section);
-        if (snapshot.ownPlayerId && snapshot.phase !== "ended") {
-          const known = snapshot.radar?.reference?.playerId === snapshot.ownPlayerId ||
-            snapshot.radar?.players.some(p => p.playerId === snapshot?.ownPlayerId && p.position);
-          text(section, "p", consent ? location.collecting ? known && location.permission === "granted" ?
+        const section = document.createElement("section"); section.className = "gameplay"; root.append(section);
+        const known = snapshot.radar?.reference?.playerId === snapshot.ownPlayerId ||
+          snapshot.radar?.players.some(p => p.playerId === snapshot?.ownPlayerId && p.position);
+        const locationLabel = snapshot.ownPlayerId && snapshot.phase !== "ended" ?
+          consent ? location.collecting ? known && location.permission === "granted" ?
             "Location sharing is on" : "Waiting for your location" :
-            "Sharing will resume when connected and visible." : "Location sharing is off", "location-sharing");
-          if (!consent) button(section, "Share location", () => {
-            error = ""; consent = true; reconcileCollection(); render();
-          }, "round-consent");
-          else button(section, "Stop sharing", () => {
-            consent = false; trialConsent = false; cancelPermissionCheck(); stopCollection(); render();
-          }, "stop-sharing", "secondary");
-        }
-        const game = document.createElement("div"); section.append(game);
+            "Sharing will resume when connected and visible." : "Location sharing is off" : null;
+        section.append(game);
         renderMatch(game, snapshot, {
           start: () => sendCommand({ type: "start" }), pause: () => sendCommand({ type: "pause" }),
           beginResume: () => sendCommand({ type: "begin_resume" }), cancelResume: () => sendCommand({ type: "cancel_resume" }),
           end: () => sendCommand({ type: "end" }), configure: sendCommand,
           setFaction: (playerId, faction) => sendCommand({ type: "set_faction", playerId, faction }), leave,
-        }, connectionStatus.state === "connected" && snapshotLive, Math.max(0, performance.now() - snapshotReceivedAt));
-        if (snapshot.radar && snapshot.phase !== "ended") {
-          const controls = document.createElement("div"); controls.className = "radar-controls";
-          controls.setAttribute("role", "group"); controls.setAttribute("aria-label", "Radar orientation");
-          game.querySelector("[data-radar-display]")?.before(controls);
-          button(controls, "Use compass", toggleCompass, "compass", "secondary");
-          const status = text(controls, "p", "", "radar-note"); status.dataset.compassStatus = "";
-          status.setAttribute("role", "status");
-        }
+        }, connectionStatus.state === "connected" && snapshotLive, Math.max(0, performance.now() - snapshotReceivedAt), {
+          locationLabel, sharing: consent, compass, toggleCompass,
+          shareLocation() { error = ""; consent = true; reconcileCollection(); render(); },
+          stopSharing() { consent = false; trialConsent = false; cancelPermissionCheck(); stopCollection(); render(); },
+        });
         applyCompass();
         if (commandStatus) { const notice = text(section, "p", commandStatus, "state-line"); notice.setAttribute("role", "status"); }
         for (const select of section.querySelectorAll<HTMLSelectElement>('[data-action="set-faction"]')) {
           select.disabled = [...pendingCommands.values()].some(c => c.type === "set_faction");
         }
         if (snapshot.ownPlayerId && typeof AudioContext !== "undefined" && !audio) {
-          button(section, "Enable sound cues", async () => {
+          button(tools, "Enable sound cues", async () => {
             audio = new AudioContext();
             try { await audio.resume(); } catch { showError("Sound could not start. Visual feedback stays on."); }
             render();
           }, "enable-audio", "secondary");
         }
+        game.querySelector("#location-trial")?.remove();
         if (snapshot.phase === "lobby" && snapshot.canHost) trialView(game.querySelector("#host-diagnostics") ?? game);
         else if (trial && snapshot.ownPlayerId && trial.playerIds.includes(snapshot.ownPlayerId)) trialView(root);
         if (feedback.length) {
-          const events = document.createElement("section"); events.className = "feedback"; events.setAttribute("aria-label", "Match feedback"); root.append(events);
-          text(events, "h3", "Match feedback");
+          const events = document.createElement("details"); events.id = "match-feedback"; events.className = "feedback";
+          events.setAttribute("aria-label", "Match feedback"); tools.append(events);
+          text(events, "summary", "Match feedback").id = "match-feedback-toggle";
           for (const event of [...feedback].reverse()) {
             const line = text(events, "p", describeEvent(event, snapshot));
             line.dataset.eventSeq = String(event.eventSeq);
           }
         }
       }
+      if (playing) root.append(top);
       if (connectionStatus.state === "failed") button(root, "Reconnect", () => { if (credentials) connect(credentials); }, "reconnect", "secondary");
-      button(root, "Leave room", leave, "leave", "secondary");
-      const status = document.createElement("section"); status.className = "status"; status.setAttribute("aria-label", "Device status"); root.append(status);
+      button(tools, "Leave room", leave, "leave", "secondary");
+      const status = document.createElement("section"); status.className = "status"; status.setAttribute("aria-label", "Device status");
+      (connectionStatus.state === "connected" && !location.reason ? tools : root).append(status);
       text(status, "p", `Connection: ${connectionStatus.state}${connectionStatus.state !== "connected" && connectionStatus.reason ? ` - ${connectionStatus.reason}` : ""}`);
       if (location.reason && location.reason !== error) text(status, "p", location.reason, "warning");
     }
     const safety = document.createElement("footer"); root.append(safety);
-    text(safety, "h3", "Location and safe play");
-    text(safety, "p", "Agree on a bounded outdoor area and safe routes. No running or touching is needed. You can leave without a gameplay penalty. Keep this app visible and the screen on.");
-    text(safety, "p", "Share location uses browser permission. Players and the host see approximate direction and distance, not raw opponent coordinates. Last-known positions stay on radar, but influence stops after 30 seconds without a new position. Sharing stops when this app is hidden or disconnected. Locations stay only in temporary server memory, not match records or exports. Rooms and credentials expire within 24 hours.");
+    const help = document.createElement("details"); help.id = "safe-play"; help.open = !playing; safety.append(help);
+    help.dataset.context = playing ? "game" : "setup";
+    text(help, "summary", "Location and safe play").id = "safe-play-toggle";
+    text(help, "p", "Agree on a bounded outdoor area and safe routes. No running or touching is needed. You can leave without a gameplay penalty. Keep this app visible and the screen on.");
+    text(help, "p", "Share location uses browser permission. Players and the host see approximate direction and distance, not raw opponent coordinates. Last-known positions stay on radar, but influence stops after 30 seconds without a new position. Sharing stops when this app is hidden or disconnected. Locations stay only in temporary server memory, not match records or exports. Rooms and credentials expire within 24 hours.");
     for (const input of root.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-retain]")) {
       const value = retained.get(input.id);
       if (value) { input.value = value.value; if (input instanceof HTMLInputElement) input.checked = value.checked; }
@@ -538,8 +541,7 @@ export function mountApp(root: HTMLElement): () => void {
   }
   document.addEventListener("visibilitychange", visibility);
   const ageInterval = setInterval(() => {
-    const activity = root.querySelector<HTMLElement>("[data-match-activity]");
-    if (snapshot && activity) renderActivity(activity, snapshot, connectionStatus.state === "connected" && snapshotLive,
+    if (snapshot) renderActivity(game, snapshot, connectionStatus.state === "connected" && snapshotLive,
       Math.max(0, performance.now() - snapshotReceivedAt));
     applyCompass();
     acknowledgeVisibleFeedback();
@@ -561,6 +563,7 @@ export function mountApp(root: HTMLElement): () => void {
     stopCompass?.(); stopCompass = null;
     clearInterval(ageInterval);
     if (audio) void audio.close().catch(() => console.warn("monk", "audio_close_failed"));
+    destroyMatch(game);
     document.removeEventListener("visibilitychange", visibility); root.replaceChildren();
   };
 }

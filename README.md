@@ -29,10 +29,15 @@ Commit `package-lock.json` and `rules/manifest.toml` when dependencies change.
 npm test && npm run typecheck && npm run build && npm run check:bundle
 ```
 
+The gameplay UI uses Svelte with Vite. The TypeScript controller owns network
+connections and device permissions. The gameplay component stays mounted across
+updates, so radar, focused controls, and open details stay in place.
+
 `npm test` compiles the real Gleam rules and runs unit/browser-API tests and
 tests in the Workers runtime. Worker tests first build the browser assets,
 so a clean clone does not need a pre-existing `dist/`. Type checks keep browser,
-Worker, browser-test, and Worker-test globals separate. `check:bundle` is a
+Worker, browser-test, and Worker-test globals separate, and check Svelte components.
+`check:bundle` is a
 Wrangler dry run; it does not deploy.
 
 The engine scenarios use synthetic positions. Production UI never generates
@@ -52,7 +57,8 @@ after edits. There is no separate Vite server, offline cache, or service worker.
 
 Enter an optional display name and select **Create room** or **Join room**.
 Blank names use numbered-player labels. The creator joins as a player.
-Share **Copy invite link** or the eight-character room code. Invitations
+Share **Copy invite link** or the eight-character room code. During play,
+open **Room & options**, then **Invite players**. Invitations
 remain available during play; new players can join running and paused rounds.
 New players get a grace period. Rooms hold at most 100 players.
 
@@ -73,10 +79,15 @@ leaving, ending, or a browser location failure stops local collection.
 The app ignores late callbacks after collection stops. A phone clock change
 does not stop ordinary reporting.
 
+The gameplay HUD groups your faction, round timer, radar, and conversion
+progress. Location sharing and compass controls stay below the radar on phones.
+The desktop view places progress and controls beside the radar.
+
 **Player radar** shows north-up directions, distance rounded to 5 m, and
 numbered faction markers. **T** marks a target faction, **!** marks a threat
-faction, and **=** marks your own faction. The faction guide and player list
-name these roles. Roles do not confirm an attack. Your last-known position
+faction, and **=** marks your own faction. The compact guide names your target
+and threat. Open **Players & radar details** for names, distances, GPS uncertainty,
+update ages, and the full legend. Roles do not confirm an attack. Your last-known position
 is the reference.
 Without your position, the radar identifies a known peer reference by name.
 An absent position shows a waiting state. Old and approximate positions
@@ -122,17 +133,20 @@ command IDs do not apply a change twice.
 
 Default settings: 30 m entry radius, 40 m retention radius, 15 m uncertainty
 limit, two-second dwell, three-second grace, and a ten-minute round.
-The host can change these under **Advanced settings** before starting.
+The host can change these under **Host controls > Advanced settings** before starting.
 Retention must be at least entry radius. Settings stay fixed while running
 or paused. The 30-second inactivity rule is fixed; no mode or approval step
-is part of game setup. Agree on safe routes and a bounded play area in person.
+is part of game setup. **Start game** and **Resume round** stay outside the
+closed host controls. Sound cues, match feedback, and **Leave room** are under
+**Room & options** during play. **Location and safe play** contains the full help.
+Agree on safe routes and a bounded play area in person.
 
 Private tokens stay in `sessionStorage` and authenticate the first WebSocket
 frame, not the URL. Invite links contain only the room code. Do not share tokens.
 
 ## Optional two-iPhone measurements
 
-Open **Host diagnostics**, then **Optional location measurement** in the lobby.
+Open **Host controls > Host diagnostics**, then **Optional location measurement** in the lobby.
 Follow [the physical trial checklist](docs/playtests/two-iphone-trial.md).
 Measurements require a deployed HTTPS origin; an insecure LAN IP is not a
 substitute. API, assets, and sockets must share one origin.

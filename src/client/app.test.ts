@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { mountApp } from "./app";
-import { describeEvent, renderMatch } from "./views";
+import { describeEvent } from "./views";
+import { destroyMatch, renderMatch as updateMatch } from "./match-view.svelte";
 import type { MatchActions } from "./views";
 import { snapshotFor } from "../worker/engine";
 import { command, lobbyFixture, pulse, runningFixture } from "../../test/fixtures";
@@ -11,6 +12,14 @@ const actions: MatchActions = {
   start: vi.fn(), pause: vi.fn(), beginResume: vi.fn(), cancelResume: vi.fn(), end: vi.fn(),
   configure: vi.fn(), setFaction: vi.fn(), leave: vi.fn(),
 };
+const mountedViews = new Set<HTMLElement>();
+function renderMatch(...args: Parameters<typeof updateMatch>) {
+  mountedViews.add(args[0]); updateMatch(...args);
+}
+afterEach(() => {
+  for (const root of mountedViews) destroyMatch(root);
+  mountedViews.clear();
+});
 
 it("explains location use and offers private creation and joining without collecting", () => {
   sessionStorage.clear();
@@ -47,6 +56,22 @@ it("shows a direct resume action with frozen paused settings", () => {
   expect(root.textContent).not.toContain("Freshness check");
   expect(root.querySelector('[data-action="configure"]')).toBeNull();
   expect(root.querySelector('[data-action="begin-resume"]')?.textContent).toBe("Resume round");
+});
+it("updates gameplay without replacing a focused control or closing its disclosure", () => {
+  const root = document.createElement("section"); document.body.append(root);
+  const snapshot = { ...snapshotFor(runningFixture(["rock", "paper"]), "p1", 0), canHost: true };
+  renderMatch(root, snapshot, actions);
+  const details = root.querySelector<HTMLDetailsElement>("#faction-controls");
+  const select = root.querySelector<HTMLSelectElement>("#faction-p1");
+  if (!details || !select) throw new Error("Missing faction controls");
+  details.open = true; select.focus();
+  try {
+    renderMatch(root, { ...snapshot, remainingMs: 123000 }, actions);
+    expect(root.querySelector("#faction-p1")).toBe(select);
+    expect(document.activeElement).toBe(select);
+    expect(details.open).toBe(true);
+    expect(root.querySelector(".round-clock")?.textContent).toContain("2:03");
+  } finally { root.remove(); }
 });
 it("keeps optional settings closed and disables redundant factions", () => {
   const root = document.createElement("section");
@@ -112,7 +137,7 @@ it.each([
     expect(row?.getAttribute("data-relationship")).toBe(relationship);
     expect(row?.textContent).toContain(labels[relationship]);
   });
-  expect(root.querySelector(".radar-guide")?.textContent).toContain("Faction roles only");
+  expect(root.querySelector("#radar-details")?.textContent).toContain("Faction roles only");
   expect(root.querySelector(".radar-link")).toBeNull();
   expect(root.querySelector(".radar-progress")).toBeNull();
 });
@@ -307,6 +332,70 @@ function browserApp(snapshot: ReturnType<typeof snapshotFor>) {
     cleanup(); root.remove(); sessionStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals();
   } };
 }
+
+it("keeps radar and every active conversion in the HUD with secondary information closed", () => {
+  const snapshot = { ...snapshotFor(pulse(runningFixture(["rock", "paper", "paper", "scissors"]),
+    0, [0, 4, -4, 3]).state, "p1", 500), canHost: true };
+  const app = browserApp(snapshot);
+  try {
+    const hud = app.root.querySelector(".game-hud");
+    expect(hud?.querySelector("[data-radar]")).not.toBeNull();
+    expect(hud?.querySelectorAll("progress")).toHaveLength(3);
+    expect(hud?.querySelector('[data-action="round-consent"]')?.closest("details")).toBeNull();
+    expect(hud?.querySelector('[data-action="compass"]')?.closest("details")).toBeNull();
+    const details = app.root.querySelector<HTMLDetailsElement>("#radar-details");
+    expect(details?.open).toBe(false);
+    expect(details?.querySelectorAll(".radar-players li")).toHaveLength(3);
+    expect(app.root.querySelector<HTMLDetailsElement>("#host-tools")?.open).toBe(false);
+    expect(app.root.querySelector<HTMLDetailsElement>("#room-tools")?.open).toBe(false);
+    expect(hud?.querySelector(".roster")).toBeNull();
+  } finally { app.cleanup(); }
+});
+
+it("keeps the HUD and its open player details stable through age and authority updates", () => {
+  vi.useFakeTimers();
+  const snapshot = { ...snapshotFor(runningFixture(["rock", "paper"]), "p1", 100), canHost: true };
+  const app = browserApp(snapshot);
+  try {
+    const details = app.root.querySelector<HTMLDetailsElement>("#radar-details");
+    const toggle = app.root.querySelector<HTMLElement>("#radar-details-toggle");
+    const radar = app.root.querySelector("[data-radar]");
+    if (!details || !toggle || !radar) throw new Error("HUD details are missing");
+    details.open = true; toggle.focus();
+    vi.advanceTimersByTime(250);
+    expect(app.root.querySelector("#radar-details")).toBe(details);
+    expect(details.open).toBe(true);
+    expect(document.activeElement).toBe(toggle);
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
+      snapshot, trial: null, startChecking: false });
+    expect(app.root.querySelector("[data-radar]")).toBe(radar);
+    expect(app.root.querySelector("#radar-details")).toBe(details);
+    expect(details.open).toBe(true);
+    expect(document.activeElement).toBe(toggle);
+    app.root.querySelector<HTMLButtonElement>('[data-action="leave"]')?.click();
+    expect(app.root.querySelector(".game-hud")).toBeNull();
+    vi.advanceTimersByTime(500);
+    expect(app.root.querySelector("[data-radar]")).toBeNull();
+  } finally { app.cleanup(); vi.useRealTimers(); }
+});
+
+it("closes setup help on entering gameplay and then retains the player's choice", () => {
+  const lobby = { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true };
+  const running = { ...snapshotFor(runningFixture(["rock", "paper"]), "p1", 0), canHost: true };
+  const app = browserApp(lobby);
+  try {
+    expect(app.root.querySelector<HTMLDetailsElement>("#safe-play")?.open).toBe(true);
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
+      snapshot: running, trial: null, startChecking: false });
+    const help = app.root.querySelector<HTMLDetailsElement>("#safe-play");
+    expect(help?.open).toBe(false);
+    if (!help) throw new Error("Help is missing");
+    help.open = true;
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 6,
+      snapshot: running, trial: null, startChecking: false });
+    expect(app.root.querySelector<HTMLDetailsElement>("#safe-play")?.open).toBe(true);
+  } finally { app.cleanup(); }
+});
 
 type CompassReading = {
   absolute?: boolean; alpha?: number | null; beta?: number | null; gamma?: number | null;
@@ -522,6 +611,7 @@ it("stops compass sensing when hidden and clears sensor timers on cleanup", asyn
     expect(app.root.querySelector('[data-action="compass"]')?.getAttribute("aria-pressed")).toBe("false");
   } finally {
     app.cleanup();
+    await vi.advanceTimersByTimeAsync(0);
     expect(vi.getTimerCount()).toBe(0);
     Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
     vi.useRealTimers();
@@ -717,7 +807,7 @@ it("reconnects unresolved host changes with their original ID and releases contr
   try {
     const select = app.root.querySelector<HTMLSelectElement>('[data-action="set-faction"]');
     if (!select) throw new Error("Host faction control missing");
-    select.value = "paper"; select.dispatchEvent(new Event("change"));
+    select.value = "paper"; select.dispatchEvent(new Event("change", { bubbles: true }));
     const original = app.frames.map(f => JSON.parse(f)).find(m => m.type === "host_command");
     vi.advanceTimersByTime(7500);
     const reconnect = app.root.querySelector<HTMLButtonElement>('[data-action="reconnect"]');
@@ -734,6 +824,26 @@ it("reconnects unresolved host changes with their original ID and releases contr
       outcome: { commandId: original.commandId, accepted: true, reason: "Original change accepted." } });
     expect(app.root.querySelector<HTMLSelectElement>('[data-action="set-faction"]')?.disabled).toBe(false);
   } finally { app.cleanup(); vi.useRealTimers(); }
+});
+
+it("restores the authoritative faction after rejection so the host can retry it", () => {
+  const snapshot = { ...snapshotFor(runningFixture(["rock", "scissors"]), "p1", 0), canHost: true };
+  const app = browserApp(snapshot);
+  try {
+    const select = app.root.querySelector<HTMLSelectElement>("#faction-p1");
+    if (!select) throw new Error("Faction control is missing");
+    select.value = "paper"; select.dispatchEvent(new Event("change", { bubbles: true }));
+    const sent = app.frames.map(frame => JSON.parse(frame)).find(frame => frame.type === "host_command");
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 5,
+      snapshot, trial: null, startChecking: false, events: [],
+      outcome: { commandId: sent.commandId, accepted: false, reason: "Faction change was rejected." } });
+    expect(select.disabled).toBe(false);
+    expect(select.value).toBe("rock");
+    expect(app.root.textContent).toContain("Faction change was rejected.");
+    select.value = "paper"; select.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(app.frames.map(frame => JSON.parse(frame)).filter(frame =>
+      frame.type === "host_command" && frame.command.faction === "paper")).toHaveLength(2);
+  } finally { app.cleanup(); }
 });
 
 it("preserves grouped measurements between reference blocks and requires explicit discard for different device details", () => {
@@ -910,6 +1020,7 @@ it("opens invalid advanced settings instead of hiding the field that needs corre
     dwell.value = "0";
     expect(form.reportValidity()).toBe(false);
     expect(app.root.querySelector<HTMLDetailsElement>("#advanced-settings")?.open).toBe(true);
+    expect(app.root.querySelector<HTMLDetailsElement>("#host-tools")?.open).toBe(true);
     expect(app.frames.some(f => JSON.parse(f).type === "host_command")).toBe(false);
   } finally { app.cleanup(); }
 });
