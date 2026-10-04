@@ -18,6 +18,7 @@ function text(parent: HTMLElement, tag: string, value: string, className = "") {
 }
 function control(parent: HTMLElement, label: string, action: () => void, name: string, secondary = false) {
   const button = document.createElement("button"); button.type = "button"; button.textContent = label;
+  button.id = `action-${name}`;
   button.dataset.action = name; button.className = secondary ? "secondary" : "";
   button.addEventListener("click", action); parent.append(button); return button;
 }
@@ -153,7 +154,7 @@ export function describeEvent(event: EngineEvent, snapshot: PlayerSnapshot): str
     case "lifecycle": return event.reason ?? "Match state changed.";
   }
 }
-export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions: MatchActions, live = true, elapsedMs = 0): void {
+export function renderActivity(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean, elapsedMs: number): void {
   root.replaceChildren();
   const quality = (id: string) => snapshot.radar?.reference?.playerId === id ? snapshot.radar.reference :
     snapshot.radar?.players.find(p => p.playerId === id)?.position ?? null;
@@ -161,16 +162,7 @@ export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions
     isCurrentPosition(quality(attack.attackerId), elapsedMs) && isCurrentPosition(quality(attack.targetId), elapsedMs);
   snapshot = { ...snapshot, outgoing: snapshot.outgoing && eligible(snapshot.outgoing) ? snapshot.outgoing : null,
     incoming: snapshot.incoming.filter(eligible) };
-  text(root, "h2", snapshot.phase === "lobby" ? "Waiting room" : snapshot.phase === "paused" ? "Paused" :
-    snapshot.phase === "ended" ? "Round ended" : "Round running");
-  if (snapshot.ownFaction) {
-    const own = document.createElement("div"); own.className = "own-faction"; root.append(own);
-    factionIcon(own, snapshot.ownFaction);
-    text(own, "strong", names[snapshot.ownFaction]); text(root, "p", `${names[snapshot.ownFaction]} converts ${targets[snapshot.ownFaction]}.`);
-  } else if (!snapshot.ownFaction) text(root, "p", "Host view. Join as a player to participate.");
   if (snapshot.phase !== "lobby") {
-    text(root, "p", `Round time: ${clock(snapshot.remainingMs)}`, "round-clock");
-    if (snapshot.graceMs) text(root, "p", `Grace: ${clock(snapshot.graceMs)}. You cannot attack or be attacked.`);
     function attack(progress: NonNullable<PlayerSnapshot["outgoing"]>, outgoing: boolean) {
       const name = snapshot.roster.find(p => p.id === (outgoing ? progress.targetId : progress.attackerId))?.label ?? "Player";
       const label = outgoing ? `Influencing ${name}` : `${name} is influencing you`;
@@ -186,6 +178,22 @@ export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions
     }
   }
   if (snapshot.phase !== "ended") renderRadar(root, snapshot, live, elapsedMs);
+}
+export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions: MatchActions, live = true, elapsedMs = 0): void {
+  root.replaceChildren();
+  text(root, "h2", snapshot.phase === "lobby" ? "Waiting room" : snapshot.phase === "paused" ? "Paused" :
+    snapshot.phase === "ended" ? "Round ended" : "Round running");
+  if (snapshot.ownFaction) {
+    const own = document.createElement("div"); own.className = "own-faction"; root.append(own);
+    factionIcon(own, snapshot.ownFaction);
+    text(own, "strong", names[snapshot.ownFaction]); text(root, "p", `${names[snapshot.ownFaction]} converts ${targets[snapshot.ownFaction]}.`);
+  } else text(root, "p", "Host view. Join as a player to participate.");
+  if (snapshot.phase !== "lobby") {
+    text(root, "p", `Round time: ${clock(snapshot.remainingMs)}`, "round-clock");
+    if (snapshot.graceMs) text(root, "p", `Grace: ${clock(snapshot.graceMs)}. You cannot attack or be attacked.`);
+  }
+  const activity = document.createElement("div"); activity.dataset.matchActivity = ""; root.append(activity);
+  renderActivity(activity, snapshot, live, elapsedMs);
   {
     text(root, "h3", `Players (${snapshot.roster.length})`);
     const roster = document.createElement("ul"); roster.className = "roster"; root.append(roster);

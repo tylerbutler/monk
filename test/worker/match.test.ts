@@ -244,6 +244,95 @@ it("does not publish an unsaved location and accepts a lower phone timestamp", a
   expect((await host.next("snapshot")).snapshot.radar?.reference?.active).toBe(true);
 });
 
+it.each(["clock backstep", "receipt delay"])("keeps A-B-A capture deadlines through %s", async cause => {
+  let now = Date.now();
+  vi.spyOn(Date, "now").mockImplementation(() => now);
+  const { host, other, ids } = await runningMatch(600000, { dwellMs: 60000, graceMs: 1 });
+  await hostCommand(host, { type: "set_faction", playerId: ids[1], faction: "scissors" });
+  now += 2;
+  const first = now;
+  const report = (seq: number, capturedAtMs: number, reportedAgeMs: number) => {
+    host.send({ version: 1, type: "position", report: { seq, capturedAtMs, reportedAgeMs,
+      latitude: 0, longitude: 0, accuracyM: 1 } });
+    other.send({ version: 1, type: "position", report: { seq, capturedAtMs: now, reportedAgeMs: 0,
+      latitude: 0, longitude: 4 / 6371000 * 180 / Math.PI, accuracyM: 1 } });
+    host.send({ version: 1, type: "snapshot_request" });
+  };
+  report(2, first, 0);
+  expect((await host.next("snapshot")).snapshot.outgoing).not.toBeNull();
+  now = first + (cause === "clock backstep" ? 20000 : 1000);
+  report(3, first + (cause === "clock backstep" ? 9000 : 1000), 0);
+  expect((await host.next("snapshot")).snapshot.radar?.reference?.active).toBe(true);
+  host.send({ version: 1, type: "suspend", reason: "Sharing stopped." });
+  host.send({ version: 1, type: "snapshot_request" });
+  await host.next("snapshot");
+  now = first + 31000;
+  report(4, first, 20000);
+  const snapshot = (await host.next("snapshot")).snapshot;
+  expect(snapshot).toMatchObject({ outgoing: null, radar: { reference: { ageMs: 31000, active: false } } });
+});
+
+it("records conversion recipients when a late join resolves mature influence", async () => {
+  let now = Date.now();
+  vi.spyOn(Date, "now").mockImplementation(() => now);
+  const { credentials, host, other, ids } = await runningMatch(600000, { dwellMs: 3000, graceMs: 1 });
+  await hostCommand(host, { type: "set_faction", playerId: ids[1], faction: "scissors" });
+  now += 2;
+  host.send({ version: 1, type: "position", report: { seq: 2, capturedAtMs: now, reportedAgeMs: 0,
+    latitude: 0, longitude: 0, accuracyM: 1 } });
+  other.send({ version: 1, type: "position", report: { seq: 2, capturedAtMs: now, reportedAgeMs: 0,
+    latitude: 0, longitude: 4 / 6371000 * 180 / Math.PI, accuracyM: 1 } });
+  host.send({ version: 1, type: "snapshot_request" });
+  expect((await host.next("snapshot")).snapshot.outgoing).not.toBeNull();
+  const stub = env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode));
+  const result = await runInDurableObject(stub, async (instance, state) => {
+    const timer: unknown = Reflect.get(instance, "timer");
+    if (typeof timer === "number") clearTimeout(timer);
+    Reflect.set(instance, "timer", null);
+    now += 3000;
+    const response = await instance.fetch(new Request(`https://monk.test/api/matches/${credentials.matchCode}/join`, {
+      method: "POST", body: "{}",
+    }));
+    const record = await loadRecord(state.storage);
+    return { status: response.status, conversions: record?.events.filter(e => e.type === "conversion"), feedback: record?.feedback };
+  });
+  expect(result.status).toBe(201);
+  expect(result.conversions).toHaveLength(1);
+  expect(result.feedback).toMatchObject([{ recipients: [
+    { playerId: ids[0], seenAfterMs: null }, { playerId: ids[1], seenAfterMs: null },
+  ] }]);
+  const eventSeq = result.conversions?.[0]?.eventSeq;
+  if (eventSeq === undefined) throw new Error("Join conversion missing");
+  host.send({ version: 1, type: "feedback_seen", eventSeq });
+  other.send({ version: 1, type: "feedback_seen", eventSeq });
+  host.send({ version: 1, type: "snapshot_request" });
+  let snapshot = await host.next("snapshot");
+  while (snapshot.snapshot.feedback?.acknowledged !== 2) {
+    host.send({ version: 1, type: "snapshot_request" }); snapshot = await host.next("snapshot");
+  }
+  expect(snapshot.snapshot.feedback).toMatchObject({ conversions: 1, intended: 2, acknowledged: 2, conversionsWithinOneSecond: 1 });
+  expect(host.messages.filter(m => m.type === "error")).toEqual([]);
+});
+it("bounds capture timing memory without keeping past coordinates", async () => {
+  const credentials = await createMatch();
+  await connect(credentials);
+  const stub = env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode));
+  const result = await runInDurableObject(stub, async (instance, state) => {
+    const socket = state.getWebSockets()[0];
+    if (!socket) throw new Error("Authenticated socket missing");
+    for (let seq = 1; seq <= 513; seq++) await instance.webSocketMessage(socket, JSON.stringify({
+      version: 1, type: "position", report: { seq, capturedAtMs: seq, reportedAgeMs: 0,
+        latitude: 0, longitude: 0, accuracyM: 1 },
+    }));
+    const histories: unknown = Reflect.get(instance, "captureTimings");
+    const timings: unknown = histories instanceof Map ? histories.values().next().value : null;
+    return timings instanceof Map ? { count: timings.size, fields: Object.keys(timings.values().next().value) } : { count: 0, fields: [] };
+  });
+  expect(result.count).toBeGreaterThan(0);
+  expect(result.count).toBeLessThanOrEqual(512);
+  expect(result.fields.sort()).toEqual(["receivedAtMs", "reportedAgeMs"]);
+});
+
 it("resolves a conversion and measures both visible-recipient acknowledgements", async () => {
   const { host, other, ids } = await runningMatch(30000, { dwellMs: 300, graceMs: 200 });
   await hostCommand(host, { type: "set_faction", playerId: ids[1], faction: "scissors" });

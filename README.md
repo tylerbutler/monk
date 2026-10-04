@@ -186,6 +186,10 @@ commit before broadcast. Player messages omit raw opponent coordinates.
 Radar sends rounded relative distance, compass direction, position age,
 uncertainty, and activity. Raw fixes, last-known positions, and unfinished dwell stay in memory; they are not saved
 in match records, routine logs, or exports.
+The authority also keeps up to 512 recent capture timing records per player,
+without past coordinates, to preserve original deadlines across replacement
+and suspension. After eviction, older captures rely on their reported age.
+This metadata stays in memory and clears on leave, end, expiry, or restart.
 
 An authority restart recovers a running round as paused with its last committed
 remaining duration. It discards locations and dwell. Resume is direct;

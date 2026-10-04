@@ -1,7 +1,7 @@
 import { connectMatch } from "./connection";
 import { requestLocationPermission, startLocation } from "./location";
 import { addTrialSample, exportTrialSummary, newTrialSummary } from "./trial";
-import { describeEvent, renderMatch } from "./views";
+import { describeEvent, renderActivity, renderMatch } from "./views";
 import { deviceSchema, sessionCredentialsSchema } from "../shared/protocol";
 import type { ConnectionStatus, EngineEvent, HostCommand, LocationStatus, MatchConnection, PlayerSnapshot, ServerMessage, SessionCredentials, TrialSample, TrialStatus, TrialSummary } from "../shared/protocol";
 
@@ -49,6 +49,7 @@ export function mountApp(root: HTMLElement): () => void {
   function button(parent: HTMLElement, label: string, action: () => void | Promise<void>, name: string, className = "") {
     const node = document.createElement("button");
     node.type = "button"; node.textContent = label; node.dataset.action = name; node.className = className;
+    node.id = `action-${name}`;
     node.addEventListener("click", async () => {
       node.disabled = true;
       try { await action(); } catch (failure) { showError(failure instanceof Error ? failure.message : "Request failed. Try again."); }
@@ -399,6 +400,7 @@ export function mountApp(root: HTMLElement): () => void {
         top.append(invites); text(invites, "summary", "Invite players").id = "room-invite-toggle";
         const link = document.createElement("a"); link.href = invite.href; link.textContent = invite.href;
         link.className = "invite-link"; link.dataset.inviteLink = ""; link.target = "_blank"; link.rel = "noopener";
+        link.id = "room-invite-link";
         invites.append(link);
         button(invites, "Copy invite link", async () => {
           inviteStatus = "";
@@ -494,7 +496,12 @@ export function mountApp(root: HTMLElement): () => void {
     }
   }
   document.addEventListener("visibilitychange", visibility);
-  const ageInterval = setInterval(() => { if (snapshot) render(); }, 250);
+  const ageInterval = setInterval(() => {
+    const activity = root.querySelector<HTMLElement>("[data-match-activity]");
+    if (snapshot && activity) renderActivity(activity, snapshot, connectionStatus.state === "connected" && snapshotLive,
+      Math.max(0, performance.now() - snapshotReceivedAt));
+    acknowledgeVisibleFeedback();
+  }, 250);
   try {
     const raw = sessionStorage.getItem("monk-session");
     if (raw) {

@@ -19,6 +19,7 @@ type Connection = z.infer<typeof attachmentSchema>;
 type ClockSession = { probe: (Omit<ClockProbeSample, "clientReceiveMs"> & { nonce: string }) | null;
   clock: ClockEstimate | null; wallMs: number; monotonicMs: number };
 type Measurement = { observation: Observation; receivedAtMs: number; updateGapMs: number; clock: ClockEstimate };
+type CaptureTiming = { receivedAtMs: number; reportedAgeMs: number | null };
 
 export class MatchAuthority extends DurableObject<Env> {
   private record: MatchRecord | null = null;
@@ -28,6 +29,7 @@ export class MatchAuthority extends DurableObject<Env> {
   private clocks = new Map<WebSocket, ClockSession>();
   private reports = new Map<string, { seq: number; capturedAtMs: number }>();
   private lastKnownPositions = new Map<string, KnownPosition>();
+  private captureTimings = new Map<string, Map<number, CaptureTiming>>();
   private measurements = new Map<string, Measurement>();
   private lastReceipts = new Map<string, number>();
   private trial: TrialStatus | null = null;
@@ -117,7 +119,7 @@ export class MatchAuthority extends DurableObject<Env> {
     await commitRecord(this.ctx.storage, record, next.events);
     this.record = { ...record, events: [...record.events, ...next.events] };
     this.engine = next.state;
-    if (record.checkpoint.phase === "ended") { this.lastKnownPositions.clear(); this.reports.clear(); }
+    if (record.checkpoint.phase === "ended") { this.lastKnownPositions.clear(); this.reports.clear(); this.captureTimings.clear(); }
     if (record.checkpoint.phase === "ended" || (record.checkpoint.phase === "paused" && !this.view({ id: "", host: false, playerId: null }).resumeChecking)) {
       this.trial = null; this.clearMeasurements();
     }
@@ -227,10 +229,8 @@ export class MatchAuthority extends DurableObject<Env> {
           commands: [{ type: "join", playerId, label, faction }], observations: [],
         });
         if (next.rejections.length) return Response.json({ error: next.rejections[0].reason }, { status: 409 });
-        const record = { ...this.record, sessions: [...this.record.sessions,
-          { id: playerId, host: false, playerId, verifier: credential.verifier }], checkpoint: checkpointEngine(next.state, Date.now()) };
-        await commitRecord(this.ctx.storage, record, next.events);
-        this.record = { ...record, events: [...record.events, ...next.events] }; this.engine = next.state;
+        await this.accept(next, null, [...this.record.sessions,
+          { id: playerId, host: false, playerId, verifier: credential.verifier }]);
         this.broadcast(next.events);
         return Response.json({ matchCode: code, hostToken: null, playerToken: credential.token }, { status: 201, headers: { "Cache-Control": "no-store" } });
       }
@@ -366,9 +366,11 @@ export class MatchAuthority extends DurableObject<Env> {
         const previous = this.reports.get(actor.playerId);
         if (previous && message.report.seq <= previous.seq) { this.error(socket, "old_sequence", "Location sequence is out of order."); return; }
         const receivedAtMs = Date.now(), prior = this.lastKnownPositions.get(actor.playerId);
-        const repeated = prior?.report.capturedAtMs === message.report.capturedAtMs;
-        const known: KnownPosition = repeated && prior ? { ...prior, sharing: true } :
-          { report: message.report, receivedAtMs, sharing: true };
+        const timing = this.captureTimings.get(actor.playerId)?.get(message.report.capturedAtMs);
+        const repeated = !!timing || prior?.report.capturedAtMs === message.report.capturedAtMs;
+        const known: KnownPosition = prior?.report.capturedAtMs === message.report.capturedAtMs ? { ...prior, sharing: true } :
+          { report: timing ? { ...message.report, reportedAgeMs: timing.reportedAgeMs } : message.report,
+            receivedAtMs: timing?.receivedAtMs ?? receivedAtMs, sharing: true };
         const gameplay = gameObservation(known, actor.playerId, receivedAtMs);
         const next = advanceEngine(gameplay ? this.engine : suspendEngine(this.engine, actor.playerId), {
           nowMs: receivedAtMs, actor: null, commands: [], observations: gameplay ? [gameplay] : [],
@@ -377,6 +379,16 @@ export class MatchAuthority extends DurableObject<Env> {
         if (this.record.checkpoint.phase !== "ended") {
           this.reports.set(actor.playerId, { seq: message.report.seq, capturedAtMs: message.report.capturedAtMs });
           this.lastKnownPositions.set(actor.playerId, known);
+          const timings = this.captureTimings.get(actor.playerId) ?? new Map<number, CaptureTiming>();
+          if (!timings.has(message.report.capturedAtMs)) timings.set(message.report.capturedAtMs, {
+            receivedAtMs: known.receivedAtMs, reportedAgeMs: known.report.reportedAgeMs ?? null,
+          });
+          // ponytail: retain 512 timings; older captures rely on reported age. Increase only with field evidence.
+          if (timings.size > 512) {
+            const oldest = timings.keys().next().value;
+            if (oldest !== undefined) timings.delete(oldest);
+          }
+          this.captureTimings.set(actor.playerId, timings);
         }
         this.broadcast(next.events);
         if (inTrial && this.trial && !repeated) {
@@ -405,7 +417,9 @@ export class MatchAuthority extends DurableObject<Env> {
         });
         const sessions = message.type === "leave" ? this.record.sessions.filter(s => s.playerId !== actor.playerId) : this.record.sessions;
         try { await this.accept(next, null, sessions); } catch { this.error(socket, "storage_failed", "Suspension was not saved. Stop local location collection."); return; }
-        if (message.type === "leave") { this.lastKnownPositions.delete(actor.playerId); this.reports.delete(actor.playerId); }
+        if (message.type === "leave") {
+          this.lastKnownPositions.delete(actor.playerId); this.reports.delete(actor.playerId); this.captureTimings.delete(actor.playerId);
+        }
         else {
           const known = this.lastKnownPositions.get(actor.playerId);
           if (known) this.lastKnownPositions.set(actor.playerId, { ...known, sharing: false });
@@ -489,6 +503,7 @@ export class MatchAuthority extends DurableObject<Env> {
     this.record = null; this.engine = null;
     if (this.timer !== null) clearTimeout(this.timer);
     this.timer = null; this.trial = null; this.clearMeasurements(); this.reports.clear(); this.clocks.clear(); this.lastKnownPositions.clear();
+    this.captureTimings.clear();
   }
   async alarm(): Promise<void> {
     await this.serialize(async () => {

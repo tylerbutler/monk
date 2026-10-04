@@ -891,3 +891,27 @@ it("collapses the lobby invite when play starts but retains a player's later cho
     expect(app.root.querySelector<HTMLDetailsElement>("#room-invite")?.open).toBe(true);
   } finally { app.cleanup(); }
 });
+it("keeps the same keyboard controls connected during idle age ticks", () => {
+  vi.useFakeTimers();
+  const app = browserApp({ ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true });
+  try {
+    for (const selector of ['[data-action="start"]', '[data-action="round-consent"]', "[data-invite-link]"]) {
+      const control = app.root.querySelector<HTMLElement>(selector);
+      if (!control) throw new Error("Keyboard control missing");
+      control.focus();
+      vi.advanceTimersByTime(250);
+      expect(app.root.querySelector(selector)).toBe(control);
+      expect(document.activeElement).toBe(control);
+    }
+  } finally { app.cleanup(); vi.useRealTimers(); }
+});
+it("restores game-control focus across an authority update", () => {
+  const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true };
+  const app = browserApp(snapshot);
+  try {
+    app.root.querySelector<HTMLElement>('[data-action="start"]')?.focus();
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
+      snapshot, trial: null, startChecking: false });
+    expect(document.activeElement).toBe(app.root.querySelector('[data-action="start"]'));
+  } finally { app.cleanup(); }
+});
