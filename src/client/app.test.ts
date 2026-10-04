@@ -56,6 +56,15 @@ it("defaults the lobby to testing mode and disables redundant factions", () => {
   expect(root.textContent).toContain("Uncalibrated");
   expect(root.querySelector<HTMLOptionElement>('select[data-action="set-faction"] option[value="rock"]')?.disabled).toBe(true);
 });
+it("keeps in-game location warnings and faction displays out of the waiting-room path", () => {
+  const root = document.createElement("section");
+  renderMatch(root, { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true }, actions);
+  expect(root.querySelector("[data-faction-symbol]")).toBeNull();
+  expect(root.querySelector(".warning")).toBeNull();
+  expect(root.querySelector(".calibration")?.closest("details")?.id).toBe("advanced-settings");
+  expect(root.querySelector(".roster")?.textContent).toContain("Player 1 - rock (you)");
+  expect(root.querySelector('[data-action="start"]')?.textContent).toBe("Start game");
+});
 it("shows outgoing and incoming attack progress", () => {
   const root = document.createElement("section");
   const state = pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state;

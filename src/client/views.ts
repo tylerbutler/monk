@@ -45,11 +45,14 @@ export function describeEvent(event: EngineEvent, snapshot: PlayerSnapshot): str
 }
 export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions: MatchActions): void {
   root.replaceChildren();
-  text(root, "p", snapshot.mode === "test" ? "Testing mode" : "Normal mode", "mode-label");
+  const calibration = snapshot.approved ? "Measured parameters approved for the stated device limits." :
+    "Uncalibrated parameters. Test values are not an accuracy claim.";
+  text(root, "p", snapshot.mode === "test" ? snapshot.approved ? "Testing mode" : "Testing mode - uncalibrated" :
+    "Normal mode", "mode-label");
   text(root, "h2", snapshot.phase === "lobby" ? "Waiting room" : snapshot.phase === "paused" ? "Paused" :
     snapshot.phase === "ended" ? "Round ended" : "Round running");
   if (snapshot.resumeChecking) text(root, "p", "Freshness check. Gameplay and timers remain paused.", "state-line");
-  if (snapshot.ownFaction) {
+  if (snapshot.ownFaction && snapshot.phase !== "lobby") {
     const own = document.createElement("div"); own.className = "own-faction"; root.append(own);
     const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("aria-hidden", "true");
@@ -59,7 +62,7 @@ export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions
     path.setAttribute("stroke", "currentColor"); path.setAttribute("stroke-width", "1.6");
     path.setAttribute("stroke-linecap", "round"); path.setAttribute("stroke-linejoin", "round"); icon.append(path); own.append(icon);
     text(own, "strong", names[snapshot.ownFaction]); text(root, "p", `${names[snapshot.ownFaction]} converts ${targets[snapshot.ownFaction]}.`);
-  } else text(root, "p", "Host view. Join as a player to participate.");
+  } else if (!snapshot.ownFaction) text(root, "p", "Host view. Join as a player to participate.");
   if (snapshot.phase !== "lobby") {
     text(root, "p", `Round time: ${clock(snapshot.remainingMs)}`, "round-clock");
     if (snapshot.graceMs) text(root, "p", `Grace: ${clock(snapshot.graceMs)}. You cannot attack or be attacked.`);
@@ -74,9 +77,11 @@ export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions
     if (!snapshot.outgoing && !snapshot.incoming.length) text(root, "p", "No confirmed attack.");
     text(root, "p", `Fresh nearby players: Rock ${snapshot.nearby.rock}, Paper ${snapshot.nearby.paper}, Scissors ${snapshot.nearby.scissors}.`);
   }
-  for (const reason of snapshot.qualityReasons) text(root, "p", reason, "warning");
-  text(root, "p", snapshot.approved ? "Measured parameters approved for the stated device limits." : "Uncalibrated parameters. Test values are not an accuracy claim.", "calibration");
-  if (snapshot.deviceLimitations) text(root, "p", `Device limits: ${snapshot.deviceLimitations}`);
+  if (snapshot.phase !== "lobby") {
+    for (const reason of snapshot.qualityReasons) text(root, "p", reason, "warning");
+    text(root, "p", calibration, "calibration");
+    if (snapshot.deviceLimitations) text(root, "p", `Device limits: ${snapshot.deviceLimitations}`);
+  }
   if (snapshot.phase === "lobby") {
     text(root, "h3", `Players (${snapshot.roster.length})`);
     const roster = document.createElement("ul"); roster.className = "roster"; root.append(roster);
@@ -129,6 +134,7 @@ export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions
       const preset = snapshot.mode === "test" && !snapshot.parameters;
       const parameters = snapshot.parameters ?? (preset ? testPreset : null);
       text(form, "h3", snapshot.mode === "test" ? "Test round setup" : "Round settings");
+      text(form, "p", calibration, "calibration");
       text(form, "p", preset ? "Save to use the uncalibrated starter values." :
         "Keep the saved values or adjust Advanced settings. Settings freeze during running and paused rounds.");
       const mode = input(form, "Testing mode (at least two active players)", "testingMode", "checkbox", "");
