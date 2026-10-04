@@ -345,7 +345,10 @@ export function mountApp(root: HTMLElement): () => void {
     for (const input of root.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-retain]")) {
       retained.set(input.id, { value: input.value, checked: input instanceof HTMLInputElement && input.checked });
     }
-    for (const details of root.querySelectorAll<HTMLDetailsElement>("details[id]")) disclosures.set(details.id, details.open);
+    for (const details of root.querySelectorAll<HTMLDetailsElement>("details[id]")) {
+      if (details.id === "room-invite" && details.dataset.phase !== (snapshot?.phase ?? "")) disclosures.delete(details.id);
+      else disclosures.set(details.id, details.open);
+    }
     root.replaceChildren();
     const header = document.createElement("header"); header.className = "masthead"; root.append(header);
     text(header, "h1", "Monk");
@@ -391,17 +394,19 @@ export function mountApp(root: HTMLElement): () => void {
       text(top, "h2", `Room ${credentials.matchCode}`);
       if (snapshot?.phase !== "ended") {
         const invite = new URL("/", window.location.origin); invite.searchParams.set("room", credentials.matchCode);
-        text(top, "h3", "Invite players");
+        const invites = document.createElement("details"); invites.id = "room-invite"; invites.open = snapshot?.phase === "lobby";
+        invites.dataset.phase = snapshot?.phase ?? "";
+        top.append(invites); text(invites, "summary", "Invite players").id = "room-invite-toggle";
         const link = document.createElement("a"); link.href = invite.href; link.textContent = invite.href;
         link.className = "invite-link"; link.dataset.inviteLink = ""; link.target = "_blank"; link.rel = "noopener";
-        top.append(link);
-        button(top, "Copy invite link", async () => {
+        invites.append(link);
+        button(invites, "Copy invite link", async () => {
           inviteStatus = "";
           if (!navigator.clipboard?.writeText) throw new Error("Copy is unavailable. Copy the invite link from its context menu.");
           await navigator.clipboard.writeText(invite.href);
           inviteStatus = "Link copied."; render();
         }, "copy-invite", "secondary");
-        if (inviteStatus) text(top, "p", inviteStatus, "state-line").setAttribute("role", "status");
+        if (inviteStatus) text(invites, "p", inviteStatus, "state-line").setAttribute("role", "status");
       }
       if (!snapshot) text(root, "p", "Connecting to the private match. Location is not collected.");
       if (snapshot) {
@@ -414,7 +419,10 @@ export function mountApp(root: HTMLElement): () => void {
         }
         const section = document.createElement("section"); root.append(section);
         if (snapshot.ownPlayerId && snapshot.phase !== "ended") {
-          text(section, "p", consent ? location.collecting ? "Waiting for your location or the next update." :
+          const known = snapshot.radar?.reference?.playerId === snapshot.ownPlayerId ||
+            snapshot.radar?.players.some(p => p.playerId === snapshot?.ownPlayerId && p.position);
+          text(section, "p", consent ? location.collecting ? known && location.permission === "granted" ?
+            "Location sharing is on" : "Waiting for your location" :
             "Sharing will resume when connected and visible." : "Location sharing is off", "location-sharing");
           if (!consent) button(section, "Share location", () => {
             error = ""; consent = true; reconcileCollection(); render();

@@ -10,7 +10,7 @@
   --accent: #254e37;
 }
 * { box-sizing: border-box; }
-body { margin: 0; }
+body { margin: 0; overflow-wrap: anywhere; }
 main { width: min(100% - 2.5rem, 48rem); margin: auto; padding: 1.5rem 0 3rem; }
 .masthead { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; border-bottom: 2px solid var(--ink); padding-bottom: .7rem; margin-bottom: 2rem; }
 h1 { font-size: 2rem; letter-spacing: -.04em; margin: 0; }
@@ -37,7 +37,7 @@ button:disabled { cursor: wait; opacity: .55; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1rem; }
 .trial { border-top: 1px solid var(--line); }
 .roster { list-style: none; padding: 0; }
-.roster li { padding: .6rem 0; border-bottom: 1px solid var(--line); }
+.roster li { padding: .6rem 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .mode-label, .state-line { font-weight: 700; }
 .mode-label { color: var(--accent); }
 .own-faction { display: flex; align-items: center; gap: 1rem; margin: 1.5rem 0 .75rem; }

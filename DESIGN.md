@@ -1,12 +1,17 @@
 # Monk: Game and System Design
 
-**Status:** Draft for discussion. No implementation or playtest results yet.
+**Status:** Broader concept draft. The current multiplayer build implements
+the core conversion loop; physical playtest results remain pending.
 
-**First implementation scope:** See the
-[outdoor playtest specification](docs/superpowers/specs/2026-10-03-monk-outdoor-playtest-design.md).
-It defines the selected PWA architecture, Gleam rules engine, two-iPhone trial,
-and default-on testing mode. This document retains broader proposals that
-are outside that first build.
+**Current implementation scope:** See the
+[game specification](docs/superpowers/specs/2026-10-03-monk-outdoor-playtest-design.md)
+and [game instructions](README.md#play-with-friends). Private rooms support
+optional names, late joining, direct start/resume, optional location sharing,
+last-known radar, and a fixed 30-second influence inactivity rule.
+The browser UI uses one game flow; host settings and measurements sit behind
+closed disclosures. The authority migrates legacy rooms without losing
+credentials or round state and keeps locations only in temporary memory.
+This document retains broader proposals outside the current build.
 
 **Source:** `monk.doc`, a concept document dated September 30, 2004.
 

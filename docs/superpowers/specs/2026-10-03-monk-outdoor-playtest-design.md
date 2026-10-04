@@ -1,8 +1,52 @@
-# Monk outdoor playtest design
+# Monk game scope and original playtest design
 
 Date: 2026-10-03
 
-Status: Written specification approved on 2026-10-03.
+Status: The multiplayer game requirements below supersede the original
+playtest requirements for ordinary gameplay. Keep the original design as
+historical context and optional measurement guidance.
+
+## Current multiplayer game requirements
+
+- Offer optional display names with numbered fallback. Creation joins the
+  host as a player. Keep invitations available during active rounds.
+- Permit joins in lobby, running, and paused phases, up to 100 players.
+  Apply grace to late joins. Reject joins after the room ends or expires.
+- Start with two joined players. Start and resume do not request location,
+  require approved parameters, or run a clock or GPS readiness check.
+- Share location with explicit browser consent in all non-ended phases.
+  Use the first watch callback, including cached positions. Do not poll
+  for fresh fixes. Pause stops conversions but keeps radar and sharing.
+- Validate reports, coordinates, uncertainty, authorization, and sequence.
+  Include nonnegative position age or unknown age separately from the phone
+  timestamp. Accept lower timestamps after phone clock changes.
+- Keep positions for radar in temporary memory. Influence requires a shared,
+  sufficiently precise position less than 30 seconds old. Old, unknown-age,
+  and repeated captures cannot refresh progress or bridge an expired gap.
+  Stopping sharing or disconnecting stops both influence roles at once.
+- Keep north-up radar, rounded distances, faction symbols, named references,
+  and marker-offset leaders. Retain last-known and approximate markers.
+  Offline and hidden states clear confirmed influence and retain radar;
+  local age labels continue without inventing progress or conversions.
+- Keep named incoming/outgoing influence and visible conversion notifications.
+  Continue play when another player lacks location or a faction disappears.
+- Use Monk as the visible identity. Keep Advanced settings and host diagnostics
+  closed by default. Remove public mode, calibration, freshness, and device-limit
+  setup. Diagnostic consent and clock checks do not block ordinary play.
+- Default to 30 m entry, 40 m retention, 15 m uncertainty, two-second dwell,
+  three-second grace, and ten-minute rounds. Fix inactivity at 30000 ms.
+- Persist credentials, names, factions, events, command outcomes, and timers
+  before broadcast. Do not persist locations or movement history. Leave removes
+  one position; end, expiry, and restart clear all positions.
+- Migrate validated legacy rooms to flexible rules and 30000 ms inactivity
+  without losing other settings or private identity. Recover running rounds
+  as paused. Clients open during an upgrade must reload the interface.
+
+Use synthetic fixtures for software checks. Physical GPS performance and
+field feedback targets require measurements on the selected devices.
+See [README](../../../README.md) for current use and verification commands.
+
+## Original playtest specification (superseded for ordinary play)
 
 Implementation plan:
 [Outdoor playtest](../plans/2026-10-03-monk-outdoor-playtest.md).

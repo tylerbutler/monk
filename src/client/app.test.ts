@@ -781,7 +781,11 @@ it.each(["create", "join"])("sends the display name when players %s", async acti
 
 it.each(["running", "paused"] as const)("keeps invitations available in a %s room", phase => {
   const app = browserApp({ ...snapshotFor(runningFixture(["rock", "paper"]), "p1", 0), phase });
-  try { expect(app.root.querySelector("[data-invite-link]")?.getAttribute("href")).toBe("https://monk.test/?room=ABCDEFGH"); }
+  try {
+    const link = app.root.querySelector("[data-invite-link]");
+    expect(link?.getAttribute("href")).toBe("https://monk.test/?room=ABCDEFGH");
+    expect(link?.closest("details")?.open).toBe(false);
+  }
   finally { app.cleanup(); }
 });
 
@@ -861,4 +865,29 @@ it("keeps the text selection while local ages update", () => {
     expect(next).toBe(document.activeElement);
     expect([next?.selectionStart, next?.selectionEnd]).toEqual([1, 4]);
   } finally { app.cleanup(); vi.useRealTimers(); }
+});
+it("does not say it is waiting when the player already has a known location", () => {
+  const browser = permissionBrowser();
+  const app = browserApp(snapshotFor(pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state, "p1", 500));
+  try {
+    app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]')?.click();
+    browser.fix();
+    expect(app.root.querySelector(".location-sharing")?.textContent).toBe("Location sharing is on");
+  } finally { app.cleanup(); }
+});
+it("collapses the lobby invite when play starts but retains a player's later choice", () => {
+  const lobby = snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0);
+  const app = browserApp(lobby);
+  try {
+    expect(app.root.querySelector<HTMLDetailsElement>("#room-invite")?.open).toBe(true);
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
+      snapshot: { ...lobby, phase: "running" }, trial: null, startChecking: false });
+    const invite = app.root.querySelector<HTMLDetailsElement>("#room-invite");
+    expect(invite?.open).toBe(false);
+    if (!invite) throw new Error("Invite disclosure missing");
+    invite.open = true;
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 6,
+      snapshot: { ...lobby, phase: "running" }, trial: null, startChecking: false });
+    expect(app.root.querySelector<HTMLDetailsElement>("#room-invite")?.open).toBe(true);
+  } finally { app.cleanup(); }
 });

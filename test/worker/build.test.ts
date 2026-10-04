@@ -16,7 +16,7 @@ it("delivers the install manifest and exact-size PNG icons through the Worker", 
   const response = await SELF.fetch("https://monk.test/manifest.webmanifest");
   expect(response.status).toBe(200);
   const manifest: unknown = await response.json();
-  expect(manifest).toMatchObject({ display: "standalone", start_url: "/" });
+  expect(manifest).toMatchObject({ name: "Monk", short_name: "Monk", display: "standalone", start_url: "/" });
   for (const size of [192, 512]) {
     const icon = await SELF.fetch(`https://monk.test/icons/icon-${size}.png`);
     expect(icon.headers.get("content-type")).toContain("image/png");
@@ -24,6 +24,13 @@ it("delivers the install manifest and exact-size PNG icons through the Worker", 
     expect(bytes.getUint32(16)).toBe(size);
     expect(bytes.getUint32(20)).toBe(size);
   }
+});
+it("serves the Monk game page identity", async () => {
+  const response = await SELF.fetch("https://monk.test/");
+  expect(response.status).toBe(200);
+  const html = await response.text();
+  expect(html).toContain("<title>Monk</title>");
+  expect(html).not.toContain("outdoor playtest");
 });
 it("refuses private session creation on an insecure non-loopback origin", async () => {
   const response = await SELF.fetch("http://monk.test/api/matches", { method: "POST", body: "{}" });

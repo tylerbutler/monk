@@ -1,9 +1,8 @@
-# Monk outdoor playtest
+# Monk
 
-Monk tests outdoor rock-paper-scissors conversion with phone location.
-A player changes faction after continuous confirmed proximity, but stays
-in the game. New matches use **Testing mode**. Two active players can play,
-and the host can change factions during a test round.
+Monk is an outdoor multiplayer rock-paper-scissors game. Find other players
+on radar and convert them through continuous confirmed proximity.
+A converted player changes faction and stays in the game.
 
 The product target is an online PWA for iPhone and Android. The first physical
 location trial uses **two iPhones only**. This software does not establish GPS
@@ -49,78 +48,43 @@ Open the loopback URL printed by Wrangler. This command builds static assets
 and serves them on the same origin as the API and WebSocket. Rebuild and restart
 after edits. There is no separate Vite server, offline cache, or service worker.
 
-Create a match. The host can select **Join as a player on this phone**.
-The second phone joins with the private eight-character code. The code does
-not grant host control. Private tokens stay in `sessionStorage` and authenticate
-the first WebSocket frame, not the URL. Do not share tokens.
+## Play with friends
 
-Both location-consent buttons request browser access immediately with a one-time
-fix. The app discards that fix; it does not report or retain its coordinates.
-The browser shows a prompt if permission is not already granted or denied.
-If access is blocked, allow location for this site in browser and device
-settings, then retry. Denial, unavailable location, and timeouts leave a retry
-action visible.
+Enter an optional display name and select **Create room** or **Join room**.
+Blank names use numbered-player labels. The creator joins as a player.
+Share **Copy invite link** or the eight-character room code. Invitations
+remain available during play; new players can join running and paused rounds.
+New players get a grace period. Rooms hold at most 100 players.
 
-Continuous collection starts only with consent during a trial, a fresh start
-check, an active round, or a resume check. Keep the app visible and the screen on.
-Permission, clock, visibility, connection, and wake-lock failures appear in the interface.
-Pausing, leaving, hiding, and ending stop local collection. Late browser
-callbacks after stopping are discarded.
+The host selects **Start game** with at least two joined players.
+Starting and **Resume round** do not request permission or wait for GPS.
+A player without location does not block another player's encounter.
+The round ends when its timer expires or the host selects **End round**.
 
-After a backward clock change, the app waits for capture times beyond the
-old clock range. A new clock probe does not make cached fixes fresh.
+Select **Share location** when you want to participate in proximity conversion.
+The app uses the browser's first available position, including a cached fix.
+No clock check or five-second freshness check is required. Location sharing
+works in the lobby and while paused. **Stop sharing** stops your influence
+without leaving the room. If permission is blocked, allow location in browser
+and device settings, then retry.
 
-## Two-iPhone field trial
+Keep the app visible, connected, and the screen on. Hiding, disconnecting,
+leaving, ending, or a browser location failure stops local collection.
+The app ignores late callbacks after collection stops. A phone clock change
+does not stop ordinary reporting.
 
-Follow [the physical trial checklist](docs/playtests/two-iphone-trial.md).
-The field build needs a deployed HTTPS origin. An insecure LAN IP is not a
-substitute for HTTPS. API, static assets, and sockets must share one origin.
+**Player radar** shows north-up directions, distance rounded to 5 m, and
+numbered faction markers. Your last-known position is the reference.
+Without your position, the radar identifies a known peer reference by name.
+An absent position shows a waiting state. Old and approximate positions
+remain visible; the app updates their age labels even while offline.
 
-The location-only trial works without gameplay parameters. Select two players;
-both must consent. Enter phone models, iOS versions, browser/PWA modes, outdoor
-conditions, and known reference separations. Export grouped summaries only
-when you choose to keep them. They contain no raw positions, session credentials,
-player names, or movement history.
-
-A summary keeps compatible measurement blocks at different marked separations.
-Export, then select **Discard measurement summary** before changing phones,
-conditions, or parameter candidates. The app does not combine incompatible
-measurements or discard earlier blocks without that action.
-
-Select **Create room**, then **Copy invite link** and share it. The host joins
-as a player automatically. Guests open the link and select **Join room**; the
-player list updates as they join. Invite links contain only the room code,
-never host or player credentials.
-
-New rooms save an **uncalibrated test preset** automatically:
-entry 30 m, retention 40 m, maximum uncertainty 15 m, freshness 5000 ms,
-dwell 2000 ms, grace 3000 ms, and a ten-minute round. No configuration step
-is required. The preset does not approve measured accuracy or override saved
-settings. The play-area text field has been removed; agree on safe routes
-in person rather than entering a note that the game cannot enforce.
-
-Expand **Advanced settings** to adjust values, switch modes, or record device
-limits. Expand **Change player factions** for host faction controls, or
-**Two-iPhone location trial** for measurements. An invited or active trial opens
-its consent controls. Open sections and draft inputs stay open across authority
-updates. Retention must be at least entry radius, and parameters must be positive
-and finite. Settings freeze while running or paused.
-
-Guests select **Allow location for this round**. The host selects **Start game**,
-which requests browser location access if needed, then starts a
-ten-second freshness check; a prior trial is not required. A test round needs
-at least two fresh, usable player fixes. Host faction changes clear affected
-attacks, apply grace, and have distinct visible feedback. Repeated command IDs
-do not apply a change twice.
-
-During a Testing-mode round, **Player radar** shows other players relative to
-you. North stays at the top; it does not follow phone orientation. Distances
-are rounded to 5 m and directions to eight compass points. Numbered faction
-markers match the player list, which shows fix age and reported GPS uncertainty.
-A host who has not joined uses the first player with a usable fix as a named
-reference. Missing, stale, or low-quality fixes have no position marker.
-Pausing, ending, hiding the app, losing the connection, or receiving no fresh
-updates clears the live display. There is no radar in Normal mode or the lobby.
+Influence requires a shared position less than **30 seconds** old and within
+the uncertainty limit. Unknown-age positions cannot contribute to influence.
+A repeated capture does not extend its original deadline. After expiry,
+the marker remains, both influence roles stop, and a new usable fix starts
+new progress. Stopping sharing or disconnecting stops influence at once.
+An unrelated old marker does not stop a fresh encounter.
 
 **Influencing** identifies a confirmed outgoing attack and its progress.
 Incoming influence identifies the player affecting you. Solid radar links
@@ -130,17 +94,43 @@ before **You converted...** appears and the player's faction changes.
 An interruption explains why influence stopped; progress does not continue
 through missing observations.
 
-Normal mode requires six active players, two per faction at start, plus a
-separate approval of the saved measured parameters and their device limits.
-Changing parameters resets approval. Normal mode pauses on a missing fresh
-faction, ends on conversion extinction, and rejects live manual changes.
+Pausing freezes round timers and clears influence, but location sharing and
+radar continue. Missing players or factions do not pause or end the round.
+Host faction changes clear affected influence and apply grace. Repeated
+command IDs do not apply a change twice.
 
-Both intended players acknowledge conversions only after visible rendering.
-The conversion text must fit inside its notification and the visible viewport.
-The host sees sample counts, missing acknowledgements, failures, and display-delay
-upper bounds. This is not one-way network latency. The later targets are 80%
-comprehension and 95% of conversions displayed to both players within one second;
-neither target is claimed as achieved.
+Default settings: 30 m entry radius, 40 m retention radius, 15 m uncertainty
+limit, two-second dwell, three-second grace, and a ten-minute round.
+The host can change these under **Advanced settings** before starting.
+Retention must be at least entry radius. Settings stay fixed while running
+or paused. The 30-second inactivity rule is fixed; no mode or approval step
+is part of game setup. Agree on safe routes and a bounded play area in person.
+
+Private tokens stay in `sessionStorage` and authenticate the first WebSocket
+frame, not the URL. Invite links contain only the room code. Do not share tokens.
+
+## Optional two-iPhone measurements
+
+Open **Host diagnostics**, then **Optional location measurement** in the lobby.
+Follow [the physical trial checklist](docs/playtests/two-iphone-trial.md).
+Measurements require a deployed HTTPS origin; an insecure LAN IP is not a
+substitute. API, assets, and sockets must share one origin.
+
+Select two players and enter phone models, iOS versions, browser/PWA modes,
+outdoor conditions, and reference separations. Both selected players must
+consent to measurements. Diagnostic clock checks and five-second samples
+do not control ordinary sharing, starting, or resuming.
+
+Export grouped summaries when you choose to keep them. They omit raw positions,
+credentials, names, and movement history. Keep compatible reference blocks
+in one summary. Export, then select **Discard measurement summary** before
+changing devices, conditions, or parameter candidates.
+
+The host can inspect visible conversion acknowledgements under diagnostics.
+Both intended players acknowledge after the conversion text fits inside its
+notification and visible viewport. Display-delay upper bounds are not one-way
+network latency. Physical accuracy, comprehension, and field feedback targets
+remain unverified.
 
 ## Deployment is a separate operation
 
@@ -192,16 +182,20 @@ runs software checks without Cloudflare secrets or automatic deployment.
 
 One Durable Object owns each private match. TypeScript validates inputs and
 calls the pure Gleam rules. Accepted checkpoints, events, and command outcomes
-commit before broadcast. Player messages omit raw opponent coordinates. Testing-mode radar sends only
-rounded relative distance, compass direction, fix age, and uncertainty.
-Raw fixes and unfinished dwell stay in short-lived memory; they are not saved
+commit before broadcast. Player messages omit raw opponent coordinates.
+Radar sends rounded relative distance, compass direction, position age,
+uncertainty, and activity. Raw fixes, last-known positions, and unfinished dwell stay in memory; they are not saved
 in match records, routine logs, or exports.
 
 An authority restart recovers a running round as paused with its last committed
-remaining duration. It discards locations and dwell. Resume requires fresh
-observations and prior player consent; failed checks keep timers paused.
+remaining duration. It discards locations and dwell. Resume is direct;
+clients share available positions after reconnecting with prior consent.
+Leaving removes that player's position; ending or expiry clears all positions.
+Saved legacy rooms migrate to flexible joining and the 30-second policy,
+preserving credentials, names, factions, remaining time, and other saved settings.
+Clients open during an upgrade must reload the new interface.
 All match records and credentials expire within 24 hours of creation.
 
 The design scope is in
-[the approved specification](docs/superpowers/specs/2026-10-03-monk-outdoor-playtest-design.md).
+[the current game specification](docs/superpowers/specs/2026-10-03-monk-outdoor-playtest-design.md).
 `DESIGN.md` records the broader concept, not features promised by this build.
