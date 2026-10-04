@@ -238,6 +238,17 @@ it("keeps co-located player markers distinct from each other and the reference",
   expect(root.textContent).toContain("Within about 5 m");
 });
 
+it("keeps displaced markers inside the radar's rotation-safe radius", () => {
+  const root = document.createElement("section");
+  const state = pulse(runningFixture(Array.from({ length: 18 }, () => "rock")), 0, Array(18).fill(0)).state;
+  renderMatch(root, snapshotFor(state, "p1", 100), actions);
+  for (const marker of root.querySelectorAll("[data-radar-player]")) {
+    const point = marker.getAttribute("transform")?.match(/^translate\(([^ ]+) ([^)]+)\)$/);
+    expect(point).not.toBeNull();
+    expect(Math.hypot(Number(point?.[1]) - 160, Number(point?.[2]) - 160)).toBeLessThanOrEqual(120.000001);
+  }
+});
+
 it("identifies the host radar reference rather than calling it your position", () => {
   const root = document.createElement("section");
   renderMatch(root, snapshotFor(runningFixture(["rock", "paper"]), null, 100, true), actions);
@@ -296,6 +307,226 @@ function browserApp(snapshot: ReturnType<typeof snapshotFor>) {
     cleanup(); root.remove(); sessionStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals();
   } };
 }
+
+type CompassReading = {
+  absolute?: boolean; alpha?: number | null; beta?: number | null; gamma?: number | null;
+  webkitCompassHeading?: number; webkitCompassAccuracy?: number;
+};
+function compassBrowser(permission: (() => Promise<"granted" | "denied">) | null = async () => "granted") {
+  class Orientation extends Event { static requestPermission = permission; }
+  const orientation = Object.assign(new EventTarget(), { angle: 0 });
+  vi.stubGlobal("DeviceOrientationEvent", Orientation);
+  vi.stubGlobal("isSecureContext", true);
+  vi.stubGlobal("screen", { orientation });
+  let readingTime = 0;
+  vi.spyOn(performance, "now").mockImplementation(() => readingTime);
+  const snapshot = snapshotFor(runningFixture(["rock", "paper", "scissors"]), "p1", 100);
+  const app = browserApp(snapshot);
+  const flush = () => { for (const callback of app.raf.splice(0)) callback(readingTime); };
+  const toggle = () => {
+    const button = app.root.querySelector<HTMLButtonElement>('[data-action="compass"]');
+    expect(button).not.toBeNull(); button?.click(); return button;
+  };
+  return { ...app, snapshot, flush, toggle,
+    async enable() { toggle(); await Promise.resolve(); await Promise.resolve(); flush(); },
+    reading(reading: CompassReading, type = "deviceorientation") {
+      readingTime += 200;
+      window.dispatchEvent(Object.assign(new Event(type), { absolute: false, alpha: null, beta: 0, gamma: 0, ...reading }));
+      flush();
+    },
+    screenAngle(angle: number) { orientation.angle = angle; orientation.dispatchEvent(new Event("change")); flush(); },
+    rotation() {
+      const world = app.root.querySelector("[data-radar-world]");
+      expect(world).not.toBeNull();
+      return Number(world?.getAttribute("transform")?.match(/^rotate\(([^ ]+) 160 160\)$/)?.[1]);
+    },
+  };
+}
+
+it("keeps compass opt-in and local without starting location sharing", async () => {
+  const app = compassBrowser();
+  try {
+    const frames = [...app.frames];
+    app.reading({ webkitCompassHeading: 90, webkitCompassAccuracy: 5 });
+    expect(app.rotation()).toBe(0);
+    expect(app.root.querySelector('[data-action="compass"]')?.getAttribute("aria-pressed")).toBe("false");
+    await app.enable();
+    app.reading({ webkitCompassHeading: 90, webkitCompassAccuracy: 5 });
+    expect(app.rotation()).toBe(-90);
+    expect(app.root.textContent).toContain("Heading-up");
+    expect(app.root.textContent).toContain("Location sharing is off");
+    expect(app.frames).toEqual(frames);
+  } finally { app.cleanup(); }
+});
+
+it("keeps compass labels, marker icons, and player numbers upright", async () => {
+  const app = compassBrowser();
+  try {
+    await app.enable(); app.reading({ webkitCompassHeading: 90 });
+    expect(app.rotation()).toBe(-90);
+    expect(app.root.querySelector('[data-radar-world] .radar-compass')?.getAttribute("transform")).toBe("rotate(90 160 19)");
+    expect(app.root.querySelector('[data-radar-player] [data-radar-upright]')?.getAttribute("transform")).toBe("rotate(90 0 0)");
+    expect(app.root.querySelector('[data-radar-world] .radar-center')).toBeNull();
+    expect(app.root.querySelector('.radar-center')).not.toBeNull();
+    expect(app.root.querySelector('[data-player-id="p2"]')?.textContent).toContain("about 100 m E");
+  } finally { app.cleanup(); }
+});
+
+it("uses Android absolute orientation but never relative alpha as north", async () => {
+  const app = compassBrowser(null);
+  try {
+    await app.enable(); app.reading({ alpha: 270 });
+    expect(app.rotation()).toBe(0);
+    app.reading({ absolute: true, alpha: 270 }, "deviceorientationabsolute");
+    expect(app.rotation()).toBe(-90);
+  } finally { app.cleanup(); }
+});
+
+it.each([0, 90, 180, 270])("aligns the top of the screen at a %s degree screen rotation", async angle => {
+  const app = compassBrowser();
+  try {
+    await app.enable(); app.reading({ webkitCompassHeading: 0, webkitCompassAccuracy: 0 });
+    app.screenAngle(angle);
+    expect(app.rotation()).toBe(angle === 0 ? 0 : -angle);
+  } finally { app.cleanup(); }
+});
+
+it("accounts for tilt when using absolute orientation in landscape", async () => {
+  const app = compassBrowser(null);
+  try {
+    app.screenAngle(90); await app.enable();
+    app.reading({ absolute: true, alpha: 90, beta: 45, gamma: 30 }, "deviceorientationabsolute");
+    expect(app.rotation()).toBeCloseTo(-337.792, 2);
+  } finally { app.cleanup(); }
+});
+
+it("smooths the short turn across north rather than turning through south", async () => {
+  const app = compassBrowser();
+  try {
+    await app.enable(); app.reading({ webkitCompassHeading: 359 });
+    expect(app.rotation()).toBe(-359);
+    app.reading({ webkitCompassHeading: 1 });
+    const heading = -app.rotation();
+    expect(heading > 358 || heading < 2).toBe(true);
+    expect(heading).not.toBe(1);
+  } finally { app.cleanup(); }
+});
+
+it.each([
+  { webkitCompassHeading: NaN }, { webkitCompassHeading: Infinity }, { webkitCompassHeading: -10 },
+  { webkitCompassHeading: 90, webkitCompassAccuracy: -1 },
+  { webkitCompassHeading: 90, webkitCompassAccuracy: 90 },
+  { absolute: true, alpha: 0, beta: 90, gamma: 0 },
+] as const)("falls back to north-up for an unreliable compass reading %j", async reading => {
+  const app = compassBrowser();
+  try {
+    await app.enable(); app.reading({ webkitCompassHeading: 90 });
+    expect(app.rotation()).toBe(-90);
+    app.reading(reading);
+    expect(app.rotation()).toBe(0);
+    expect(app.root.querySelector("[data-compass-status]")?.textContent).toMatch(/north-up/i);
+    expect(app.root.querySelectorAll("[data-radar-player]")).toHaveLength(2);
+  } finally { app.cleanup(); }
+});
+
+it("returns to north-up when compass events stop and recovers on a new reading", async () => {
+  vi.useFakeTimers();
+  const app = compassBrowser();
+  try {
+    await app.enable(); app.reading({ webkitCompassHeading: 90 });
+    vi.advanceTimersByTime(3500); app.flush();
+    expect(app.rotation()).toBe(0);
+    expect(app.root.querySelector("[data-compass-status]")?.textContent).toMatch(/north-up/i);
+    app.reading({ webkitCompassHeading: 180 });
+    expect(app.rotation()).toBe(-180);
+  } finally { app.cleanup(); vi.useRealTimers(); }
+});
+
+it.each(["denied", "rejected", "sync-rejected"] as const)("reports %s compass permission without losing the radar", async result => {
+  const app = compassBrowser(() => {
+    if (result === "sync-rejected") throw new Error("Sensor access blocked");
+    if (result === "rejected") return Promise.reject(new Error("Sensor access blocked"));
+    return Promise.resolve("denied");
+  });
+  try {
+    await app.enable(); app.reading({ webkitCompassHeading: 90 });
+    expect(app.rotation()).toBe(0);
+    expect(app.root.querySelector('[data-action="compass"]')?.getAttribute("aria-pressed")).toBe("false");
+    expect(app.root.querySelector("[data-compass-status]")?.textContent).toMatch(/denied|blocked/i);
+  } finally { app.cleanup(); }
+});
+
+it("does not repeatedly announce unchanged compass status on sensor updates", async () => {
+  const app = compassBrowser();
+  const observer = new MutationObserver(() => {});
+  try {
+    await app.enable(); app.reading({ webkitCompassHeading: 90 });
+    const status = app.root.querySelector("[data-compass-status]");
+    expect(status).not.toBeNull();
+    if (!status) throw new Error("Missing compass status");
+    observer.observe(status, { childList: true });
+    app.reading({ webkitCompassHeading: 90 });
+    expect(observer.takeRecords()).toHaveLength(0);
+  } finally { observer.disconnect(); app.cleanup(); }
+});
+
+it.each(["unsupported", "insecure"] as const)("explains an %s compass instead of requesting sensors", async reason => {
+  const app = compassBrowser();
+  try {
+    if (reason === "unsupported") vi.stubGlobal("DeviceOrientationEvent", undefined);
+    else vi.stubGlobal("isSecureContext", false);
+    await app.enable(); app.reading({ webkitCompassHeading: 90 });
+    expect(app.rotation()).toBe(0);
+    expect(app.root.querySelector("[data-compass-status]")?.textContent).toMatch(/not supported|HTTPS/i);
+  } finally { app.cleanup(); }
+});
+
+it("ignores a late permission grant after the player selects north-up", async () => {
+  let grant: ((value: "granted") => void) | undefined;
+  const app = compassBrowser(() => new Promise(resolve => { grant = resolve; }));
+  try {
+    await app.enable(); app.toggle();
+    grant?.("granted"); await Promise.resolve(); app.flush();
+    app.reading({ webkitCompassHeading: 90 });
+    expect(app.rotation()).toBe(0);
+    expect(app.root.querySelector('[data-action="compass"]')?.getAttribute("aria-pressed")).toBe("false");
+  } finally { app.cleanup(); }
+});
+
+it("retains heading and compass-button focus through age and snapshot updates", async () => {
+  vi.useFakeTimers();
+  const app = compassBrowser();
+  try {
+    await app.enable(); app.reading({ webkitCompassHeading: 90 });
+    const button = app.root.querySelector<HTMLButtonElement>('[data-action="compass"]');
+    button?.focus(); vi.advanceTimersByTime(250); app.flush();
+    expect(app.rotation()).toBe(-90);
+    expect(app.root.querySelector('[data-action="compass"]')).toBe(button);
+    expect(document.activeElement).toBe(button);
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
+      snapshot: app.snapshot, trial: null, startChecking: false });
+    expect(app.rotation()).toBe(-90);
+    expect(document.activeElement?.id).toBe("action-compass");
+  } finally { app.cleanup(); vi.useRealTimers(); }
+});
+
+it("stops compass sensing when hidden and clears sensor timers on cleanup", async () => {
+  vi.useFakeTimers();
+  const app = compassBrowser();
+  try {
+    await app.enable(); app.reading({ webkitCompassHeading: 90 });
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    document.dispatchEvent(new Event("visibilitychange")); app.flush();
+    app.reading({ webkitCompassHeading: 180 });
+    expect(app.rotation()).toBe(0);
+    expect(app.root.querySelector('[data-action="compass"]')?.getAttribute("aria-pressed")).toBe("false");
+  } finally {
+    app.cleanup();
+    expect(vi.getTimerCount()).toBe(0);
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    vi.useRealTimers();
+  }
+});
 
 it("retains last-known markers but clears influence when the connection fails", () => {
   const state = pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state;

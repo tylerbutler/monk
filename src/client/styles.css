@@ -48,6 +48,11 @@ button:disabled { cursor: wait; opacity: .55; }
 progress { width: 100%; height: 1.25rem; accent-color: var(--accent); }
 .influence { padding: .75rem 0; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
 .player-radar { border-top: 1px solid var(--line); }
+.radar-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .75rem; margin: 1rem 0; }
+.radar-controls button { margin: 0; }
+.radar-controls button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.radar-controls button[aria-pressed="true"]:hover { background: #163523; }
+.radar-controls p { margin: 0; }
 .radar-note { color: var(--muted); font-size: .95rem; }
 .radar-guide { display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin: 1rem 0; }
 .radar-guide-item { display: inline-flex; align-items: center; gap: .4rem; font-size: .95rem; font-weight: 650; }
@@ -69,7 +74,7 @@ progress { width: 100%; height: 1.25rem; accent-color: var(--accent); }
 .radar-marker[data-faction="paper"] { color: #805016; }
 .radar-marker[data-faction="scissors"] { color: #693864; }
 .radar-marker-body { fill: #f7f8f1; stroke: currentColor; stroke-width: 1.5; }
-.radar-marker[data-current="false"] > .radar-marker-body { stroke-dasharray: 3 3; }
+.radar-marker[data-current="false"] .radar-marker-body { stroke-dasharray: 3 3; }
 .radar-progress-track, .radar-progress { fill: none; stroke-width: 3; }
 .radar-progress-track { stroke: var(--line); }
 .radar-progress { stroke: var(--accent); }

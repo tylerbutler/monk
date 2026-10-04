@@ -65,7 +65,7 @@ function renderRadar(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean,
   const section = document.createElement("section"); section.className = "player-radar";
   section.setAttribute("aria-label", "Player radar"); root.append(section);
   text(section, "h3", "Player radar");
-  text(section, "p", "North stays at the top. Numbers match the player list.", "radar-note");
+  text(section, "p", "North stays at the top. Numbers match the player list.", "radar-note").dataset.radarOrientationNote = "";
   const relationship = (faction: Faction, playerId?: string) => playerId === snapshot.ownPlayerId ? "you" :
     !snapshot.ownFaction ? "player" : faction === snapshot.ownFaction ? "same" :
       faction === targets[snapshot.ownFaction] ? "target" : "threat";
@@ -96,16 +96,18 @@ function renderRadar(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean,
     const figure = document.createElement("figure"); layout.append(figure);
     const chart = svg(figure, "svg", { viewBox: "0 0 320 320", "aria-hidden": "true" });
     chart.dataset.radar = "";
+    const world = svg(chart, "g", { "data-radar-world": "", transform: "rotate(0 160 160)" });
     const scale = Math.ceil(Math.max(25, snapshot.parameters?.entryRadiusM ?? 0,
       ...radar.players.map(p => p.position?.distanceM ?? 0)) / 25) * 25;
-    for (const radius of [60, 120]) svg(chart, "circle", { cx: "160", cy: "160", r: String(radius), class: "radar-ring" });
-    svg(chart, "path", { d: "M160 40V280M40 160H280", class: "radar-axis" });
-    if (snapshot.parameters) svg(chart, "circle", { cx: "160", cy: "160",
+    for (const radius of [60, 120]) svg(world, "circle", { cx: "160", cy: "160", r: String(radius), class: "radar-ring" });
+    svg(world, "path", { d: "M160 40V280M40 160H280", class: "radar-axis" });
+    if (snapshot.parameters) svg(world, "circle", { cx: "160", cy: "160",
       r: String(120 * snapshot.parameters.entryRadiusM / scale), class: "radar-entry" });
     for (const [direction, x, y] of [["North", 160, 19], ["S", 160, 311], ["E", 307, 165], ["W", 13, 165]] as const) {
-      svg(chart, "text", { x: String(x), y: String(y), "text-anchor": "middle", class: "radar-compass" }).textContent = direction;
+      svg(world, "text", { x: String(x), y: String(y), "text-anchor": "middle", class: "radar-compass",
+        "data-radar-upright": "" }).textContent = direction;
     }
-    const connections = svg(chart, "g"), markers = svg(chart, "g");
+    const connections = svg(world, "g"), markers = svg(world, "g");
     const placed = [{ x: 160, y: 160 }];
     radar.players.forEach((p, index) => {
       const player = snapshot.roster.find(player => player.id === p.playerId);
@@ -120,6 +122,11 @@ function renderRadar(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean,
         const angle = attempt * Math.PI / 4, offset = 56 * (1 + Math.floor(attempt / 8));
         markerX = Math.max(40, Math.min(280, x + Math.cos(angle) * offset));
         markerY = Math.max(40, Math.min(280, y + Math.sin(angle) * offset));
+        const radius = Math.hypot(markerX - 160, markerY - 160);
+        if (radius > 120) {
+          markerX = 160 + (markerX - 160) * 120 / radius;
+          markerY = 160 + (markerY - 160) * 120 / radius;
+        }
       }
       placed.push({ x: markerX, y: markerY });
       if (markerX !== x || markerY !== y) {
@@ -146,18 +153,19 @@ function renderRadar(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean,
         "data-current": String(live && isCurrentPosition(p.position, elapsedMs)), class: "radar-marker" });
       svg(marker, "title").textContent = `${index + 1}. ${player.label} - ${names[player.faction]} - ${role.label}` +
         (attack ? `. ${combatLabel(player)} - ${Math.round(attack.progress * 100)}%.` : "");
+      const upright = svg(marker, "g", { "data-radar-upright": "" });
       if (attack) {
-        svg(marker, "circle", { r: "22", class: "radar-progress-track" });
-        svg(marker, "circle", { r: "22", pathLength: "100", transform: "rotate(-90)",
+        svg(upright, "circle", { r: "22", class: "radar-progress-track" });
+        svg(upright, "circle", { r: "22", pathLength: "100", transform: "rotate(-90)",
           "stroke-dasharray": `${attack.progress * 100} 100`, class: `radar-progress ${influence}` });
       }
-      svg(marker, "circle", { r: "16", class: "radar-marker-body" });
-      const icon = factionIcon(marker, player.faction);
+      svg(upright, "circle", { r: "16", class: "radar-marker-body" });
+      const icon = factionIcon(upright, player.faction);
       icon.setAttribute("x", "-11"); icon.setAttribute("y", "-11");
       icon.setAttribute("width", "22"); icon.setAttribute("height", "22");
-      svg(marker, "text", { x: "20", y: "-14", class: "radar-number" }).textContent = String(index + 1);
+      svg(upright, "text", { x: "20", y: "-14", class: "radar-number" }).textContent = String(index + 1);
       if (role.symbol) {
-        const badge = svg(marker, "g", { transform: "translate(-19 19)", class: "radar-role", "data-relationship": relation });
+        const badge = svg(upright, "g", { transform: "translate(-19 19)", class: "radar-role", "data-relationship": relation });
         svg(badge, "circle", { r: "9" });
         svg(badge, "text", { y: "4", "text-anchor": "middle", "data-radar-role": "" }).textContent = role.symbol;
       }
@@ -201,6 +209,18 @@ function renderRadar(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean,
     } else text(row, "p", "Waiting for location.", "radar-note");
   }
 }
+export function setRadarHeading(root: HTMLElement, headingDegrees: number | null): void {
+  const heading = headingDegrees ?? 0;
+  for (const world of root.querySelectorAll("[data-radar-world]")) {
+    world.setAttribute("transform", `rotate(${-heading} 160 160)`);
+    for (const content of world.querySelectorAll("[data-radar-upright]")) {
+      content.setAttribute("transform", `rotate(${heading} ${content.getAttribute("x") ?? "0"} ${content.getAttribute("y") ?? "0"})`);
+    }
+  }
+  const label = headingDegrees === null ? "North stays at the top. Numbers match the player list." :
+    "Heading-up: the top follows your phone. Numbers match the player list.";
+  for (const note of root.querySelectorAll("[data-radar-orientation-note]")) if (note.textContent !== label) note.textContent = label;
+}
 export function describeEvent(event: EngineEvent, snapshot: PlayerSnapshot): string {
   const label = (id: string | null) => snapshot.roster.find(p => p.id === id)?.label ?? "Player";
   const name = event.faction ? names[event.faction] : "faction";
@@ -215,7 +235,14 @@ export function describeEvent(event: EngineEvent, snapshot: PlayerSnapshot): str
   }
 }
 export function renderActivity(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean, elapsedMs: number): void {
-  root.replaceChildren();
+  let influence = root.querySelector<HTMLElement>("[data-influence-display]");
+  let radar = root.querySelector<HTMLElement>("[data-radar-display]");
+  if (!influence || !radar) {
+    root.replaceChildren();
+    influence = text(root, "div", ""); influence.dataset.influenceDisplay = "";
+    radar = text(root, "div", ""); radar.dataset.radarDisplay = "";
+  }
+  influence.replaceChildren(); radar.replaceChildren();
   const quality = (id: string) => snapshot.radar?.reference?.playerId === id ? snapshot.radar.reference :
     snapshot.radar?.players.find(p => p.playerId === id)?.position ?? null;
   const eligible = (attack: NonNullable<PlayerSnapshot["outgoing"]>) => live && snapshot.phase === "running" &&
@@ -223,21 +250,22 @@ export function renderActivity(root: HTMLElement, snapshot: PlayerSnapshot, live
   snapshot = { ...snapshot, outgoing: snapshot.outgoing && eligible(snapshot.outgoing) ? snapshot.outgoing : null,
     incoming: snapshot.incoming.filter(eligible) };
   if (snapshot.phase !== "lobby") {
+    const influenceDisplay = influence;
     function attack(progress: NonNullable<PlayerSnapshot["outgoing"]>, outgoing: boolean) {
       const name = snapshot.roster.find(p => p.id === (outgoing ? progress.targetId : progress.attackerId))?.label ?? "Player";
       const label = outgoing ? `Influencing ${name}` : `${name} is influencing you`;
       const row = document.createElement("label"); row.className = "influence"; row.textContent = `${label} - ${Math.round(progress.progress * 100)}%`;
       const bar = document.createElement("progress"); bar.max = 1; bar.value = progress.progress;
-      bar.setAttribute("aria-label", label); row.append(bar); root.append(row);
+      bar.setAttribute("aria-label", label); row.append(bar); influenceDisplay.append(row);
     }
     if (live && snapshot.phase === "running") {
       if (snapshot.outgoing) attack(snapshot.outgoing, true);
       for (const incoming of snapshot.incoming) attack(incoming, false);
-      if (!snapshot.outgoing && !snapshot.incoming.length) text(root, "p", "No confirmed influence.");
-      if (snapshot.outgoing || snapshot.incoming.length) text(root, "p", "Influence must stay confirmed until the bar fills. Leaving range or losing location quality stops progress.", "radar-note");
+      if (!snapshot.outgoing && !snapshot.incoming.length) text(influence, "p", "No confirmed influence.");
+      if (snapshot.outgoing || snapshot.incoming.length) text(influence, "p", "Influence must stay confirmed until the bar fills. Leaving range or losing location quality stops progress.", "radar-note");
     }
   }
-  if (snapshot.phase !== "ended") renderRadar(root, snapshot, live, elapsedMs);
+  if (snapshot.phase !== "ended") renderRadar(radar, snapshot, live, elapsedMs);
 }
 export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions: MatchActions, live = true, elapsedMs = 0): void {
   root.replaceChildren();

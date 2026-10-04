@@ -1,7 +1,9 @@
 import { connectMatch } from "./connection";
 import { requestLocationPermission, startLocation } from "./location";
+import { startCompass } from "./compass";
+import type { CompassState } from "./compass";
 import { addTrialSample, exportTrialSummary, newTrialSummary } from "./trial";
-import { describeEvent, renderActivity, renderMatch } from "./views";
+import { describeEvent, renderActivity, renderMatch, setRadarHeading } from "./views";
 import { deviceSchema, sessionCredentialsSchema } from "../shared/protocol";
 import type { ConnectionStatus, EngineEvent, HostCommand, LocationStatus, MatchConnection, PlayerSnapshot, ServerMessage, SessionCredentials, TrialSample, TrialStatus, TrialSummary } from "../shared/protocol";
 
@@ -32,6 +34,8 @@ export function mountApp(root: HTMLElement): () => void {
   let feedbackFrame = false, audio: AudioContext | null = null;
   let stopLocation: (() => void) | null = null;
   let stopPermissionCheck: (() => void) | null = null, requestingPermission = false;
+  let compass: CompassState = { enabled: false, headingDegrees: null, reason: null };
+  let stopCompass: (() => void) | null = null, compassFramePending = false;
   let error = "";
   let inviteStatus = "";
   let diagnosticStatus = "";
@@ -45,6 +49,32 @@ export function mountApp(root: HTMLElement): () => void {
   function showError(reason: string) { error = reason; render(); }
   function stopLiveUpdates() {
     snapshotLive = false;
+  }
+  function applyCompass() {
+    if (disposed) return;
+    setRadarHeading(root, compass.headingDegrees);
+    const toggle = root.querySelector<HTMLButtonElement>('[data-action="compass"]');
+    if (toggle) toggle.setAttribute("aria-pressed", String(compass.enabled));
+    const status = root.querySelector<HTMLElement>("[data-compass-status]");
+    const label = compass.reason ?? (compass.enabled ? "Heading-up is on." : "North-up. Compass is off.");
+    if (status && status.textContent !== label) status.textContent = label;
+  }
+  function compassChanged(state: CompassState) {
+    compass = state;
+    if (!state.enabled) stopCompass = null;
+    if (disposed || compassFramePending) return;
+    compassFramePending = true;
+    requestAnimationFrame(() => { compassFramePending = false; applyCompass(); });
+  }
+  function toggleCompass() {
+    if (stopCompass) {
+      const stop = stopCompass; stopCompass = null; stop(); applyCompass();
+    } else {
+      const stop = startCompass(compassChanged);
+      if (compass.enabled) stopCompass = stop;
+      else stop();
+      applyCompass();
+    }
   }
   function button(parent: HTMLElement, label: string, action: () => void | Promise<void>, name: string, className = "") {
     const node = document.createElement("button");
@@ -228,6 +258,7 @@ export function mountApp(root: HTMLElement): () => void {
     return parsed.data;
   }
   function leave() {
+    stopCompass?.(); stopCompass = null;
     cancelPermissionCheck(); stopCollection(); stopLiveUpdates(); consent = false; trialConsent = false;
     connection?.send({ version: 1, type: "leave" });
     connection?.close(); connection = null; credentials = null; snapshot = null; trial = null;
@@ -339,6 +370,7 @@ export function mountApp(root: HTMLElement): () => void {
   }
   function render() {
     if (disposed) return;
+    if (!snapshot?.radar || snapshot.phase === "ended") { stopCompass?.(); stopCompass = null; }
     const active = document.activeElement;
     const focused = active instanceof HTMLElement ? active.id : "";
     const selection = active instanceof HTMLInputElement && active.selectionStart !== null ?
@@ -440,6 +472,15 @@ export function mountApp(root: HTMLElement): () => void {
           end: () => sendCommand({ type: "end" }), configure: sendCommand,
           setFaction: (playerId, faction) => sendCommand({ type: "set_faction", playerId, faction }), leave,
         }, connectionStatus.state === "connected" && snapshotLive, Math.max(0, performance.now() - snapshotReceivedAt));
+        if (snapshot.radar && snapshot.phase !== "ended") {
+          const controls = document.createElement("div"); controls.className = "radar-controls";
+          controls.setAttribute("role", "group"); controls.setAttribute("aria-label", "Radar orientation");
+          game.querySelector("[data-radar-display]")?.before(controls);
+          button(controls, "Use compass", toggleCompass, "compass", "secondary");
+          const status = text(controls, "p", "", "radar-note"); status.dataset.compassStatus = "";
+          status.setAttribute("role", "status");
+        }
+        applyCompass();
         if (commandStatus) { const notice = text(section, "p", commandStatus, "state-line"); notice.setAttribute("role", "status"); }
         for (const select of section.querySelectorAll<HTMLSelectElement>('[data-action="set-faction"]')) {
           select.disabled = [...pendingCommands.values()].some(c => c.type === "set_faction");
@@ -500,6 +541,7 @@ export function mountApp(root: HTMLElement): () => void {
     const activity = root.querySelector<HTMLElement>("[data-match-activity]");
     if (snapshot && activity) renderActivity(activity, snapshot, connectionStatus.state === "connected" && snapshotLive,
       Math.max(0, performance.now() - snapshotReceivedAt));
+    applyCompass();
     acknowledgeVisibleFeedback();
   }, 250);
   try {
@@ -516,6 +558,7 @@ export function mountApp(root: HTMLElement): () => void {
   render();
   return () => {
     disposed = true; cancelPermissionCheck(); stopCollection(); stopLiveUpdates(); connection?.close();
+    stopCompass?.(); stopCompass = null;
     clearInterval(ageInterval);
     if (audio) void audio.close().catch(() => console.warn("monk", "audio_close_failed"));
     document.removeEventListener("visibilitychange", visibility); root.replaceChildren();

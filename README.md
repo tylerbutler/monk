@@ -82,6 +82,22 @@ Without your position, the radar identifies a known peer reference by name.
 An absent position shows a waiting state. Old and approximate positions
 remain visible; the app updates their age labels even while offline.
 
+Select **Use compass** for optional **Heading-up** radar. On browsers that
+request sensor permission, respond to the prompt after selecting the button.
+Player positions and compass directions rotate with your phone; faction
+icons, player numbers, and progress rings stay upright. Direction labels
+in the player list still refer to geographic north. Select **Use compass**
+again to stop compass access and restore the fixed view.
+
+Compass access needs HTTPS and a supported sensor/browser. iPhone Safari
+uses its compass heading; other browsers must provide absolute orientation.
+Relative orientation and GPS travel direction are not used as a compass.
+Unavailable, uncalibrated, or inaccurate readings use North-up. A three-second
+gap also returns the radar to North-up; a usable new reading restores Heading-up
+while it is selected. Hiding the app, leaving, or ending the round stops compass
+access. Compass readings stay on your device and do not affect game rules or
+location sharing. Sensor accuracy varies by device and surroundings.
+
 Influence requires a shared position less than **30 seconds** old and within
 the uncertainty limit. Unknown-age positions cannot contribute to influence.
 A repeated capture does not extend its original deadline. After expiry,
