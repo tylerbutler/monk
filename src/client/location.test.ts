@@ -4,7 +4,6 @@ import { startLocation } from "./location";
 import type { LocationStatus, PositionReport } from "../shared/protocol";
 
 let onWatch: PositionCallback;
-let onFallback: PositionCallback;
 let onError: PositionErrorCallback;
 let clearWatch: ReturnType<typeof vi.fn>;
 let fallback: ReturnType<typeof vi.fn>;
@@ -15,7 +14,7 @@ beforeEach(() => {
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
   Object.defineProperty(navigator, "wakeLock", { configurable: true, value: undefined });
   clearWatch = vi.fn();
-  fallback = vi.fn((success: PositionCallback) => { onFallback = success; });
+  fallback = vi.fn();
   Object.defineProperty(navigator, "geolocation", { configurable: true, value: {
     watchPosition: vi.fn((success: PositionCallback, error: PositionErrorCallback) => { onWatch = success; onError = error; return 1; }),
     getCurrentPosition: fallback, clearWatch,
@@ -43,16 +42,16 @@ it("reports permission denial and stops collection", () => {
   expect(clearWatch).toHaveBeenCalledWith(1);
   stop();
 });
-it("permits one fallback request and discards callbacks after stop or hide", () => {
+it("uses the watch without forced polling and discards callbacks after stop or hide", () => {
   const fixes: PositionReport[] = [];
   const stop = startLocation(f => fixes.push(f), () => {});
-  vi.advanceTimersByTime(3000);
-  expect(fallback).toHaveBeenCalledTimes(1);
+  vi.advanceTimersByTime(30000);
+  expect(fallback).not.toHaveBeenCalled();
   stop();
-  onFallback(position(13000));
+  onWatch(position(40000));
   expect(fixes).toHaveLength(0);
   vi.advanceTimersByTime(5000);
-  expect(fallback).toHaveBeenCalledTimes(1);
+  expect(fallback).not.toHaveBeenCalled();
   const stopAgain = startLocation(f => fixes.push(f), () => {});
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
   document.dispatchEvent(new Event("visibilitychange"));
@@ -60,16 +59,17 @@ it("permits one fallback request and discards callbacks after stop or hide", () 
   expect(fixes).toHaveLength(0);
   stopAgain();
 });
-it("detects backward wall-clock changes without sending a fix", () => {
+it("reports a new position after the phone clock moves backward", () => {
   const states: LocationStatus[] = [], fixes: PositionReport[] = [];
   const stop = startLocation(f => fixes.push(f), s => states.push(s));
+  onWatch(position(10000));
   vi.setSystemTime(5000);
   onWatch(position(5000));
-  expect(fixes).toHaveLength(0);
-  expect(states.at(-1)?.reason).toMatch(/clock/i);
+  expect(fixes.map(f => [f.seq, f.capturedAtMs, f.reportedAgeMs])).toEqual([[1, 10000, 0], [2, 5000, 0]]);
+  expect(states.at(-1)?.reason).toBeNull();
   stop();
 });
-it("keeps the clock epoch across collection restarts and quarantines old cached fixes after resynchronization", () => {
+it("preserves sequence numbers across restarts without a clock quarantine", () => {
   const fixes: PositionReport[] = [], states: LocationStatus[] = [];
   const stop = startLocation(f => fixes.push(f), s => states.push(s));
   onWatch(position(10000));
@@ -78,29 +78,15 @@ it("keeps the clock epoch across collection restarts and quarantines old cached 
   vi.setSystemTime(12000);
   const stopAgain = startLocation(f => fixes.push(f), s => states.push(s));
   onWatch(position(11000));
-  expect(fixes).toHaveLength(1);
-  expect(states.at(-1)?.reason).toMatch(/clock/i);
+  expect(fixes.map(f => [f.seq, f.capturedAtMs, f.reportedAgeMs])).toEqual([[1, 10000, 0], [2, 11000, 1000]]);
   stopAgain();
-  const stopAfterProbe = startLocation(f => fixes.push(f), s => states.push(s));
-  onWatch(position(11000));
-  expect(fixes).toHaveLength(1);
-  vi.advanceTimersByTime(1001);
-  onWatch(position(13001));
-  expect(fixes.map(f => f.capturedAtMs)).toEqual([10000, 13001]);
-  stopAfterProbe();
 });
-it.each(["fix", "error"])("does not release an outstanding fallback when a watch %s arrives", kind => {
-  const stop = startLocation(() => {}, () => {});
-  onWatch(position(10000));
-  vi.advanceTimersByTime(1000);
-  expect(fallback).toHaveBeenCalledTimes(1);
-  if (kind === "fix") onWatch(position(10000));
-  else onError({ code: 2, message: "Unavailable", PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 });
-  vi.advanceTimersByTime(2000);
-  expect(fallback).toHaveBeenCalledTimes(1);
-  onFallback(position(13000));
-  vi.advanceTimersByTime(1000);
-  expect(fallback).toHaveBeenCalledTimes(2);
+it.each([[9999, 1], [5000, 5000], [0, 10000], [10001, null]])("reports available capture %s with age %s", (timestamp, age) => {
+  const fixes: PositionReport[] = [];
+  const stop = startLocation(f => fixes.push(f), () => {});
+  onWatch(position(timestamp!));
+  expect(fixes).toHaveLength(1);
+  expect(fixes[0]).toMatchObject({ capturedAtMs: timestamp, reportedAgeMs: age });
   stop();
 });
 it("reports a released wake lock and releases a late-acquired lock after stop", async () => {
@@ -122,4 +108,17 @@ it("reports a released wake lock and releases a late-acquired lock after stop", 
   stopLate();
   await Promise.resolve(); await Promise.resolve();
   expect(late.released).toBe(true);
+});
+it("normalizes fractional browser milliseconds without rejecting available coordinates", () => {
+  const fixes: PositionReport[] = [];
+  const stop = startLocation(f => fixes.push(f), () => {});
+  onWatch(position(9999.25));
+  expect(fixes).toMatchObject([{ capturedAtMs: 9999, reportedAgeMs: 1 }]);
+  stop();
+});
+it("does not send a fix if its status callback stops the watch", () => {
+  const fixes: PositionReport[] = [];
+  const stop = startLocation(f => fixes.push(f), s => { if (s.permission === "granted") stop(); });
+  onWatch(position(10000));
+  expect(fixes).toEqual([]);
 });

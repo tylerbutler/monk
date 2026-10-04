@@ -20,12 +20,12 @@ function field(parent: HTMLElement, label: string, name: string, type = "text", 
 export function mountApp(root: HTMLElement): () => void {
   let credentials: SessionCredentials | null = null, connection: MatchConnection | null = null;
   let snapshot: PlayerSnapshot | null = null, trial: TrialStatus | null = null;
-  let snapshotLive = false, snapshotTimer: ReturnType<typeof setTimeout> | null = null;
+  let snapshotLive = false, snapshotReceivedAt = performance.now();
   let latest: TrialSample | null = null, summary: TrialSummary | null = null;
   let connectionStatus: ConnectionStatus = { state: "connecting", reason: null };
   let location: LocationStatus = { collecting: false, permission: "unknown", visible: true, wakeLock: "unsupported", reason: null };
-  let consent = false, clockReady = false, disposed = false;
-  let startChecking = false, commandStatus = "", feedback: EngineEvent[] = [];
+  let consent = false, trialConsent = false, clockReady = false, disposed = false;
+  let commandStatus = "", feedback: EngineEvent[] = [];
   let conversionNotices: EngineEvent[] = [];
   const pendingCommands = new Map<string, HostCommand>();
   const pendingFeedback = new Set<number>(), acknowledged = new Set<number>();
@@ -34,6 +34,7 @@ export function mountApp(root: HTMLElement): () => void {
   let stopPermissionCheck: (() => void) | null = null, requestingPermission = false;
   let error = "";
   let inviteStatus = "";
+  let diagnosticStatus = "";
   const rawInvite = new URLSearchParams(window.location.search).get("room");
   const invitedCode = rawInvite?.trim().toUpperCase() ?? null;
   const validInvite = invitedCode !== null && /^[A-Z2-9]{8}$/.test(invitedCode);
@@ -44,8 +45,6 @@ export function mountApp(root: HTMLElement): () => void {
   function showError(reason: string) { error = reason; render(); }
   function stopLiveUpdates() {
     snapshotLive = false;
-    if (snapshotTimer !== null) clearTimeout(snapshotTimer);
-    snapshotTimer = null;
   }
   function button(parent: HTMLElement, label: string, action: () => void | Promise<void>, name: string, className = "") {
     const node = document.createElement("button");
@@ -57,15 +56,37 @@ export function mountApp(root: HTMLElement): () => void {
     });
     parent.append(node); return node;
   }
-  function stopCollection() { const stop = stopLocation; stopLocation = null; stop?.(); }
+  function stopCollection() {
+    const stop = stopLocation; stopLocation = null;
+    if (!stop) return;
+    if (snapshot) {
+      const radar = snapshot.radar;
+      snapshot = { ...snapshot, outgoing: null, incoming: [], radar: radar ? { ...radar,
+        reference: radar.reference?.playerId === snapshot.ownPlayerId ? { ...radar.reference, active: false } : radar.reference,
+        players: radar.players.map(p => p.playerId === snapshot?.ownPlayerId && p.position ?
+          { ...p, position: { ...p.position, active: false } } : p),
+      } : null };
+    }
+    stop();
+    if (connectionStatus.state === "connected" && snapshot?.ownPlayerId && snapshot.phase !== "ended") {
+      connection?.send({ version: 1, type: "suspend", reason: "Location sharing is stopped." });
+    }
+  }
   function cancelPermissionCheck() {
     stopPermissionCheck?.(); stopPermissionCheck = null;
     if (requestingPermission) location = { ...location, reason: "Location permission check canceled." };
     requestingPermission = false;
   }
-  function requestLocationConsent(forTrial = false, onGranted?: () => void) {
+  function requestTrialConsent() {
     if (requestingPermission) return;
-    cancelPermissionCheck(); consent = false; stopCollection();
+    function agree() {
+      trialConsent = true;
+      connection?.send({ version: 1, type: "clock_probe", nonce: crypto.randomUUID(), clientSendMs: Date.now() });
+      connection?.send({ version: 1, type: "trial_ready", consent: true });
+      reconcileCollection();
+    }
+    if (consent && location.permission === "granted") { agree(); return; }
+    cancelPermissionCheck();
     requestingPermission = true; error = "";
     location = { ...location, permission: "unknown", reason: "Requesting browser location access. Respond if a prompt appears." };
     render();
@@ -73,32 +94,27 @@ export function mountApp(root: HTMLElement): () => void {
       requestingPermission = false; stopPermissionCheck = null;
       location = { ...location, ...result };
       if (result.permission === "granted") {
-        consent = true;
-        if (forTrial) connection?.send({ version: 1, type: "trial_ready", consent: true });
-        onGranted?.();
-        reconcileCollection();
+        agree();
       } else error = result.reason ?? "Location access failed. Try again.";
       render();
     });
     stopPermissionCheck = requestingPermission ? cancel : null;
   }
   function reconcileCollection() {
-    const needed = !!snapshot?.ownPlayerId && consent && clockReady && connectionStatus.state === "connected" &&
-      document.visibilityState === "visible" && (snapshot.phase === "running" || snapshot.resumeChecking || startChecking ||
-        !!trial?.collecting && trial.readyIds.includes(snapshot.ownPlayerId));
+    const needed = !!snapshot?.ownPlayerId && (consent || trialConsent && clockReady &&
+      !!trial?.collecting && trial.readyIds.includes(snapshot.ownPlayerId)) && connectionStatus.state === "connected" &&
+      document.visibilityState === "visible" && snapshot.phase !== "ended";
     if (!needed) { stopCollection(); return; }
-    if (!stopLocation) stopLocation = startLocation(fix => connection?.send({ version: 1, type: "position", report: fix }), status => {
+    if (!stopLocation) {
+      stopLocation = startLocation(fix => connection?.send({ version: 1, type: "position", report: fix }), status => {
       location = { ...status, permission: status.permission === "unknown" && location.permission === "granted" ? "granted" : status.permission };
-      if (status.permission === "denied") {
-        consent = false; error = status.reason ?? "Location permission denied."; stopCollection();
-      }
-      if (status.reason?.includes("clock")) {
-        clockReady = false;
-        connection?.send({ version: 1, type: "suspend", reason: "Phone clock changed." });
-        connection?.send({ version: 1, type: "clock_probe", nonce: crypto.randomUUID(), clientSendMs: Date.now() });
+      if (!status.collecting && status.reason && document.visibilityState === "visible") {
+        consent = false; trialConsent = false; error = status.reason; stopCollection();
       }
       if (!disposed) render();
-    });
+      });
+      if (!location.collecting) { stopLocation(); stopLocation = null; }
+    }
   }
   function receive(message: ServerMessage) {
     if (disposed) return;
@@ -108,17 +124,12 @@ export function mountApp(root: HTMLElement): () => void {
     if (message.type === "clock_ready") clockReady = true;
     if (message.type === "snapshot" || message.type === "update") {
       const previousTrial = trial;
-      snapshot = message.snapshot; trial = message.trial; startChecking = message.startChecking;
-      if (snapshotTimer !== null) clearTimeout(snapshotTimer);
-      snapshotTimer = null; snapshotLive = document.visibilityState === "visible";
-      if (snapshot.mode === "test" && snapshot.phase === "running" && snapshot.parameters) {
-        const ages = [snapshot.radar?.reference?.ageMs ?? 0,
-          ...(snapshot.radar?.players.map(p => p.position?.ageMs ?? 0) ?? [])];
-        snapshotTimer = setTimeout(() => { snapshotTimer = null; snapshotLive = false; render(); },
-          Math.max(0, snapshot.parameters.freshnessMs - Math.max(...ages)));
-      }
+      snapshot = message.snapshot; trial = message.trial;
+      snapshotReceivedAt = performance.now(); snapshotLive = document.visibilityState === "visible";
       if (snapshot.phase === "ended" || previousTrial && (!trial || previousTrial.referenceM !== trial.referenceM ||
-        previousTrial.playerIds.some((id, index) => id !== trial?.playerIds[index]))) cancelPermissionCheck();
+        previousTrial.playerIds.some((id, index) => id !== trial?.playerIds[index]))) {
+        cancelPermissionCheck(); trialConsent = false;
+      }
       if (message.type === "update") {
         if (message.outcome) {
           pendingCommands.delete(message.outcome.commandId);
@@ -136,8 +147,9 @@ export function mountApp(root: HTMLElement): () => void {
       }
     }
     if (message.type === "error") {
-      error = message.reason;
-      if (message.code === "expired") { cancelPermissionCheck(); consent = false; clockReady = false; stopCollection(); }
+      if (message.code.startsWith("diagnostic_") || message.code === "clock_invalid") diagnosticStatus = message.reason;
+      else error = message.reason;
+      if (message.code === "expired") { cancelPermissionCheck(); consent = false; trialConsent = false; clockReady = false; stopCollection(); }
     }
     if (message.type === "trial_sample") {
       latest = message.sample;
@@ -146,18 +158,20 @@ export function mountApp(root: HTMLElement): () => void {
     reconcileCollection(); render();
   }
   function connect(next: SessionCredentials) {
-    if (credentials?.matchCode !== next.matchCode) { pendingCommands.clear(); commandStatus = ""; }
-    cancelPermissionCheck(); connection?.close(); stopCollection();
+    if (credentials?.matchCode !== next.matchCode) { pendingCommands.clear(); commandStatus = ""; consent = false; }
+    cancelPermissionCheck(); stopCollection(); connection?.close();
     stopLiveUpdates();
-    credentials = next; snapshot = null; trial = null; clockReady = false; error = "";
+    credentials = next; snapshot = null; trial = null; trialConsent = false; clockReady = false; error = ""; diagnosticStatus = "";
     try { sessionStorage.setItem("monk-session", JSON.stringify(next)); }
     catch { throw new Error("Session storage is unavailable. Allow storage to keep private credentials."); }
     connection = connectMatch(next, {
       onMessage: receive,
       onStatus(status) {
         connectionStatus = status;
-        if (status.state !== "connected" || status.reason) { clockReady = false; stopCollection(); }
+        if (status.state === "connected" && status.reason) { clockReady = false; diagnosticStatus = status.reason; }
+        if (status.state !== "connected") { clockReady = false; stopCollection(); }
         if (status.state !== "connected") stopLiveUpdates();
+        reconcileCollection();
         if (!disposed) render();
       },
     });
@@ -213,11 +227,11 @@ export function mountApp(root: HTMLElement): () => void {
     return parsed.data;
   }
   function leave() {
-    cancelPermissionCheck(); stopCollection(); stopLiveUpdates(); consent = false;
+    cancelPermissionCheck(); stopCollection(); stopLiveUpdates(); consent = false; trialConsent = false;
     connection?.send({ version: 1, type: "leave" });
     connection?.close(); connection = null; credentials = null; snapshot = null; trial = null;
     latest = null; summary = null; retained.clear(); disclosures.clear(); error = "";
-    pendingCommands.clear(); pendingFeedback.clear(); acknowledged.clear(); feedback = []; startChecking = false;
+    pendingCommands.clear(); pendingFeedback.clear(); acknowledged.clear(); feedback = [];
     conversionNotices = []; inviteStatus = "";
     sessionStorage.removeItem("monk-session"); render();
   }
@@ -234,8 +248,9 @@ export function mountApp(root: HTMLElement): () => void {
   function trialView(parent: HTMLElement) {
     const section = document.createElement("details"); section.className = "trial"; section.id = "location-trial";
     section.open = !!trial; parent.append(section);
-    text(section, "summary", "Two-iPhone location trial").id = "location-trial-toggle";
-    text(section, "p", "Measure marked separations outdoors. Both selected players must agree before location starts. Diagnostic freshness is 5000 ms; it does not set gameplay values.");
+    text(section, "summary", "Optional location measurement").id = "location-trial-toggle";
+    text(section, "p", "Both selected players must agree to measurements. This does not change ordinary sharing or block the game.");
+    if (diagnosticStatus) text(section, "p", diagnosticStatus, "radar-note");
     const details = document.createElement("details"); details.id = "trial-devices";
     details.open = !summary; text(details, "summary", "Device pair and conditions").id = "trial-devices-toggle"; section.append(details);
     const devices = document.createElement("div"); devices.className = "form-grid"; details.append(devices);
@@ -285,13 +300,17 @@ export function mountApp(root: HTMLElement): () => void {
       text(section, "p", trial.collecting ? "Trial collecting. Keep both apps visible." : "Waiting for both players to agree.", "state-line");
       if (snapshot?.ownPlayerId && trial.playerIds.includes(snapshot.ownPlayerId) && !trial.readyIds.includes(snapshot.ownPlayerId)) {
         button(section, requestingPermission ? "Requesting location access..." : "Agree and collect location",
-          () => requestLocationConsent(true), "trial-ready").disabled = requestingPermission;
+          requestTrialConsent, "trial-ready").disabled = requestingPermission;
         button(section, "Decline trial", () => {
-          cancelPermissionCheck(); consent = false; stopCollection();
+          cancelPermissionCheck(); trialConsent = false;
           connection?.send({ version: 1, type: "trial_ready", consent: false });
+          reconcileCollection(); render();
         }, "trial-decline", "secondary");
       }
-      button(section, "Stop trial", () => { cancelPermissionCheck(); stopCollection(); connection?.send({ version: 1, type: "trial_end" }); }, "trial-end", "secondary");
+      button(section, "Stop trial", () => {
+        cancelPermissionCheck(); trialConsent = false;
+        connection?.send({ version: 1, type: "trial_end" }); reconcileCollection(); render();
+      }, "trial-end", "secondary");
       text(section, "p", trial.referenceM === null ? "No reference separation entered." : `Reference separation: ${trial.referenceM} m`);
     }
     if (latest) {
@@ -319,14 +338,17 @@ export function mountApp(root: HTMLElement): () => void {
   }
   function render() {
     if (disposed) return;
-    const focused = document.activeElement instanceof HTMLElement ? document.activeElement.id : "";
+    const active = document.activeElement;
+    const focused = active instanceof HTMLElement ? active.id : "";
+    const selection = active instanceof HTMLInputElement && active.selectionStart !== null ?
+      { start: active.selectionStart, end: active.selectionEnd, direction: active.selectionDirection } : null;
     for (const input of root.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-retain]")) {
       retained.set(input.id, { value: input.value, checked: input instanceof HTMLInputElement && input.checked });
     }
     for (const details of root.querySelectorAll<HTMLDetailsElement>("details[id]")) disclosures.set(details.id, details.open);
     root.replaceChildren();
     const header = document.createElement("header"); header.className = "masthead"; root.append(header);
-    text(header, "h1", "Monk"); text(header, "span", "Outdoor playtest", "edition");
+    text(header, "h1", "Monk");
     if (snapshot && conversionNotices.length) {
       const notice = document.createElement("aside"); notice.className = "conversion-notice";
       notice.setAttribute("role", "status"); notice.setAttribute("aria-live", pendingFeedback.size ? "polite" : "off");
@@ -348,7 +370,8 @@ export function mountApp(root: HTMLElement): () => void {
       text(root, "p", "Rock converts Scissors. Paper converts Rock. Scissors converts Paper. Confirmed proximity changes your faction; you stay in the game.", "intro");
       const area = document.createElement("section"); root.append(area); text(area, "h3", "Play with friends");
       if (validInvite) text(area, "p", `You are invited to room ${invitedCode}.`);
-      button(area, "Create room", async () => { connect(await request("/api/matches", {})); }, "create", validInvite ? "secondary" : "");
+      const name = field(area, "Display name (optional)", "displayName"); name.maxLength = 80; name.autocomplete = "off";
+      button(area, "Create room", async () => { connect(await request("/api/matches", { label: name.value.trim() })); }, "create", validInvite ? "secondary" : "");
       const form = document.createElement("form"); form.className = "join-form"; area.append(form);
       const code = field(form, "Room code", "matchCode", "text", validInvite ? invitedCode : "");
       code.required = true; code.maxLength = 8; code.autocomplete = "off";
@@ -359,14 +382,14 @@ export function mountApp(root: HTMLElement): () => void {
         try {
           const matchCode = code.value.trim().toUpperCase();
           if (!/^[A-Z2-9]{8}$/.test(matchCode)) throw new Error("Enter the eight-character room code.");
-          connect(await request(`/api/matches/${matchCode}/join`, {}));
+          connect(await request(`/api/matches/${matchCode}/join`, { label: name.value.trim() }));
         } catch (failure) { showError(failure instanceof Error ? failure.message : "Join failed. Try again."); }
         finally { submit.disabled = false; }
       });
     } else {
       const top = document.createElement("div"); top.className = "match-heading"; root.append(top);
       text(top, "h2", `Room ${credentials.matchCode}`);
-      if (snapshot?.phase === "lobby") {
+      if (snapshot?.phase !== "ended") {
         const invite = new URL("/", window.location.origin); invite.searchParams.set("room", credentials.matchCode);
         text(top, "h3", "Invite players");
         const link = document.createElement("a"); link.href = invite.href; link.textContent = invite.href;
@@ -382,7 +405,7 @@ export function mountApp(root: HTMLElement): () => void {
       }
       if (!snapshot) text(root, "p", "Connecting to the private match. Location is not collected.");
       if (snapshot) {
-        if (snapshot.canHost && !snapshot.ownPlayerId && snapshot.phase === "lobby") {
+        if (snapshot.canHost && !snapshot.ownPlayerId && snapshot.phase !== "ended") {
           button(top, "Join as a player on this phone", async () => {
             if (!credentials) return;
             const player = await request(`/api/matches/${credentials.matchCode}/join`, { hostToken: credentials.hostToken });
@@ -390,32 +413,26 @@ export function mountApp(root: HTMLElement): () => void {
           }, "host-join");
         }
         const section = document.createElement("section"); root.append(section);
-        renderMatch(section, snapshot, {
-          start: () => {
-            if (snapshot?.ownPlayerId && !consent) requestLocationConsent(false, () => sendCommand({ type: "start" }));
-            else sendCommand({ type: "start" });
-          }, pause: () => sendCommand({ type: "pause" }),
+        if (snapshot.ownPlayerId && snapshot.phase !== "ended") {
+          text(section, "p", consent ? location.collecting ? "Waiting for your location or the next update." :
+            "Sharing will resume when connected and visible." : "Location sharing is off", "location-sharing");
+          if (!consent) button(section, "Share location", () => {
+            error = ""; consent = true; reconcileCollection(); render();
+          }, "round-consent");
+          else button(section, "Stop sharing", () => {
+            consent = false; trialConsent = false; cancelPermissionCheck(); stopCollection(); render();
+          }, "stop-sharing", "secondary");
+        }
+        const game = document.createElement("div"); section.append(game);
+        renderMatch(game, snapshot, {
+          start: () => sendCommand({ type: "start" }), pause: () => sendCommand({ type: "pause" }),
           beginResume: () => sendCommand({ type: "begin_resume" }), cancelResume: () => sendCommand({ type: "cancel_resume" }),
           end: () => sendCommand({ type: "end" }), configure: sendCommand,
           setFaction: (playerId, faction) => sendCommand({ type: "set_faction", playerId, faction }), leave,
-        }, connectionStatus.state === "connected" && (snapshot.mode !== "test" || snapshotLive));
-        const start = section.querySelector<HTMLButtonElement>('[data-action="start"]');
-        if (start) {
-          start.disabled ||= requestingPermission || startChecking;
-          if (requestingPermission) start.textContent = "Requesting location access...";
-          else if (startChecking) start.textContent = "Checking fresh locations...";
-        }
-        if (startChecking) {
-          text(section, "p", "Freshness check before start. The round is not running. Consenting players must provide fresh fixes within 10 seconds.", "state-line");
-          for (const node of section.querySelectorAll<HTMLButtonElement | HTMLInputElement>(".configuration input, .configuration button, [data-action='start']")) node.disabled = true;
-        }
+        }, connectionStatus.state === "connected" && snapshotLive, Math.max(0, performance.now() - snapshotReceivedAt));
         if (commandStatus) { const notice = text(section, "p", commandStatus, "state-line"); notice.setAttribute("role", "status"); }
         for (const select of section.querySelectorAll<HTMLSelectElement>('[data-action="set-faction"]')) {
           select.disabled = [...pendingCommands.values()].some(c => c.type === "set_faction");
-        }
-        if (snapshot.ownPlayerId && !consent && snapshot.phase !== "ended" && !(snapshot.canHost && snapshot.phase === "lobby")) {
-          button(section, requestingPermission ? "Requesting location access..." : "Allow location for this round",
-            () => requestLocationConsent(), "round-consent").disabled = requestingPermission;
         }
         if (snapshot.ownPlayerId && typeof AudioContext !== "undefined" && !audio) {
           button(section, "Enable sound cues", async () => {
@@ -424,12 +441,8 @@ export function mountApp(root: HTMLElement): () => void {
             render();
           }, "enable-audio", "secondary");
         }
-        if (snapshot.phase !== "lobby") {
-          text(section, "h3", "Players");
-          const roster = document.createElement("ul"); roster.className = "roster"; section.append(roster);
-          for (const p of snapshot.roster) text(roster, "li", `${p.label} - ${p.faction}${p.id === snapshot.ownPlayerId ? " (you)" : ""}`);
-        }
-        if (snapshot.phase === "lobby") trialView(root);
+        if (snapshot.phase === "lobby" && snapshot.canHost) trialView(game.querySelector("#host-diagnostics") ?? game);
+        else if (trial && snapshot.ownPlayerId && trial.playerIds.includes(snapshot.ownPlayerId)) trialView(root);
         if (feedback.length) {
           const events = document.createElement("section"); events.className = "feedback"; events.setAttribute("aria-label", "Match feedback"); root.append(events);
           text(events, "h3", "Match feedback");
@@ -440,16 +453,15 @@ export function mountApp(root: HTMLElement): () => void {
         }
       }
       if (connectionStatus.state === "failed") button(root, "Reconnect", () => { if (credentials) connect(credentials); }, "reconnect", "secondary");
-      button(root, "Leave match", leave, "leave", "secondary");
+      button(root, "Leave room", leave, "leave", "secondary");
       const status = document.createElement("section"); status.className = "status"; status.setAttribute("aria-label", "Device status"); root.append(status);
-      text(status, "p", `Connection: ${connectionStatus.state}${connectionStatus.reason ? ` - ${connectionStatus.reason}` : ""}`);
-      text(status, "p", `Location: ${location.collecting ? "collecting" : "stopped"}; permission ${location.permission}; screen wake lock ${location.wakeLock}.`);
-      if (location.reason) text(status, "p", location.reason, "warning");
+      text(status, "p", `Connection: ${connectionStatus.state}${connectionStatus.state !== "connected" && connectionStatus.reason ? ` - ${connectionStatus.reason}` : ""}`);
+      if (location.reason && location.reason !== error) text(status, "p", location.reason, "warning");
     }
     const safety = document.createElement("footer"); root.append(safety);
     text(safety, "h3", "Location and safe play");
     text(safety, "p", "Agree on a bounded outdoor area and safe routes. No running or touching is needed. You can leave without a gameplay penalty. Keep this app visible and the screen on.");
-    text(safety, "p", "Allow location requests browser access and discards its permission-check fix. Location reports require a consenting trial, active round, or fresh start or resume check. Testing-mode radar shares approximate direction and distance with players and the host, not raw opponent coordinates. Locations are not retained in match records or exports. Matches and credentials expire within 24 hours.");
+    text(safety, "p", "Share location uses browser permission. Players and the host see approximate direction and distance, not raw opponent coordinates. Last-known positions stay on radar, but influence stops after 30 seconds without a new position. Sharing stops when this app is hidden or disconnected. Locations stay only in temporary server memory, not match records or exports. Rooms and credentials expire within 24 hours.");
     for (const input of root.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-retain]")) {
       const value = retained.get(input.id);
       if (value) { input.value = value.value; if (input instanceof HTMLInputElement) input.checked = value.checked; }
@@ -458,19 +470,23 @@ export function mountApp(root: HTMLElement): () => void {
       if (details.id === "location-trial" && trial) details.open = true;
       else if (disclosures.has(details.id)) details.open = disclosures.get(details.id) === true;
     }
-    if (focused) root.querySelector<HTMLElement>(`[id="${focused}"]`)?.focus({ preventScroll: true });
+    if (focused) {
+      const next = root.querySelector<HTMLElement>(`[id="${focused}"]`);
+      next?.focus({ preventScroll: true });
+      if (selection && next instanceof HTMLInputElement) next.setSelectionRange(selection.start, selection.end, selection.direction ?? undefined);
+    }
     acknowledgeVisibleFeedback();
   }
   function visibility() {
     if (document.visibilityState !== "visible") {
       stopCollection(); stopLiveUpdates(); connection?.send({ version: 1, type: "suspend", reason: "App is hidden." }); render();
     } else if (connection) {
-      clockReady = false;
       connection.send({ version: 1, type: "snapshot_request" });
-      connection.send({ version: 1, type: "clock_probe", nonce: crypto.randomUUID(), clientSendMs: Date.now() });
+      reconcileCollection(); render();
     }
   }
   document.addEventListener("visibilitychange", visibility);
+  const ageInterval = setInterval(() => { if (snapshot) render(); }, 250);
   try {
     const raw = sessionStorage.getItem("monk-session");
     if (raw) {
@@ -485,6 +501,7 @@ export function mountApp(root: HTMLElement): () => void {
   render();
   return () => {
     disposed = true; cancelPermissionCheck(); stopCollection(); stopLiveUpdates(); connection?.close();
+    clearInterval(ageInterval);
     if (audio) void audio.close().catch(() => console.warn("monk", "audio_close_failed"));
     document.removeEventListener("visibilitychange", visibility); root.replaceChildren();
   };

@@ -36,6 +36,44 @@ it("authenticates in the first frame and never puts credentials in its URL", () 
   expect(JSON.parse(socket.frames[0])).toMatchObject({ type: "authenticate", hostToken: credentials.hostToken });
   connection.close();
 });
+it("allows authenticated reporting without a clock check", () => {
+  const statuses: ConnectionStatus[] = [];
+  const connection = connectMatch(credentials, { onMessage() {}, onStatus: s => statuses.push(s) });
+  const socket = instances[0]; auth(socket); socket.receive(snapshot("stream-a", 2));
+  connection.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs: 1,
+    latitude: 0, longitude: 0, accuracyM: 1, reportedAgeMs: 0 } });
+  vi.advanceTimersByTime(30000);
+  expect(socket.frames.map(f => JSON.parse(f)).filter(m => m.type === "clock_probe")).toEqual([]);
+  expect(socket.frames.map(f => JSON.parse(f)).filter(m => m.type === "position")).toHaveLength(1);
+  expect(statuses.at(-1)?.state).toBe("connected");
+  connection.close();
+});
+it("keeps a requested diagnostic clock timeout from failing the connection", () => {
+  const statuses: ConnectionStatus[] = [];
+  const connection = connectMatch(credentials, { onMessage() {}, onStatus: s => statuses.push(s) });
+  const socket = instances[0]; auth(socket); socket.receive(snapshot("stream-a", 2));
+  connection.send({ version: 1, type: "clock_probe", nonce: "diagnostic", clientSendMs: Date.now() });
+  vi.advanceTimersByTime(5000);
+  connection.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs: 1,
+    latitude: 0, longitude: 0, accuracyM: 1, reportedAgeMs: 0 } });
+  expect(statuses.filter(s => s.state === "failed")).toEqual([]);
+  expect(socket.frames.map(f => JSON.parse(f)).at(-1)?.type).toBe("position");
+  connection.close();
+});
+it("keeps invalid diagnostic clock replies from stopping ordinary reports", () => {
+  const statuses: ConnectionStatus[] = [];
+  const connection = connectMatch(credentials, { onMessage() {}, onStatus: s => statuses.push(s) });
+  const socket = instances[0]; auth(socket); socket.receive(snapshot("stream-a", 2));
+  connection.send({ version: 1, type: "clock_probe", nonce: "diagnostic", clientSendMs: Date.now() });
+  socket.receive({ version: 1, type: "clock_reply", streamId: "stream-a", streamSeq: 3,
+    nonce: "wrong", clientSendMs: Date.now(), serverReceiveMs: Date.now(), serverSendMs: Date.now() });
+  connection.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs: 1,
+    latitude: 0, longitude: 0, accuracyM: 1, reportedAgeMs: 0 } });
+  expect(statuses.filter(s => s.state === "failed")).toEqual([]);
+  expect(socket.frames.map(f => JSON.parse(f)).at(-1)?.type).toBe("position");
+  expect(socket.frames.map(f => JSON.parse(f)).filter(m => m.type === "clock_probe")).toHaveLength(1);
+  connection.close();
+});
 it("requires snapshots after stream changes or cursor gaps, not global private-event gaps", () => {
   const messages: ServerMessage[] = [];
   const connection = connectMatch(credentials, { onMessage: m => messages.push(m), onStatus() {} });

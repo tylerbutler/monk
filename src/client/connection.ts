@@ -22,7 +22,8 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
     status("connected", "Checking the phone clock.");
     rawSend({ version: 1, type: "clock_probe", nonce: clockProbe.nonce, clientSendMs: clockProbe.wallMs });
     probeTimeout = setTimeout(() => {
-      clockProbe = null; status("failed", "Clock check timed out. Reconnect before collecting location.");
+      clockProbe = null; probeTimeout = null;
+      status("connected", "Diagnostic clock check timed out. Location sharing is still available.");
     }, 5000);
   }
   function open() {
@@ -51,7 +52,6 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
           for (const command of pending.values()) if (command.message.command.type === "start") command.attempts = 1;
         }
         handlers.onMessage(message);
-        if (changed && authenticated) requestProbe();
         return;
       }
       if (message.type !== "authenticated" && (needsSnapshot || message.streamSeq !== cursor + 1)) {
@@ -63,13 +63,16 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
       }
       cursor = message.streamSeq;
       if (message.type === "authenticated") {
-        authenticated = true; backoff = 1000; requestProbe();
+        authenticated = true; backoff = 1000; status("connected", null);
         for (const { message: command } of pending.values()) rawSend(command);
       }
       if (message.type === "clock_reply") {
         if (!clockProbe || message.nonce !== clockProbe.nonce || message.clientSendMs !== clockProbe.wallMs ||
           Math.abs((Date.now() - clockProbe.wallMs) - (performance.now() - clockProbe.monotonicMs)) > 100) {
-          requestProbe(); return;
+          clockProbe = null;
+          if (probeTimeout !== null) clearTimeout(probeTimeout);
+          probeTimeout = null;
+          status("connected", "Diagnostic clock reply is invalid. Retry the measurement clock check."); return;
         }
         rawSend({ version: 1, type: "clock_confirm", nonce: message.nonce, clientReceiveMs: Date.now() });
       }
@@ -85,7 +88,12 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
         }
       }
       if (message.type === "error") {
-        if (message.code === "clock_invalid") requestProbe();
+        if (message.code === "clock_invalid") {
+          clockProbe = null;
+          if (probeTimeout !== null) clearTimeout(probeTimeout);
+          probeTimeout = null;
+          status("connected", `Diagnostic clock: ${message.reason}`);
+        }
         if (message.code === "expired" || message.code === "unauthorized" || message.code === "auth_timeout") {
           status("failed", message.reason); handlers.onMessage(message); close(); return;
         }
@@ -95,6 +103,9 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
     socket.addEventListener("error", () => status("reconnecting", "Connection failed. Location collection is stopped."));
     socket.addEventListener("close", event => {
       authenticated = false;
+      clockProbe = null;
+      if (probeTimeout !== null) clearTimeout(probeTimeout);
+      probeTimeout = null;
       if (stopped) return;
       if (event.code === 1008) { status("failed", "Session ended or credentials expired."); close(); return; }
       status("reconnecting", "Connection lost. Waiting to reconnect.");
@@ -103,12 +114,11 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
   }
   function close() {
     stopped = true;
-    clearInterval(probeInterval); clearInterval(retryInterval);
+    clearInterval(retryInterval);
     if (reconnect !== null) clearTimeout(reconnect);
     if (probeTimeout !== null) clearTimeout(probeTimeout);
     pending.clear(); socket.close();
   }
-  const probeInterval = setInterval(requestProbe, 30000);
   const retryInterval = setInterval(() => {
     if (!authenticated || stopped) return;
     for (const command of pending.values()) {

@@ -1,4 +1,4 @@
-import { configureSchema, factionSchema, testDeviceLimitations, testPreset } from "../shared/protocol";
+import { configureSchema, factionSchema, gamePreset, locationInactivityMs } from "../shared/protocol";
 import type { EngineEvent, Faction, HostCommand, PlayerSnapshot, RuleParameters } from "../shared/protocol";
 
 export type MatchActions = {
@@ -44,15 +44,24 @@ function factionIcon(parent: Element, faction: Faction) {
     "stroke-linecap": "round", "stroke-linejoin": "round" });
   return icon;
 }
-function renderRadar(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean) {
+export function isCurrentPosition(position: { ageMs: number | null; active: boolean } | null, elapsedMs: number): boolean {
+  return !!position?.active && position.ageMs !== null && position.ageMs + Math.max(0, elapsedMs) < locationInactivityMs;
+}
+function updated(ageMs: number | null, elapsedMs: number): string {
+  if (ageMs === null) return "Update time unknown";
+  const seconds = Math.floor((ageMs + Math.max(0, elapsedMs)) / 1000);
+  return seconds < 1 ? "Updated just now" : seconds < 60 ? `Updated ${seconds} s ago` :
+    `Updated ${Math.floor(seconds / 60)} min ago`;
+}
+function renderRadar(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean, elapsedMs: number) {
   const radar = snapshot.radar;
   if (!radar) return;
-  const age = (ms: number | null) => ms === null ? "unknown" : `${(ms / 1000).toFixed(1)} s`;
   const section = document.createElement("section"); section.className = "player-radar";
   section.setAttribute("aria-label", "Player radar"); root.append(section);
   text(section, "h3", "Player radar");
-  text(section, "p", "North stays at the top. Distances are rounded to 5 m; directions use eight compass points. GPS estimates are not confirmed influence.", "radar-note");
-  const reference = live ? radar.reference : null;
+  text(section, "p", "North stays at the top. Find players by number, faction, and approximate distance.", "radar-note");
+  if (!live) text(section, "p", "Offline or hidden. Showing last-known positions.", "state-line");
+  const reference = radar.reference;
   const label = (id: string) => snapshot.roster.find(p => p.id === id)?.label ?? "Player";
   const layout = document.createElement("div"); layout.className = "radar-layout"; section.append(layout);
   if (reference) {
@@ -91,7 +100,8 @@ function renderRadar(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean)
         svg(chart, "circle", { cx: String(x), cy: String(y), r: "3", class: "radar-estimate" });
       }
       const marker = svg(chart, "g", { transform: `translate(${markerX} ${markerY})`, "data-radar-player": p.playerId,
-        "data-influence": influence, "data-faction": player.faction, class: "radar-marker" });
+        "data-influence": influence, "data-faction": player.faction,
+        "data-current": String(live && isCurrentPosition(p.position, elapsedMs)), class: "radar-marker" });
       svg(marker, "title").textContent = `${index + 1}. ${player.label} - ${names[player.faction]}`;
       svg(marker, "circle", { r: "16" });
       const icon = factionIcon(marker, player.faction);
@@ -99,7 +109,8 @@ function renderRadar(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean)
       icon.setAttribute("width", "22"); icon.setAttribute("height", "22");
       svg(marker, "text", { x: "20", y: "-14", class: "radar-number" }).textContent = String(index + 1);
     });
-    svg(chart, "circle", { cx: "160", cy: "160", r: "7", class: "radar-center" });
+    svg(chart, "circle", { cx: "160", cy: "160", r: "7", class: "radar-center",
+      "data-current": String(live && isCurrentPosition(reference, elapsedMs)) });
     svg(chart, "text", { x: "160", y: "186", "text-anchor": "middle", class: "radar-compass" })
       .textContent = reference.playerId === snapshot.ownPlayerId ? "You" : "Reference";
     text(figure, "figcaption", `Outer ring: ${scale} m. Dashed ring: entry radius. Offset markers link to their estimated positions.`, "radar-note");
@@ -107,9 +118,10 @@ function renderRadar(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean)
   const details = document.createElement("div"); layout.append(details);
   if (reference) {
     text(details, "p", reference.playerId === snapshot.ownPlayerId ? "Reference: you" : `Reference: ${label(reference.playerId)}`, "state-line");
-    text(details, "p", `GPS uncertainty ${reference.accuracyM} m. Fix age ${age(reference.ageMs)}.`, "radar-note");
-  } else text(details, "p", live ? radar.reason ?? "Reference location is unavailable." :
-    "Live player updates are unavailable. Waiting for a fresh server update.", "warning");
+    text(details, "p", `GPS uncertainty ${reference.accuracyM} m. ${updated(reference.ageMs, elapsedMs)}.`, "radar-note");
+    if (reference.accuracyM > (snapshot.parameters?.maxAccuracyM ?? gamePreset.maxAccuracyM)) text(details, "p", "Location is approximate.", "radar-note");
+    else if (!live || !isCurrentPosition(reference, elapsedMs)) text(details, "p", "Last-known position.", "radar-note");
+  } else text(details, "p", "Waiting for location.", "radar-note");
   const list = document.createElement("ol"); list.className = "radar-players"; details.append(list);
   const directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
   for (const p of radar.players) {
@@ -117,13 +129,15 @@ function renderRadar(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean)
     if (!player) continue;
     const row = document.createElement("li"); row.dataset.playerId = p.playerId; list.append(row);
     text(row, "strong", `${player.label} - ${names[player.faction]}`);
-    if (live && p.position) {
+    if (p.position) {
       text(row, "p", p.position.distanceM === 0 ? "Within about 5 m." :
         `about ${p.position.distanceM} m ${directions[p.position.bearingDegrees / 45]}`);
-      text(row, "p", `GPS uncertainty ${p.position.accuracyM} m. Fix age ${age(p.position.ageMs)}.`, "radar-note");
+      text(row, "p", `GPS uncertainty ${p.position.accuracyM} m. ${updated(p.position.ageMs, elapsedMs)}.`, "radar-note");
+      if (p.position.accuracyM > (snapshot.parameters?.maxAccuracyM ?? gamePreset.maxAccuracyM)) text(row, "p", "Location is approximate.", "radar-note");
+      else if (!live || !isCurrentPosition(p.position, elapsedMs)) text(row, "p", "Last-known position.", "radar-note");
       if (snapshot.outgoing?.targetId === p.playerId) text(row, "p", "You are influencing this player.", "influence-label");
       if (snapshot.incoming.some(a => a.attackerId === p.playerId)) text(row, "p", "This player is influencing you.", "influence-label");
-    } else text(row, "p", live ? p.reason ?? "Location is unavailable." : "Live location is unavailable.", "radar-note");
+    } else text(row, "p", "Waiting for location.", "radar-note");
   }
 }
 export function describeEvent(event: EngineEvent, snapshot: PlayerSnapshot): string {
@@ -139,16 +153,17 @@ export function describeEvent(event: EngineEvent, snapshot: PlayerSnapshot): str
     case "lifecycle": return event.reason ?? "Match state changed.";
   }
 }
-export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions: MatchActions, live = true): void {
+export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions: MatchActions, live = true, elapsedMs = 0): void {
   root.replaceChildren();
-  const calibration = snapshot.approved ? "Measured parameters approved for the stated device limits." :
-    "Uncalibrated parameters. Test values are not an accuracy claim.";
-  text(root, "p", snapshot.mode === "test" ? snapshot.approved ? "Testing mode" : "Testing mode - uncalibrated" :
-    "Normal mode", "mode-label");
+  const quality = (id: string) => snapshot.radar?.reference?.playerId === id ? snapshot.radar.reference :
+    snapshot.radar?.players.find(p => p.playerId === id)?.position ?? null;
+  const eligible = (attack: NonNullable<PlayerSnapshot["outgoing"]>) => live && snapshot.phase === "running" &&
+    isCurrentPosition(quality(attack.attackerId), elapsedMs) && isCurrentPosition(quality(attack.targetId), elapsedMs);
+  snapshot = { ...snapshot, outgoing: snapshot.outgoing && eligible(snapshot.outgoing) ? snapshot.outgoing : null,
+    incoming: snapshot.incoming.filter(eligible) };
   text(root, "h2", snapshot.phase === "lobby" ? "Waiting room" : snapshot.phase === "paused" ? "Paused" :
     snapshot.phase === "ended" ? "Round ended" : "Round running");
-  if (snapshot.resumeChecking) text(root, "p", "Freshness check. Gameplay and timers remain paused.", "state-line");
-  if (snapshot.ownFaction && snapshot.phase !== "lobby") {
+  if (snapshot.ownFaction) {
     const own = document.createElement("div"); own.className = "own-faction"; root.append(own);
     factionIcon(own, snapshot.ownFaction);
     text(own, "strong", names[snapshot.ownFaction]); text(root, "p", `${names[snapshot.ownFaction]} converts ${targets[snapshot.ownFaction]}.`);
@@ -169,16 +184,9 @@ export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions
       if (!snapshot.outgoing && !snapshot.incoming.length) text(root, "p", "No confirmed influence.");
       if (snapshot.outgoing || snapshot.incoming.length) text(root, "p", "Influence must stay confirmed until the bar fills. Leaving range or losing location quality stops progress.", "radar-note");
     }
-    text(root, "p", live ? `Fresh nearby players: Rock ${snapshot.nearby.rock}, Paper ${snapshot.nearby.paper}, Scissors ${snapshot.nearby.scissors}.` :
-      "Fresh nearby counts are unavailable.");
-    renderRadar(root, snapshot, live);
   }
-  if (snapshot.phase !== "lobby") {
-    for (const reason of snapshot.qualityReasons) text(root, "p", reason, "warning");
-    text(root, "p", calibration, "calibration");
-    if (snapshot.deviceLimitations) text(root, "p", `Device limits: ${snapshot.deviceLimitations}`);
-  }
-  if (snapshot.phase === "lobby") {
+  if (snapshot.phase !== "ended") renderRadar(root, snapshot, live, elapsedMs);
+  {
     text(root, "h3", `Players (${snapshot.roster.length})`);
     const roster = document.createElement("ul"); roster.className = "roster"; root.append(roster);
     for (const player of snapshot.roster) text(roster, "li",
@@ -189,21 +197,15 @@ export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions
     if (snapshot.phase !== "lobby") text(controls, "h3", "Host controls");
     if (snapshot.phase === "lobby") {
       const start = control(controls, "Start game", actions.start, "start");
-      const rosterReady = snapshot.mode === "test" ? snapshot.roster.length >= 2 :
-        snapshot.roster.length === 6 && (["rock", "paper", "scissors"] as const)
-          .every(faction => snapshot.roster.filter(player => player.faction === faction).length === 2);
-      start.disabled = !snapshot.parameters || !rosterReady || snapshot.mode === "normal" && !snapshot.approved;
-      if (!rosterReady) text(controls, "p", snapshot.mode === "test" ? "Invite another player to start." :
-        "Normal mode needs six players, two per faction.");
-      text(controls, "p", "Starting requires browser location access and a fresh-location check.");
+      start.disabled = snapshot.roster.length < 2;
+      if (start.disabled) text(controls, "p", "Invite another player to start.");
     }
     if (snapshot.phase === "running") control(controls, "Pause round", actions.pause, "pause");
     if (snapshot.phase === "paused") {
-      if (snapshot.resumeChecking) control(controls, "Cancel freshness check", actions.cancelResume, "cancel-resume");
-      else control(controls, "Check fresh locations and resume", actions.beginResume, "begin-resume");
+      control(controls, "Resume round", actions.beginResume, "begin-resume");
     }
     if (snapshot.phase !== "lobby" && snapshot.phase !== "ended") control(controls, "End round", actions.end, "end", true);
-    if (snapshot.phase === "lobby" || snapshot.mode === "test" && snapshot.phase !== "ended") {
+    if (snapshot.phase !== "ended") {
       const factions = document.createElement("details"); factions.id = "faction-controls"; controls.append(factions);
       text(factions, "summary", "Change player factions").id = "faction-controls-toggle";
       text(factions, "p", "A live faction change clears both attack roles and gives the player a grace period.");
@@ -224,30 +226,22 @@ export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions
     }
     if (snapshot.phase === "lobby") {
       const advanced = document.createElement("details"); advanced.id = "advanced-settings"; controls.append(advanced);
-      advanced.open = snapshot.mode === "normal" && !snapshot.parameters;
       text(advanced, "summary", "Advanced settings").id = "advanced-settings-toggle";
       const form = document.createElement("form"); form.className = "configuration"; advanced.append(form);
-      const preset = snapshot.mode === "test" && !snapshot.parameters;
-      const parameters = snapshot.parameters ?? (preset ? testPreset : null);
-      text(form, "h3", snapshot.mode === "test" ? "Test round setup" : "Round settings");
-      text(form, "p", calibration, "calibration");
-      text(form, "p", preset ? "Save to use the uncalibrated starter values." :
-        "Keep the saved values or adjust Advanced settings. Settings freeze during running and paused rounds.");
-      const mode = input(form, "Testing mode (at least two active players)", "testingMode", "checkbox", "");
-      mode.checked = snapshot.mode === "test";
+      const parameters = snapshot.parameters ?? gamePreset;
+      text(form, "h3", "Round settings");
+      text(form, "p", "Settings stay fixed while the round is running or paused.");
       const grid = document.createElement("div"); grid.className = "form-grid"; form.append(grid);
       const fields: [keyof RuleParameters, string][] = [
         ["entryRadiusM", "Entry radius (m)"], ["retentionRadiusM", "Retention radius (m)"],
-        ["maxAccuracyM", "Maximum uncertainty (m)"], ["freshnessMs", "Fix freshness (ms)"],
+        ["maxAccuracyM", "Influence uncertainty limit (m)"],
         ["dwellMs", "Continuous dwell (ms)"], ["graceMs", "Grace period (ms)"], ["roundDurationMs", "Round duration (minutes)"],
       ];
       for (const [name, label] of fields) {
         const value = name === "roundDurationMs" ? String((parameters?.roundDurationMs ?? 600000) / 60000) :
-          parameters ? String(parameters[name]) : "";
+          String(parameters[name]);
         input(grid, label, name, "number", value);
       }
-      input(form, "Device and measurement limitations", "deviceLimitations", "text",
-        snapshot.deviceLimitations || (preset ? testDeviceLimitations : ""));
       const submit = document.createElement("button"); submit.type = "submit"; submit.dataset.action = "configure";
       submit.textContent = "Save round settings"; form.append(submit);
       const validation = text(form, "p", "", "error"); validation.hidden = true; validation.setAttribute("role", "alert");
@@ -257,11 +251,10 @@ export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions
       form.addEventListener("submit", event => {
         event.preventDefault();
         const values = new FormData(form);
-        const parameters = Object.fromEntries(fields.map(([name]) =>
-          [name, Number(values.get(name)) * (name === "roundDurationMs" ? 60000 : 1)]));
+        const parameters = { ...Object.fromEntries(fields.map(([name]) =>
+          [name, Number(values.get(name)) * (name === "roundDurationMs" ? 60000 : 1)])), freshnessMs: locationInactivityMs };
         const parsed = configureSchema.safeParse({
-          type: "configure", mode: mode.checked ? "test" : "normal", parameters, approved: false,
-          deviceLimitations: String(values.get("deviceLimitations") ?? ""),
+          type: "configure", mode: "test", parameters, approved: false, deviceLimitations: "",
         });
         if (!parsed.success) {
           advanced.open = true;
@@ -269,18 +262,14 @@ export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions
         }
         validation.hidden = true; actions.configure(parsed.data);
       });
-      if (snapshot.parameters && !snapshot.approved) {
-        control(snapshot.mode === "test" ? advanced : controls, "Approve measured parameters and device limits", () => {
-          if (snapshot.parameters) actions.configure({ type: "configure", mode: snapshot.mode,
-            parameters: snapshot.parameters, approved: true, deviceLimitations: snapshot.deviceLimitations });
-        }, "approve", true);
-      }
     }
+    const diagnostics = document.createElement("details"); diagnostics.id = "host-diagnostics"; controls.append(diagnostics);
+    text(diagnostics, "summary", "Host diagnostics").id = "host-diagnostics-toggle";
     if (snapshot.feedback?.conversions) {
       const f = snapshot.feedback;
-      text(controls, "h3", "Visible conversion feedback");
-      text(controls, "p", `${f.conversionsWithinOneSecond}/${f.conversions} conversions confirmed on both visible player interfaces within one second. ${f.conversionsFailed} failed; ${f.conversionsPending} pending; ${f.missing} missing acknowledgements.`);
-      text(controls, "p", f.p95UpperMs === null ? "Display-delay upper-bound p95 is unavailable while acknowledgements are missing." :
+      text(diagnostics, "h3", "Visible conversion feedback");
+      text(diagnostics, "p", `${f.conversionsWithinOneSecond}/${f.conversions} conversions confirmed on both visible player interfaces within one second. ${f.conversionsFailed} failed; ${f.conversionsPending} pending; ${f.missing} missing acknowledgements.`);
+      text(diagnostics, "p", f.p95UpperMs === null ? "Display-delay upper-bound p95 is unavailable while acknowledgements are missing." :
         `Display-delay upper-bound p95: ${Math.ceil(f.p95UpperMs)} ms. This is not one-way network latency.`);
     }
   }

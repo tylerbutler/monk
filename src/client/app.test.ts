@@ -24,12 +24,12 @@ it("explains location use and offers private creation and joining without collec
   cleanup(); root.remove();
 });
 
-it("shows testing mode and host-only faction controls, without a coordinate map", () => {
+it("shows game identity and host-only faction controls without testing gates", () => {
   const root = document.createElement("section");
   const playerTestSnapshot = snapshotFor(runningFixture(["rock", "scissors"]), "p1", 0);
   const hostTestSnapshot = { ...playerTestSnapshot, canHost: true };
   renderMatch(root, hostTestSnapshot, actions);
-  expect(root.textContent).toContain("Testing mode");
+  expect(root.textContent).not.toMatch(/Testing mode|uncalibrated|freshness/i);
   expect(root.querySelector('[data-action="set-faction"]')).not.toBeNull();
   renderMatch(root, playerTestSnapshot, actions);
   expect(root.querySelector('[data-action="set-faction"]')).toBeNull();
@@ -38,30 +38,30 @@ it("shows testing mode and host-only faction controls, without a coordinate map"
   expect(root.querySelector('[data-map]')).toBeNull();
   expect(root.textContent).not.toMatch(/latitude|longitude/);
 });
-it("freezes the paused clock and grace, shows checks as paused, and freezes settings", () => {
+it("shows a direct resume action with frozen paused settings", () => {
   const root = document.createElement("section");
   const changed = command(runningFixture(["rock", "paper"]), 0, { type: "set_faction", playerId: "p1", faction: "scissors" }).state;
   const paused = command(changed, 500, { type: "pause" }).state;
-  const checking = command(paused, 10000, { type: "begin_resume" }).state;
-  renderMatch(root, { ...snapshotFor(checking, "p1", 10000), canHost: true }, actions);
+  renderMatch(root, { ...snapshotFor(paused, "p1", 10000), canHost: true }, actions);
   expect(root.textContent).toContain("Paused");
-  expect(root.textContent).toContain("Freshness check");
+  expect(root.textContent).not.toContain("Freshness check");
   expect(root.querySelector('[data-action="configure"]')).toBeNull();
-  expect(root.querySelector('[data-action="cancel-resume"]')).not.toBeNull();
+  expect(root.querySelector('[data-action="begin-resume"]')?.textContent).toBe("Resume round");
 });
-it("defaults the lobby to testing mode and disables redundant factions", () => {
+it("keeps optional settings closed and disables redundant factions", () => {
   const root = document.createElement("section");
   renderMatch(root, { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true }, actions);
-  expect(root.querySelector<HTMLInputElement>('input[name="testingMode"]')?.checked).toBe(true);
-  expect(root.textContent).toContain("Uncalibrated");
+  expect(root.querySelector('input[name="testingMode"]')).toBeNull();
+  expect(root.querySelector<HTMLDetailsElement>("#advanced-settings")?.open).toBe(false);
   expect(root.querySelector<HTMLOptionElement>('select[data-action="set-faction"] option[value="rock"]')?.disabled).toBe(true);
 });
-it("keeps in-game location warnings and faction displays out of the waiting-room path", () => {
+it("shows faction and waiting radar without calibration warnings in the lobby", () => {
   const root = document.createElement("section");
   renderMatch(root, { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true }, actions);
-  expect(root.querySelector("[data-faction-symbol]")).toBeNull();
+  expect(root.querySelector('[data-faction-symbol="rock"]')).not.toBeNull();
   expect(root.querySelector(".warning")).toBeNull();
-  expect(root.querySelector(".calibration")?.closest("details")?.id).toBe("advanced-settings");
+  expect(root.querySelector(".calibration")).toBeNull();
+  expect(root.querySelector(".player-radar")).not.toBeNull();
   expect(root.querySelector(".roster")?.textContent).toContain("Player 1 - rock (you)");
   expect(root.querySelector('[data-action="start"]')?.textContent).toBe("Start game");
 });
@@ -87,7 +87,7 @@ it("shows a north-up radar with player identities and location quality", () => {
   expect(root.textContent).toContain("Player 2");
   expect(root.textContent).toContain("about 20 m E");
   expect(root.textContent).toContain("GPS uncertainty 1 m");
-  expect(root.textContent).toContain("Fix age 0.5 s");
+  expect(root.textContent).toContain("Updated just now");
   expect(root.querySelector('[data-radar-player="p2"] [data-faction-symbol="paper"]')).not.toBeNull();
   expect(root.textContent).toContain("No confirmed influence");
   expect(root.querySelectorAll("progress")).toHaveLength(0);
@@ -101,17 +101,17 @@ it("does not invent a fresh age for unknown radar timestamps", () => {
   snapshot.radar.reference.ageMs = null;
   snapshot.radar.players[0].position.ageMs = null;
   renderMatch(root, snapshot, actions);
-  expect(root.textContent).toContain("Fix age unknown");
-  expect(root.textContent).not.toContain("Fix age 0.0 s");
+  expect(root.textContent).toContain("Update time unknown");
+  expect(root.textContent).not.toContain("Updated just now");
 });
 
-it("does not place unknown locations or keep radar markers while paused", () => {
+it("retains old markers and shows ordinary waiting states without influence", () => {
   const root = document.createElement("section");
   const state = pulse(runningFixture(["rock", "paper"]), 0, [0, 21]).state;
   renderMatch(root, snapshotFor(state, "p1", 1500), actions);
-  expect(root.querySelectorAll("[data-radar-player]")).toHaveLength(0);
+  expect(root.querySelectorAll("[data-radar-player]")).toHaveLength(1);
   expect(root.querySelectorAll("progress")).toHaveLength(0);
-  expect(root.textContent).toMatch(/location.*stale|location.*unavailable/i);
+  expect(root.textContent).toMatch(/last-known/i);
   renderMatch(root, snapshotFor(command(state, 100, { type: "pause" }).state, "p1", 100), actions);
   expect(root.querySelector("[data-radar]")).toBeNull();
   renderMatch(root, snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), actions);
@@ -178,11 +178,8 @@ function browserApp(snapshot: ReturnType<typeof snapshotFor>) {
       playerId: snapshot.ownPlayerId, canHost: snapshot.canHost, expiresAtMs: Date.now() + 86400000 });
     current.receive({ version: 1, type: "snapshot", streamId, streamSeq: 2,
       snapshot, trial: null, startChecking: false });
-    const probe = JSON.parse([...frames].reverse().find(f => JSON.parse(f).type === "clock_probe") ?? "{}");
-    current.receive({ version: 1, type: "clock_reply", streamId, streamSeq: 3,
-      nonce: probe.nonce, clientSendMs: probe.clientSendMs, serverReceiveMs: Date.now(), serverSendMs: Date.now() });
-    current.receive({ version: 1, type: "clock_ready", streamId, streamSeq: 4,
-      clock: { offsetMs: 0, uncertaintyMs: 0, measuredAtMs: Date.now() } });
+    for (const streamSeq of [3, 4]) current.receive({ version: 1, type: "snapshot", streamId, streamSeq,
+      snapshot, trial: null, startChecking: false });
   }
   const current = socket!;
   authenticate(current);
@@ -191,47 +188,47 @@ function browserApp(snapshot: ReturnType<typeof snapshotFor>) {
   } };
 }
 
-it("clears live radar markers and influence when the connection fails", () => {
+it("retains last-known markers but clears influence when the connection fails", () => {
   const state = pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state;
   const app = browserApp(snapshotFor(state, "p1", 500));
   try {
     expect(app.root.querySelector("[data-radar-player]")).not.toBeNull();
     expect(app.root.querySelector("progress")).not.toBeNull();
     app.socket.dispatchEvent(new Event("error"));
-    expect(app.root.querySelector("[data-radar-player]")).toBeNull();
+    expect(app.root.querySelector("[data-radar-player]")).not.toBeNull();
     expect(app.root.querySelector("progress")).toBeNull();
-    expect(app.root.textContent).toMatch(/live.*unavailable/i);
+    expect(app.root.textContent).toMatch(/offline.*last-known/i);
   } finally { app.cleanup(); }
 });
 
-it("expires radar and influence locally if server updates stop, then accepts a fresh snapshot", () => {
+it("expires influence at thirty seconds locally while retaining the radar", () => {
   vi.useFakeTimers();
   const state = pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state;
   const snapshot = snapshotFor(state, "p1", 500);
   const app = browserApp(snapshot);
   try {
     expect(app.root.querySelector("[data-radar-player]")).not.toBeNull();
-    vi.advanceTimersByTime(1000);
-    expect(app.root.querySelector("[data-radar-player]")).toBeNull();
+    vi.advanceTimersByTime(30000);
+    expect(app.root.querySelector("[data-radar-player]")).not.toBeNull();
     expect(app.root.querySelector("progress")).toBeNull();
-    expect(app.root.textContent).toMatch(/live.*unavailable/i);
+    expect(app.root.textContent).toMatch(/last-known/i);
     app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
       snapshot: snapshotFor(pulse(state, 1500, [0, 4]).state, "p1", 1500), trial: null, startChecking: false });
     expect(app.root.querySelector("[data-radar-player]")).not.toBeNull();
   } finally { app.cleanup(); vi.useRealTimers(); }
 });
 
-it("keeps live markers cleared when an update arrives while the app is hidden", () => {
+it("keeps retained markers without influence when an update arrives while hidden", () => {
   const state = pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state;
   const snapshot = snapshotFor(state, "p1", 500);
   const app = browserApp(snapshot);
   try {
     Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
     document.dispatchEvent(new Event("visibilitychange"));
-    expect(app.root.querySelector("[data-radar-player]")).toBeNull();
+    expect(app.root.querySelector("[data-radar-player]")).not.toBeNull();
     app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
       snapshot, trial: null, startChecking: false });
-    expect(app.root.querySelector("[data-radar-player]")).toBeNull();
+    expect(app.root.querySelector("[data-radar-player]")).not.toBeNull();
     expect(app.root.querySelector("progress")).toBeNull();
   } finally {
     Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
@@ -275,8 +272,9 @@ function permissionBrowser() {
   let success: PositionCallback = () => { throw new Error("No permission request"); };
   let failure: PositionErrorCallback = () => { throw new Error("No permission request"); };
   let watchError: PositionErrorCallback = () => { throw new Error("No location watch"); };
+  let watchSuccess: PositionCallback = () => { throw new Error("No location watch"); };
   const request = vi.fn((accept: PositionCallback, reject: PositionErrorCallback) => { success = accept; failure = reject; });
-  const watch = vi.fn((_accept: PositionCallback, reject: PositionErrorCallback) => { watchError = reject; return 42; });
+  const watch = vi.fn((accept: PositionCallback, reject: PositionErrorCallback) => { watchSuccess = accept; watchError = reject; return 42; });
   Object.defineProperty(navigator, "geolocation", { configurable: true, value: {
     getCurrentPosition: request, watchPosition: watch, clearWatch: vi.fn(),
   } });
@@ -287,17 +285,16 @@ function permissionBrowser() {
     code, message: "Browser location error", PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3,
   });
   return { request, watch, grant: () => success(position), deny: (code: number) => failure(error(code)),
-    revoke: () => watchError(error(1)) };
+    fix: (timestamp = Date.now()) => watchSuccess({ ...position, timestamp }),
+    revoke: (code = 1) => watchError(error(code)) };
 }
 
-it("requests host location from Start game before sending the start command", () => {
+it("starts the game without requesting browser permission", () => {
   const browser = permissionBrowser();
   const app = browserApp({ ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true });
   try {
     app.root.querySelector<HTMLButtonElement>('[data-action="start"]')?.click();
-    expect(browser.request).toHaveBeenCalledTimes(1);
-    expect(app.frames.some(frame => JSON.parse(frame).type === "host_command")).toBe(false);
-    browser.grant();
+    expect(browser.request).not.toHaveBeenCalled();
     expect(app.frames.map(frame => JSON.parse(frame)).filter(frame =>
       frame.type === "host_command" && frame.command.type === "start")).toHaveLength(1);
     expect(browser.watch).not.toHaveBeenCalled();
@@ -309,7 +306,6 @@ it("keeps Start game retryable with the same command ID after a storage error", 
   const app = browserApp({ ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true });
   try {
     app.root.querySelector<HTMLButtonElement>('[data-action="start"]')?.click();
-    browser.grant();
     const original = app.frames.map(frame => JSON.parse(frame)).find(frame => frame.type === "host_command");
     app.socket.receive({ version: 1, type: "error", streamId: "app-stream", streamSeq: 5,
       code: "storage_failed", reason: "State was not saved. Retry the same command ID.", commandId: original.commandId });
@@ -321,7 +317,7 @@ it("keeps Start game retryable with the same command ID after a storage error", 
   } finally { app.cleanup(); }
 });
 
-it("collects one fresh resume-check fix with prior consent without showing running, then stops on cancel", () => {
+it("shares location while paused and stops sharing without leaving", () => {
   let callback: PositionCallback = () => {};
   let permission: PositionCallback = () => {};
   const clearWatch = vi.fn();
@@ -331,25 +327,23 @@ it("collects one fresh resume-check fix with prior consent without showing runni
     clearWatch, getCurrentPosition: (success: PositionCallback) => { permission = success; },
   } });
   const paused = command(runningFixture(["rock", "paper"]), 500, { type: "pause" }).state;
-  const checking = command(paused, 1000, { type: "begin_resume" }).state;
-  const snapshot = snapshotFor(checking, "p1", 1000);
+  const snapshot = snapshotFor(paused, "p1", 1000);
   const app = browserApp(snapshot);
   try {
     app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]')?.click();
     const position: GeolocationPosition = { timestamp: Date.now(), coords: {
       latitude: 0, longitude: 0, accuracy: 1, altitude: null, altitudeAccuracy: null, heading: null, speed: null, toJSON: () => ({}) },
       toJSON: () => ({}) };
-    permission(position);
-    expect(app.frames.filter(f => JSON.parse(f).type === "position")).toHaveLength(0);
     callback(position);
     expect(app.frames.filter(f => JSON.parse(f).type === "position")).toHaveLength(1);
     expect(app.root.textContent).toContain("Paused");
     expect(app.root.textContent).not.toContain("Round running");
-    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 5,
-      snapshot: { ...snapshot, resumeChecking: false }, trial: null, startChecking: false, events: [], outcome: null });
+    app.root.querySelector<HTMLButtonElement>('[data-action="stop-sharing"]')?.click();
     callback(position);
     expect(clearWatch).toHaveBeenCalledWith(42);
     expect(app.frames.filter(f => JSON.parse(f).type === "position")).toHaveLength(1);
+    expect(app.frames.map(f => JSON.parse(f)).some(f => f.type === "suspend")).toBe(true);
+    expect(app.frames.map(f => JSON.parse(f)).some(f => f.type === "leave")).toBe(false);
   } finally { app.cleanup(); }
 });
 
@@ -491,7 +485,7 @@ it("does not acknowledge conversion text clipped by its notification container",
   } finally { app.cleanup(); }
 });
 
-it("saves a fresh unapproved testing preset without entering any fields", () => {
+it("saves ordinary defaults without a mode, approval, or inactivity field", () => {
   const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true,
     parameters: null, approved: false, deviceLimitations: "" };
   const app = browserApp(snapshot);
@@ -499,17 +493,18 @@ it("saves a fresh unapproved testing preset without entering any fields", () => 
     const form = app.root.querySelector<HTMLFormElement>(".configuration");
     if (!form) throw new Error("Round setup is missing");
     expect(app.root.querySelector("#playArea")).toBeNull();
-    expect(app.root.querySelector<HTMLButtonElement>('[data-action="start"]')?.disabled).toBe(true);
+    expect(app.root.querySelector<HTMLButtonElement>('[data-action="start"]')?.disabled).toBe(false);
     expect(form.reportValidity()).toBe(true);
     form.requestSubmit();
     const configured = app.frames.map(f => JSON.parse(f)).find(m => m.type === "host_command" && m.command.type === "configure");
     expect(configured?.command).toMatchObject({
       type: "configure", mode: "test", approved: false,
       parameters: { entryRadiusM: 30, retentionRadiusM: 40, maxAccuracyM: 15,
-        freshnessMs: 5000, dwellMs: 2000, graceMs: 3000, roundDurationMs: 600000 },
+        freshnessMs: 30000, dwellMs: 2000, graceMs: 3000, roundDurationMs: 600000 },
     });
     expect(configured.command).not.toHaveProperty("playArea");
-    expect(configured.command.deviceLimitations).toMatch(/uncalibrated/i);
+    expect(configured.command.deviceLimitations).toBe("");
+    expect(app.root.querySelector("#freshnessMs")).toBeNull();
     expect(app.root.querySelector('[data-action="approve"]')).toBeNull();
   } finally { app.cleanup(); }
 });
@@ -531,8 +526,8 @@ it("needs no visible inputs while advanced controls and measurements are collaps
     expect(app.root.textContent).not.toContain("Agreed play area");
     expect(app.root.querySelector<HTMLInputElement>("#device-0")?.value).toBe("");
     expect(app.root.querySelector<HTMLInputElement>("#os-0")?.value).toBe("");
-    expect(app.root.querySelector('[data-action="approve"]')?.closest("details")?.id).toBe("advanced-settings");
-    expect(app.root.querySelector('[data-action="round-consent"]')).toBeNull();
+    expect(app.root.querySelector('[data-action="approve"]')).toBeNull();
+    expect(app.root.querySelector('[data-action="round-consent"]')?.textContent).toBe("Share location");
     expect(app.root.querySelector('[data-action="start"]')).not.toBeNull();
   } finally { app.cleanup(); }
 });
@@ -591,27 +586,25 @@ it("opens an invited measurement trial without hiding the player's consent actio
   } finally { app.cleanup(); }
 });
 
-it.each(["test", "normal"] as const)("preserves saved %s settings and explicit Normal-mode approval", mode => {
+it.each(["test", "normal"] as const)("shows saved %s range settings without legacy approval gates", mode => {
   const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"], mode), "p1", 0), canHost: true, approved: false };
   const root = document.createElement("section");
   const configure = vi.fn();
   renderMatch(root, snapshot, { ...actions, configure });
   expect(root.querySelector<HTMLInputElement>("#entryRadiusM")?.value).toBe("12");
-  expect(root.querySelector<HTMLInputElement>("#deviceLimitations")?.value).toBe("Synthetic tests only");
+  expect(root.querySelector("#deviceLimitations")).toBeNull();
   expect(root.querySelector("#playArea")).toBeNull();
-  expect(root.querySelector<HTMLButtonElement>('[data-action="start"]')?.disabled).toBe(mode === "normal");
-  root.querySelector<HTMLButtonElement>('[data-action="approve"]')?.click();
-  expect(configure).toHaveBeenCalledWith({ type: "configure", mode, parameters: snapshot.parameters,
-    approved: true, deviceLimitations: "Synthetic tests only" });
+  expect(root.querySelector<HTMLButtonElement>('[data-action="start"]')?.disabled).toBe(false);
+  expect(root.querySelector('[data-action="approve"]')).toBeNull();
 });
 
-it("does not prefill location parameters for an unconfigured Normal-mode match", () => {
+it("uses game defaults for legacy unconfigured snapshots without blocking start", () => {
   const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"], "normal"), "p1", 0), canHost: true,
     parameters: null, approved: false, deviceLimitations: "" };
   const root = document.createElement("section");
   renderMatch(root, snapshot, actions);
-  expect(root.querySelector<HTMLInputElement>("#entryRadiusM")?.value).toBe("");
-  expect(root.querySelector<HTMLButtonElement>('[data-action="start"]')?.disabled).toBe(true);
+  expect(root.querySelector<HTMLInputElement>("#entryRadiusM")?.value).toBe("30");
+  expect(root.querySelector<HTMLButtonElement>('[data-action="start"]')?.disabled).toBe(false);
 });
 
 it("offers the host's player join before the setup form", () => {
@@ -625,26 +618,21 @@ it("offers the host's player join before the setup form", () => {
   } finally { app.cleanup(); }
 });
 
-it("requests browser permission on the lobby consent click and discards the permission fix", () => {
+it("starts a lobby watch without a clock and sends its first cached position", () => {
+  vi.spyOn(Date, "now").mockReturnValue(Date.now());
   const browser = permissionBrowser();
   const snapshot = snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0);
   const app = browserApp(snapshot);
   try {
     expect(browser.request).not.toHaveBeenCalled();
     app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]')?.click();
-    expect(browser.request).toHaveBeenCalledTimes(1);
-    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
-      snapshot, trial: null, startChecking: false });
-    const pending = app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]');
-    expect(pending?.disabled).toBe(true);
-    pending?.click();
-    expect(browser.request).toHaveBeenCalledTimes(1);
-    browser.grant();
-    expect(app.root.textContent).toContain("permission granted");
-    expect(browser.watch).not.toHaveBeenCalled();
-    expect(app.frames.some(f => JSON.parse(f).type === "position")).toBe(false);
-    expect(sessionStorage.getItem("monk-last-capture")).toBeNull();
-    expect(sessionStorage.getItem("monk-position-seq")).toBeNull();
+    expect(browser.request).not.toHaveBeenCalled();
+    expect(browser.watch).toHaveBeenCalledTimes(1);
+    browser.fix(Date.now() - 60000);
+    const reports = app.frames.map(f => JSON.parse(f)).filter(f => f.type === "position");
+    expect(reports).toHaveLength(1);
+    expect(reports[0].report.reportedAgeMs).toBe(60000);
+    expect(app.frames.some(f => JSON.parse(f).type === "clock_probe")).toBe(false);
   } finally { app.cleanup(); }
 });
 
@@ -657,17 +645,17 @@ it.each([
   const app = browserApp(snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0));
   try {
     app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]')?.click();
-    expect(browser.request).toHaveBeenCalledTimes(1);
-    browser.deny(code);
+    expect(browser.watch).toHaveBeenCalledTimes(1);
+    browser.revoke(code);
     expect(app.root.querySelector('[role="alert"]')?.textContent).toMatch(reason);
     const retry = app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]');
     expect(retry?.disabled).toBe(false);
     retry?.click();
-    expect(browser.request).toHaveBeenCalledTimes(2);
-    browser.grant();
+    expect(browser.watch).toHaveBeenCalledTimes(2);
+    browser.fix();
     expect(app.root.querySelector('[role="alert"]')).toBeNull();
-    expect(app.root.textContent).toContain("permission granted");
-    expect(browser.watch).not.toHaveBeenCalled();
+    expect(app.root.querySelector('[data-action="stop-sharing"]')).not.toBeNull();
+    expect(app.frames.some(f => JSON.parse(f).type === "position")).toBe(true);
   } finally { app.cleanup(); }
 });
 
@@ -709,13 +697,13 @@ it.each(["leave", "end", "dispose"])("ignores a late permission result after %s"
   const app = browserApp(snapshot);
   try {
     app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]')?.click();
-    expect(browser.request).toHaveBeenCalledTimes(1);
+    expect(browser.watch).toHaveBeenCalledTimes(1);
     if (action === "leave") app.root.querySelector<HTMLButtonElement>('[data-action="leave"]')?.click();
     else if (action === "dispose") app.cleanup();
     else app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
       snapshot: { ...snapshot, phase: "ended" }, trial: null, startChecking: false });
-    browser.grant();
-    expect(browser.watch).not.toHaveBeenCalled();
+    browser.fix();
+    expect(browser.watch).toHaveBeenCalledTimes(1);
     expect(app.frames.some(f => JSON.parse(f).type === "position")).toBe(false);
     expect(app.root.textContent).not.toContain("permission granted");
   } finally { app.cleanup(); }
@@ -743,15 +731,14 @@ it("restores the consent action when location permission is revoked during colle
   const app = browserApp(snapshotFor(runningFixture(["rock", "paper"]), "p1", 0));
   try {
     app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]')?.click();
-    expect(browser.request).toHaveBeenCalledTimes(1);
-    browser.grant();
     expect(browser.watch).toHaveBeenCalledTimes(1);
+    browser.fix();
     browser.revoke();
     expect(app.root.textContent).toContain("permission denied");
     const retry = app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]');
     expect(retry?.disabled).toBe(false);
     retry?.click();
-    expect(browser.request).toHaveBeenCalledTimes(2);
+    expect(browser.watch).toHaveBeenCalledTimes(2);
   } finally { app.cleanup(); }
 });
 
@@ -763,4 +750,115 @@ it("reports unsupported geolocation without hiding or disabling the consent acti
     expect(app.root.querySelector('[role="alert"]')?.textContent).toMatch(/not supported/i);
     expect(app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]')?.disabled).toBe(false);
   } finally { app.cleanup(); }
+});
+
+it.each(["create", "join"])("sends the display name when players %s", async action => {
+  sessionStorage.clear();
+  const calls: { path: string; body: unknown }[] = [];
+  vi.stubGlobal("fetch", async (path: string, options: RequestInit) => {
+    calls.push({ path, body: JSON.parse(String(options.body)) });
+    return new Response(JSON.stringify({ error: "Name recorded" }), { status: 400 });
+  });
+  const root = document.createElement("main"); document.body.append(root);
+  const cleanup = mountApp(root);
+  try {
+    const name = root.querySelector<HTMLInputElement>("#displayName");
+    expect(name).not.toBeNull();
+    if (!name) throw new Error("Display name missing");
+    name.value = "Sam";
+    if (action === "create") root.querySelector<HTMLButtonElement>('[data-action="create"]')?.click();
+    else {
+      const code = root.querySelector<HTMLInputElement>("#matchCode");
+      if (!code) throw new Error("Room code missing");
+      code.value = "ABCDEFGH";
+      root.querySelector("form")?.dispatchEvent(new Event("submit", { cancelable: true }));
+    }
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]).toEqual({ path: action === "create" ? "/api/matches" : "/api/matches/ABCDEFGH/join",
+      body: { label: "Sam" } });
+  } finally { cleanup(); root.remove(); vi.unstubAllGlobals(); }
+});
+
+it.each(["running", "paused"] as const)("keeps invitations available in a %s room", phase => {
+  const app = browserApp({ ...snapshotFor(runningFixture(["rock", "paper"]), "p1", 0), phase });
+  try { expect(app.root.querySelector("[data-invite-link]")?.getAttribute("href")).toBe("https://monk.test/?room=ABCDEFGH"); }
+  finally { app.cleanup(); }
+});
+
+it.each([29999, 30000])("retains radar and expires confirmed influence at local age %s", elapsedMs => {
+  const root = document.createElement("section");
+  const snapshot = snapshotFor(pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state, "p1", 0);
+  renderMatch(root, snapshot, actions, true, elapsedMs);
+  expect(root.querySelector('[data-radar-player="p2"]')).not.toBeNull();
+  expect(root.querySelector("progress") === null).toBe(elapsedMs === 30000);
+  expect(root.querySelector('[data-radar-player="p2"]')?.getAttribute("data-current")).toBe(String(elapsedMs < 30000));
+});
+
+it("does not let an unrelated old marker hide a fresh encounter", () => {
+  const root = document.createElement("section");
+  const snapshot = snapshotFor(pulse(runningFixture(["rock", "scissors", "paper"]), 0, [0, 4, 60]).state, "p1", 0);
+  const old = snapshot.radar?.players.find(p => p.playerId === "p3")?.position;
+  if (!old) throw new Error("Old marker fixture missing");
+  old.ageMs = 60000; old.active = false;
+  renderMatch(root, snapshot, actions, true, 1000);
+  expect(root.querySelector("progress")).not.toBeNull();
+  expect(root.querySelector('[data-radar-player="p2"]')?.getAttribute("data-current")).toBe("true");
+  expect(root.querySelector('[data-radar-player="p3"]')?.getAttribute("data-current")).toBe("false");
+});
+
+it.each(["lobby", "paused"] as const)("shows retained positions in the %s", phase => {
+  const root = document.createElement("section");
+  const snapshot = { ...snapshotFor(pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state, "p1", 0), phase };
+  renderMatch(root, snapshot, actions);
+  expect(root.querySelector("[data-radar]")).not.toBeNull();
+  expect(root.querySelector("progress")).toBeNull();
+});
+
+it("updates offline ages without changing influence progress and clears its timer on disposal", () => {
+  vi.useFakeTimers({ toFake: ["Date", "performance", "setInterval", "clearInterval", "setTimeout", "clearTimeout"] });
+  const app = browserApp(snapshotFor(pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state, "p1", 500));
+  try {
+    vi.advanceTimersByTime(1000);
+    expect(app.root.querySelector("progress")?.value).toBeCloseTo(1 / 6);
+    app.socket.dispatchEvent(new Event("error"));
+    vi.advanceTimersByTime(60000);
+    expect(app.root.textContent).toContain("Updated 1 min ago");
+    expect(app.root.querySelector("progress")).toBeNull();
+    app.cleanup();
+    expect(vi.getTimerCount()).toBe(0);
+  } finally { app.cleanup(); vi.useRealTimers(); }
+});
+
+it("keeps ordinary sharing independent of trial consent, timeout, and stopping", () => {
+  vi.useFakeTimers();
+  const browser = permissionBrowser();
+  const snapshot = snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0);
+  const app = browserApp(snapshot);
+  try {
+    app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]')?.click();
+    browser.fix();
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5, snapshot,
+      trial: { playerIds: ["p1", "p2"], readyIds: [], collecting: false, referenceM: 4 }, startChecking: false });
+    app.root.querySelector<HTMLButtonElement>('[data-action="trial-ready"]')?.click();
+    vi.advanceTimersByTime(5000);
+    browser.fix(Date.now());
+    app.root.querySelector<HTMLButtonElement>('[data-action="trial-end"]')?.click();
+    browser.fix(Date.now() + 1);
+    expect(app.frames.map(f => JSON.parse(f)).filter(f => f.type === "position")).toHaveLength(3);
+    expect(app.frames.map(f => JSON.parse(f)).filter(f => f.type === "suspend")).toHaveLength(0);
+    expect(app.root.querySelector('[data-action="stop-sharing"]')).not.toBeNull();
+  } finally { app.cleanup(); vi.useRealTimers(); }
+});
+it("keeps the text selection while local ages update", () => {
+  vi.useFakeTimers();
+  const app = browserApp({ ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true });
+  try {
+    const input = app.root.querySelector<HTMLInputElement>("#conditions");
+    if (!input) throw new Error("Text field missing");
+    input.value = "Open field"; input.focus(); input.setSelectionRange(1, 4);
+    vi.advanceTimersByTime(250);
+    const next = app.root.querySelector<HTMLInputElement>("#conditions");
+    expect(next).toBe(document.activeElement);
+    expect([next?.selectionStart, next?.selectionEnd]).toEqual([1, 4]);
+  } finally { app.cleanup(); vi.useRealTimers(); }
 });

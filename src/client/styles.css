@@ -60,6 +60,10 @@ progress { width: 100%; height: 1.25rem; accent-color: var(--accent); }
 .radar-marker[data-faction="paper"] { color: #805016; }
 .radar-marker[data-faction="scissors"] { color: #693864; }
 .radar-marker > circle { fill: #f7f8f1; stroke: currentColor; stroke-width: 1.5; }
+.radar-marker[data-current="false"] > circle { stroke-dasharray: 3 3; }
+.radar-center[data-current="false"] { fill: #f7f8f1; stroke: var(--ink); stroke-dasharray: 2 2; }
+.location-sharing { font-weight: 650; }
+.host-controls > details { margin-top: 1.5rem; }
 .radar-marker[data-influence="outgoing"] > circle { stroke-width: 3; }
 .radar-marker[data-influence="incoming"] > circle { stroke-width: 3; stroke-dasharray: 4 3; }
 .radar-link { stroke: var(--accent); stroke-width: 3; }
