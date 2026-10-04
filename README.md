@@ -54,9 +54,16 @@ The second phone joins with the private eight-character code. The code does
 not grant host control. Private tokens stay in `sessionStorage` and authenticate
 the first WebSocket frame, not the URL. Do not share tokens.
 
-Location starts only with consent during a trial, a fresh start check, an active
-round, or a resume check. Keep the app visible and the screen on. Permission,
-clock, visibility, connection, and wake-lock failures appear in the interface.
+Both location-consent buttons request browser access immediately with a one-time
+fix. The app discards that fix; it does not report or retain its coordinates.
+The browser shows a prompt if permission is not already granted or denied.
+If access is blocked, allow location for this site in browser and device
+settings, then retry. Denial, unavailable location, and timeouts leave a retry
+action visible.
+
+Continuous collection starts only with consent during a trial, a fresh start
+check, an active round, or a resume check. Keep the app visible and the screen on.
+Permission, clock, visibility, connection, and wake-lock failures appear in the interface.
 Pausing, leaving, hiding, and ending stop local collection. Late browser
 callbacks after stopping are discarded.
 

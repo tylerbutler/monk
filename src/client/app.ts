@@ -1,5 +1,5 @@
 import { connectMatch } from "./connection";
-import { startLocation } from "./location";
+import { requestLocationPermission, startLocation } from "./location";
 import { addTrialSample, exportTrialSummary, newTrialSummary } from "./trial";
 import { describeEvent, renderMatch } from "./views";
 import { deviceSchema, sessionCredentialsSchema } from "../shared/protocol";
@@ -30,6 +30,7 @@ export function mountApp(root: HTMLElement): () => void {
   const pendingFeedback = new Set<number>(), acknowledged = new Set<number>();
   let feedbackFrame = false, audio: AudioContext | null = null;
   let stopLocation: (() => void) | null = null;
+  let stopPermissionCheck: (() => void) | null = null, requestingPermission = false;
   let error = "";
   const retained = new Map<string, { value: string; checked: boolean }>();
   const disclosures = new Map<string, boolean>();
@@ -46,13 +47,39 @@ export function mountApp(root: HTMLElement): () => void {
     parent.append(node); return node;
   }
   function stopCollection() { const stop = stopLocation; stopLocation = null; stop?.(); }
+  function cancelPermissionCheck() {
+    stopPermissionCheck?.(); stopPermissionCheck = null;
+    if (requestingPermission) location = { ...location, reason: "Location permission check canceled." };
+    requestingPermission = false;
+  }
+  function requestLocationConsent(forTrial = false) {
+    if (requestingPermission) return;
+    cancelPermissionCheck(); consent = false; stopCollection();
+    requestingPermission = true; error = "";
+    location = { ...location, permission: "unknown", reason: "Requesting browser location access. Respond if a prompt appears." };
+    render();
+    const cancel = requestLocationPermission(result => {
+      requestingPermission = false; stopPermissionCheck = null;
+      location = { ...location, ...result };
+      if (result.permission === "granted") {
+        consent = true;
+        if (forTrial) connection?.send({ version: 1, type: "trial_ready", consent: true });
+        reconcileCollection();
+      } else error = result.reason ?? "Location access failed. Try again.";
+      render();
+    });
+    stopPermissionCheck = requestingPermission ? cancel : null;
+  }
   function reconcileCollection() {
     const needed = !!snapshot?.ownPlayerId && consent && clockReady && connectionStatus.state === "connected" &&
       document.visibilityState === "visible" && (snapshot.phase === "running" || snapshot.resumeChecking || startChecking ||
         !!trial?.collecting && trial.readyIds.includes(snapshot.ownPlayerId));
     if (!needed) { stopCollection(); return; }
     if (!stopLocation) stopLocation = startLocation(fix => connection?.send({ version: 1, type: "position", report: fix }), status => {
-      location = status;
+      location = { ...status, permission: status.permission === "unknown" && location.permission === "granted" ? "granted" : status.permission };
+      if (status.permission === "denied") {
+        consent = false; error = status.reason ?? "Location permission denied."; stopCollection();
+      }
       if (status.reason?.includes("clock")) {
         clockReady = false;
         connection?.send({ version: 1, type: "suspend", reason: "Phone clock changed." });
@@ -68,7 +95,10 @@ export function mountApp(root: HTMLElement): () => void {
     }
     if (message.type === "clock_ready") clockReady = true;
     if (message.type === "snapshot" || message.type === "update") {
+      const previousTrial = trial;
       snapshot = message.snapshot; trial = message.trial; startChecking = message.startChecking;
+      if (snapshot.phase === "ended" || previousTrial && (!trial || previousTrial.referenceM !== trial.referenceM ||
+        previousTrial.playerIds.some((id, index) => id !== trial?.playerIds[index]))) cancelPermissionCheck();
       if (message.type === "update") {
         if (message.outcome) {
           pendingCommands.delete(message.outcome.commandId);
@@ -87,7 +117,7 @@ export function mountApp(root: HTMLElement): () => void {
     }
     if (message.type === "error") {
       error = message.reason;
-      if (message.code === "expired") { consent = false; clockReady = false; stopCollection(); }
+      if (message.code === "expired") { cancelPermissionCheck(); consent = false; clockReady = false; stopCollection(); }
     }
     if (message.type === "trial_sample") {
       latest = message.sample;
@@ -97,7 +127,7 @@ export function mountApp(root: HTMLElement): () => void {
   }
   function connect(next: SessionCredentials) {
     if (credentials?.matchCode !== next.matchCode) { pendingCommands.clear(); commandStatus = ""; }
-    connection?.close(); stopCollection();
+    cancelPermissionCheck(); connection?.close(); stopCollection();
     credentials = next; snapshot = null; trial = null; clockReady = false; error = "";
     try { sessionStorage.setItem("monk-session", JSON.stringify(next)); }
     catch { throw new Error("Session storage is unavailable. Allow storage to keep private credentials."); }
@@ -160,7 +190,7 @@ export function mountApp(root: HTMLElement): () => void {
     return parsed.data;
   }
   function leave() {
-    stopCollection(); consent = false;
+    cancelPermissionCheck(); stopCollection(); consent = false;
     connection?.send({ version: 1, type: "leave" });
     connection?.close(); connection = null; credentials = null; snapshot = null; trial = null;
     latest = null; summary = null; retained.clear(); disclosures.clear(); error = "";
@@ -230,13 +260,15 @@ export function mountApp(root: HTMLElement): () => void {
     }
     if (trial) {
       text(section, "p", trial.collecting ? "Trial collecting. Keep both apps visible." : "Waiting for both players to agree.", "state-line");
-      if (snapshot?.ownPlayerId && !trial.readyIds.includes(snapshot.ownPlayerId)) {
-        button(section, "Agree and collect location", () => {
-          consent = true; connection?.send({ version: 1, type: "trial_ready", consent: true });
-        }, "trial-ready");
-        button(section, "Decline trial", () => { consent = false; connection?.send({ version: 1, type: "trial_ready", consent: false }); }, "trial-decline", "secondary");
+      if (snapshot?.ownPlayerId && trial.playerIds.includes(snapshot.ownPlayerId) && !trial.readyIds.includes(snapshot.ownPlayerId)) {
+        button(section, requestingPermission ? "Requesting location access..." : "Agree and collect location",
+          () => requestLocationConsent(true), "trial-ready").disabled = requestingPermission;
+        button(section, "Decline trial", () => {
+          cancelPermissionCheck(); consent = false; stopCollection();
+          connection?.send({ version: 1, type: "trial_ready", consent: false });
+        }, "trial-decline", "secondary");
       }
-      button(section, "Stop trial", () => { stopCollection(); connection?.send({ version: 1, type: "trial_end" }); }, "trial-end", "secondary");
+      button(section, "Stop trial", () => { cancelPermissionCheck(); stopCollection(); connection?.send({ version: 1, type: "trial_end" }); }, "trial-end", "secondary");
       text(section, "p", trial.referenceM === null ? "No reference separation entered." : `Reference separation: ${trial.referenceM} m`);
     }
     if (latest) {
@@ -333,7 +365,8 @@ export function mountApp(root: HTMLElement): () => void {
           select.disabled = [...pendingCommands.values()].some(c => c.type === "set_faction");
         }
         if (snapshot.ownPlayerId && !consent && snapshot.phase !== "ended") {
-          button(section, "Allow location for this round", () => { consent = true; reconcileCollection(); render(); }, "round-consent");
+          button(section, requestingPermission ? "Requesting location access..." : "Allow location for this round",
+            () => requestLocationConsent(), "round-consent").disabled = requestingPermission;
         }
         if (snapshot.ownPlayerId && typeof AudioContext !== "undefined" && !audio) {
           button(section, "Enable sound cues", async () => {
@@ -365,7 +398,7 @@ export function mountApp(root: HTMLElement): () => void {
     const safety = document.createElement("footer"); root.append(safety);
     text(safety, "h3", "Location and safe play");
     text(safety, "p", "Agree on a bounded outdoor area and safe routes. No running or touching is needed. You can leave without a gameplay penalty. Keep this app visible and the screen on.");
-    text(safety, "p", "Location is used only for a consenting trial, active round, or fresh start or resume check. Opponent coordinates are not shown. Locations are not retained in match records or exports. Matches and credentials expire within 24 hours.");
+    text(safety, "p", "Allow location requests browser access and discards its permission-check fix. Location reports require a consenting trial, active round, or fresh start or resume check. Opponent coordinates are not shown. Locations are not retained in match records or exports. Matches and credentials expire within 24 hours.");
     for (const input of root.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-retain]")) {
       const value = retained.get(input.id);
       if (value) { input.value = value.value; if (input instanceof HTMLInputElement) input.checked = value.checked; }
@@ -397,7 +430,7 @@ export function mountApp(root: HTMLElement): () => void {
   } catch { error = "Stored session could not be loaded. Clear this browser session or join again."; }
   render();
   return () => {
-    disposed = true; stopCollection(); connection?.close();
+    disposed = true; cancelPermissionCheck(); stopCollection(); connection?.close();
     if (audio) void audio.close().catch(() => console.warn("monk", "audio_close_failed"));
     document.removeEventListener("visibilitychange", visibility); root.replaceChildren();
   };

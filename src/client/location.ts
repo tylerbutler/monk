@@ -6,6 +6,26 @@ const clockStateSchema = z.strictObject({
   captureAfterMs: z.number().int().min(-1),
 });
 
+function locationFailure(error: GeolocationPositionError): Pick<LocationStatus, "permission" | "reason"> {
+  if (error.code === 1) return { permission: "denied",
+    reason: "Location permission denied. Allow location for this site in browser and device settings, then try again." };
+  return { permission: "unknown", reason: error.code === 3 ?
+    "Location request timed out. Move to a clear outdoor area and try again." :
+    "Location is unavailable. Check device location settings and try again." };
+}
+
+export function requestLocationPermission(onResult: (result: Pick<LocationStatus, "permission" | "reason">) => void): () => void {
+  let active = true;
+  function finish(result: Pick<LocationStatus, "permission" | "reason">) {
+    if (!active) return;
+    active = false; onResult(result);
+  }
+  if (!navigator.geolocation) finish({ permission: "unknown", reason: "Geolocation is not supported by this browser." });
+  else navigator.geolocation.getCurrentPosition(() => finish({ permission: "granted", reason: null }),
+    error => finish(locationFailure(error)), { enableHighAccuracy: false, maximumAge: 60000, timeout: 5000 });
+  return () => { active = false; };
+}
+
 export function startLocation(onFix: (fix: PositionReport) => void, onStatus: (status: LocationStatus) => void): () => void {
   let active = true, pending = false, watcher: number | null = null;
   let lock: WakeLockSentinel | null = null;
@@ -58,11 +78,11 @@ export function startLocation(onFix: (fix: PositionReport) => void, onStatus: (s
   }
   function fail(error: GeolocationPositionError) {
     if (!active) return;
-    if (error.code === 1) {
-      status.permission = "denied"; stop("Location permission denied. Allow location in browser settings."); return;
+    const result = locationFailure(error);
+    if (result.permission === "denied") {
+      status.permission = "denied"; stop(result.reason); return;
     }
-    publish(error.code === 3 ? "Location request timed out. Move to a clear outdoor area." :
-      "Location is unavailable. Check device location settings.");
+    publish(result.reason);
   }
   function visibility() {
     status.visible = document.visibilityState === "visible";

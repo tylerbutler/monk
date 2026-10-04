@@ -56,7 +56,12 @@ Expand **Advanced settings** to use measured or other provisional values and
 describe the device limits. Keep **Testing mode** checked for two-player rounds.
 Saved settings take priority over the preset.
 
-Both players select **Allow location for this round**. The host selects
+Both players select **Allow location for this round** and answer the browser
+permission prompt. This requests access immediately and discards the
+permission-check fix. If the site is already blocked, change browser and device
+location settings, then retry; the browser may not show another prompt.
+The app does not report location until a trial, round, or freshness check needs it.
+The host selects
 **Check fresh locations and start**. The ten-second check requests fresh fixes;
 it does not run the gameplay clock. A trial is not a start prerequisite.
 If it times out, check consent, clock, connection, and reported uncertainty,

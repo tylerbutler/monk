@@ -118,13 +118,33 @@ function browserApp(snapshot: ReturnType<typeof snapshotFor>) {
   } };
 }
 
+function permissionBrowser() {
+  let success: PositionCallback = () => { throw new Error("No permission request"); };
+  let failure: PositionErrorCallback = () => { throw new Error("No permission request"); };
+  let watchError: PositionErrorCallback = () => { throw new Error("No location watch"); };
+  const request = vi.fn((accept: PositionCallback, reject: PositionErrorCallback) => { success = accept; failure = reject; });
+  const watch = vi.fn((_accept: PositionCallback, reject: PositionErrorCallback) => { watchError = reject; return 42; });
+  Object.defineProperty(navigator, "geolocation", { configurable: true, value: {
+    getCurrentPosition: request, watchPosition: watch, clearWatch: vi.fn(),
+  } });
+  const position: GeolocationPosition = { timestamp: Date.now(), coords: {
+    latitude: 0, longitude: 0, accuracy: 1, altitude: null, altitudeAccuracy: null, heading: null, speed: null, toJSON: () => ({}) },
+    toJSON: () => ({}) };
+  const error = (code: number): GeolocationPositionError => ({
+    code, message: "Browser location error", PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3,
+  });
+  return { request, watch, grant: () => success(position), deny: (code: number) => failure(error(code)),
+    revoke: () => watchError(error(1)) };
+}
+
 it("collects one fresh resume-check fix with prior consent without showing running, then stops on cancel", () => {
   let callback: PositionCallback = () => {};
+  let permission: PositionCallback = () => {};
   const clearWatch = vi.fn();
   Object.defineProperty(navigator, "wakeLock", { configurable: true, value: undefined });
   Object.defineProperty(navigator, "geolocation", { configurable: true, value: {
     watchPosition: (success: PositionCallback) => { callback = success; return 42; },
-    clearWatch, getCurrentPosition: vi.fn(),
+    clearWatch, getCurrentPosition: (success: PositionCallback) => { permission = success; },
   } });
   const paused = command(runningFixture(["rock", "paper"]), 500, { type: "pause" }).state;
   const checking = command(paused, 1000, { type: "begin_resume" }).state;
@@ -135,6 +155,8 @@ it("collects one fresh resume-check fix with prior consent without showing runni
     const position: GeolocationPosition = { timestamp: Date.now(), coords: {
       latitude: 0, longitude: 0, accuracy: 1, altitude: null, altitudeAccuracy: null, heading: null, speed: null, toJSON: () => ({}) },
       toJSON: () => ({}) };
+    permission(position);
+    expect(app.frames.filter(f => JSON.parse(f).type === "position")).toHaveLength(0);
     callback(position);
     expect(app.frames.filter(f => JSON.parse(f).type === "position")).toHaveLength(1);
     expect(app.root.textContent).toContain("Paused");
@@ -416,5 +438,145 @@ it("offers the host's player join before the setup form", () => {
     const form = app.root.querySelector<HTMLFormElement>(".configuration");
     if (!join || !form) throw new Error("Host join or setup is missing");
     expect(join.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  } finally { app.cleanup(); }
+});
+
+it("requests browser permission on the lobby consent click and discards the permission fix", () => {
+  const browser = permissionBrowser();
+  const snapshot = snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0);
+  const app = browserApp(snapshot);
+  try {
+    expect(browser.request).not.toHaveBeenCalled();
+    app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]')?.click();
+    expect(browser.request).toHaveBeenCalledTimes(1);
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
+      snapshot, trial: null, startChecking: false });
+    const pending = app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]');
+    expect(pending?.disabled).toBe(true);
+    pending?.click();
+    expect(browser.request).toHaveBeenCalledTimes(1);
+    browser.grant();
+    expect(app.root.textContent).toContain("permission granted");
+    expect(browser.watch).not.toHaveBeenCalled();
+    expect(app.frames.some(f => JSON.parse(f).type === "position")).toBe(false);
+    expect(sessionStorage.getItem("monk-last-capture")).toBeNull();
+    expect(sessionStorage.getItem("monk-position-seq")).toBeNull();
+  } finally { app.cleanup(); }
+});
+
+it.each([
+  { code: 1, reason: /denied/i },
+  { code: 2, reason: /unavailable/i },
+  { code: 3, reason: /timed out/i },
+])("keeps the permission action retryable after browser error $code", ({ code, reason }) => {
+  const browser = permissionBrowser();
+  const app = browserApp(snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0));
+  try {
+    app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]')?.click();
+    expect(browser.request).toHaveBeenCalledTimes(1);
+    browser.deny(code);
+    expect(app.root.querySelector('[role="alert"]')?.textContent).toMatch(reason);
+    const retry = app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]');
+    expect(retry?.disabled).toBe(false);
+    retry?.click();
+    expect(browser.request).toHaveBeenCalledTimes(2);
+    browser.grant();
+    expect(app.root.querySelector('[role="alert"]')).toBeNull();
+    expect(app.root.textContent).toContain("permission granted");
+    expect(browser.watch).not.toHaveBeenCalled();
+  } finally { app.cleanup(); }
+});
+
+it("requests permission before confirming a trial while the other player is still waiting", () => {
+  const browser = permissionBrowser();
+  const snapshot = snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0);
+  const app = browserApp(snapshot);
+  try {
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5, snapshot,
+      trial: { playerIds: ["p1", "p2"], readyIds: [], collecting: false, referenceM: 4 }, startChecking: false });
+    app.root.querySelector<HTMLButtonElement>('[data-action="trial-ready"]')?.click();
+    expect(browser.request).toHaveBeenCalledTimes(1);
+    expect(app.frames.some(f => JSON.parse(f).type === "trial_ready")).toBe(false);
+    browser.grant();
+    expect(app.frames.map(f => JSON.parse(f)).filter(f => f.type === "trial_ready")).toEqual([
+      { version: 1, type: "trial_ready", consent: true },
+    ]);
+    expect(browser.watch).not.toHaveBeenCalled();
+    expect(app.frames.some(f => JSON.parse(f).type === "position")).toBe(false);
+  } finally { app.cleanup(); }
+});
+
+it("does not offer trial permission to a player outside the selected pair", () => {
+  const browser = permissionBrowser();
+  const snapshot = snapshotFor(lobbyFixture(["rock", "paper", "scissors"]), "p3", 0);
+  const app = browserApp(snapshot);
+  try {
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5, snapshot,
+      trial: { playerIds: ["p1", "p2"], readyIds: [], collecting: false, referenceM: 4 }, startChecking: false });
+    expect(app.root.querySelector('[data-action="trial-ready"]')).toBeNull();
+    expect(browser.request).not.toHaveBeenCalled();
+    expect(app.root.querySelector('[data-action="round-consent"]')).not.toBeNull();
+  } finally { app.cleanup(); }
+});
+
+it.each(["leave", "end", "dispose"])("ignores a late permission result after %s", action => {
+  const browser = permissionBrowser();
+  const snapshot = snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0);
+  const app = browserApp(snapshot);
+  try {
+    app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]')?.click();
+    expect(browser.request).toHaveBeenCalledTimes(1);
+    if (action === "leave") app.root.querySelector<HTMLButtonElement>('[data-action="leave"]')?.click();
+    else if (action === "dispose") app.cleanup();
+    else app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
+      snapshot: { ...snapshot, phase: "ended" }, trial: null, startChecking: false });
+    browser.grant();
+    expect(browser.watch).not.toHaveBeenCalled();
+    expect(app.frames.some(f => JSON.parse(f).type === "position")).toBe(false);
+    expect(app.root.textContent).not.toContain("permission granted");
+  } finally { app.cleanup(); }
+});
+
+it("does not confirm an ended trial from an outstanding permission request", () => {
+  const browser = permissionBrowser();
+  const snapshot = snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0);
+  const app = browserApp(snapshot);
+  try {
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5, snapshot,
+      trial: { playerIds: ["p1", "p2"], readyIds: [], collecting: false, referenceM: 4 }, startChecking: false });
+    app.root.querySelector<HTMLButtonElement>('[data-action="trial-ready"]')?.click();
+    expect(browser.request).toHaveBeenCalledTimes(1);
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 6,
+      snapshot, trial: null, startChecking: false });
+    browser.grant();
+    expect(app.frames.some(f => JSON.parse(f).type === "trial_ready")).toBe(false);
+    expect(app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]')?.disabled).toBe(false);
+  } finally { app.cleanup(); }
+});
+
+it("restores the consent action when location permission is revoked during collection", () => {
+  const browser = permissionBrowser();
+  const app = browserApp(snapshotFor(runningFixture(["rock", "paper"]), "p1", 0));
+  try {
+    app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]')?.click();
+    expect(browser.request).toHaveBeenCalledTimes(1);
+    browser.grant();
+    expect(browser.watch).toHaveBeenCalledTimes(1);
+    browser.revoke();
+    expect(app.root.textContent).toContain("permission denied");
+    const retry = app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]');
+    expect(retry?.disabled).toBe(false);
+    retry?.click();
+    expect(browser.request).toHaveBeenCalledTimes(2);
+  } finally { app.cleanup(); }
+});
+
+it("reports unsupported geolocation without hiding or disabling the consent action", () => {
+  Object.defineProperty(navigator, "geolocation", { configurable: true, value: undefined });
+  const app = browserApp(snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0));
+  try {
+    app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]')?.click();
+    expect(app.root.querySelector('[role="alert"]')?.textContent).toMatch(/not supported/i);
+    expect(app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]')?.disabled).toBe(false);
   } finally { app.cleanup(); }
 });
