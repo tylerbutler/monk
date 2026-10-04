@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import { advanceEngine, checkpointEngine, createEngine, distanceBetween, isSuperior, restoreEngine, snapshotFor, suspendEngine } from "./engine";
 import { command, fix, host, lobbyFixture, parameters, pulse, runningFixture } from "../../test/fixtures";
+import { gamePreset } from "../shared/protocol";
 
 it("calls Gleam faction rules", () => {
   expect(isSuperior("rock", "scissors")).toBe(true);
@@ -128,6 +129,23 @@ it("requires continuous dwell", () => {
     state = next.state;
   }
   expect(pulse(state, 3000, [0, 4]).events.filter(e => e.type === "conversion")).toMatchObject([
+    { attackerId: "p1", targetId: "p2", faction: "rock" },
+  ]);
+});
+
+it("requires thirty seconds of continuous influence with the game defaults", () => {
+  let state = command(lobbyFixture(["rock", "scissors"]), 0,
+    { type: "configure", mode: "test", parameters: gamePreset, approved: false, deviceLimitations: "" },
+    { type: "start" }).state;
+  for (let now = 0; now < 30000; now += 1000) {
+    const next = pulse(state, now, [0, 4]);
+    expect(next.events.filter(event => event.type === "conversion")).toHaveLength(0);
+    state = next.state;
+    if (now === 15000) expect(snapshotFor(state, "p1", now).outgoing?.progress).toBe(.5);
+  }
+  const before = pulse(state, 29999, [0, 4]);
+  expect(before.events.filter(event => event.type === "conversion")).toHaveLength(0);
+  expect(pulse(before.state, 30000, [0, 4]).events.filter(event => event.type === "conversion")).toMatchObject([
     { attackerId: "p1", targetId: "p2", faction: "rock" },
   ]);
 });

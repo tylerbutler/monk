@@ -943,6 +943,7 @@ it("saves ordinary defaults without a mode, approval, or inactivity field", () =
     const form = app.root.querySelector<HTMLFormElement>(".configuration");
     if (!form) throw new Error("Round setup is missing");
     expect(app.root.querySelector("#playArea")).toBeNull();
+    expect(app.root.querySelector<HTMLInputElement>("#dwellMs")?.value).toBe("30");
     expect(app.root.querySelector<HTMLButtonElement>('[data-action="start"]')?.disabled).toBe(false);
     expect(form.reportValidity()).toBe(true);
     form.requestSubmit();
@@ -950,12 +951,32 @@ it("saves ordinary defaults without a mode, approval, or inactivity field", () =
     expect(configured?.command).toMatchObject({
       type: "configure", mode: "test", approved: false,
       parameters: { entryRadiusM: 30, retentionRadiusM: 40, maxAccuracyM: 15,
-        freshnessMs: 30000, dwellMs: 2000, graceMs: 3000, roundDurationMs: 600000 },
+        freshnessMs: 30000, dwellMs: 30000, graceMs: 3000, roundDurationMs: 600000 },
     });
     expect(configured.command).not.toHaveProperty("playArea");
     expect(configured.command.deviceLimitations).toBe("");
     expect(app.root.querySelector("#freshnessMs")).toBeNull();
     expect(app.root.querySelector('[data-action="approve"]')).toBeNull();
+  } finally { app.cleanup(); }
+});
+
+it.each([[.001, 1], [1.001, 1001], [15, 15000], [45.5, 45500], [86400, 86400000]])(
+  "lets the host set conversion time to %s seconds", (seconds, milliseconds) => {
+  const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true };
+  const app = browserApp(snapshot);
+  try {
+    const form = app.root.querySelector<HTMLFormElement>(".configuration");
+    const duration = app.root.querySelector<HTMLInputElement>("#dwellMs");
+    if (!form || !duration) throw new Error("Conversion setting is missing");
+    expect(duration.labels?.[0].textContent).toContain("Conversion time (seconds)");
+    expect(duration.value).toBe("3");
+    duration.value = String(seconds);
+    expect(form.reportValidity()).toBe(true);
+    form.requestSubmit();
+    const configured = app.frames.map(frame => JSON.parse(frame)).find(frame =>
+      frame.type === "host_command" && frame.command.type === "configure");
+    expect(configured?.command.parameters.dwellMs).toBe(milliseconds);
+    expect(configured?.command.parameters.roundDurationMs).toBe(600000);
   } finally { app.cleanup(); }
 });
 
@@ -1009,7 +1030,7 @@ it("keeps open disclosures and draft settings across authority updates", () => {
   } finally { app.cleanup(); }
 });
 
-it("opens invalid advanced settings instead of hiding the field that needs correction", () => {
+it.each(["0", "1.0001"])("opens invalid advanced settings for conversion time %s", seconds => {
   const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true,
     parameters: null, approved: false, deviceLimitations: "" };
   const app = browserApp(snapshot);
@@ -1017,10 +1038,11 @@ it("opens invalid advanced settings instead of hiding the field that needs corre
     const form = app.root.querySelector<HTMLFormElement>(".configuration");
     const dwell = app.root.querySelector<HTMLInputElement>("#dwellMs");
     if (!form || !dwell) throw new Error("Round setup is missing");
-    dwell.value = "0";
+    dwell.value = seconds;
     expect(form.reportValidity()).toBe(false);
     expect(app.root.querySelector<HTMLDetailsElement>("#advanced-settings")?.open).toBe(true);
     expect(app.root.querySelector<HTMLDetailsElement>("#host-tools")?.open).toBe(true);
+    form.requestSubmit();
     expect(app.frames.some(f => JSON.parse(f).type === "host_command")).toBe(false);
   } finally { app.cleanup(); }
 });

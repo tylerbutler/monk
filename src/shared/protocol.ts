@@ -20,7 +20,7 @@ export type RuleParameters = z.infer<typeof parametersSchema>;
 export const locationInactivityMs = 30000;
 export const gamePreset: RuleParameters = {
   entryRadiusM: 30, retentionRadiusM: 40, maxAccuracyM: 15,
-  freshnessMs: locationInactivityMs, dwellMs: 2000, graceMs: 3000, roundDurationMs: 600000,
+  freshnessMs: locationInactivityMs, dwellMs: 30000, graceMs: 3000, roundDurationMs: 600000,
 };
 export const testPreset = gamePreset;
 export const testDeviceLimitations = "Uncalibrated test preset; phone accuracy not measured.";

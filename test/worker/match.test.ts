@@ -21,7 +21,7 @@ it("creates a room with the host already playing and automatic game defaults", a
     phase: "lobby", mode: "test", canHost: true, approved: false, ownFaction: "rock",
     roster: [{ label: "Player 1" }],
     parameters: { entryRadiusM: 30, retentionRadiusM: 40, maxAccuracyM: 15,
-      freshnessMs: 30000, dwellMs: 2000, graceMs: 3000, roundDurationMs: 600000 },
+      freshnessMs: 30000, dwellMs: 30000, graceMs: 3000, roundDurationMs: 600000 },
   });
   expect(snapshot.ownPlayerId).not.toBeNull();
   expect(snapshot).not.toHaveProperty("playArea");

@@ -132,8 +132,10 @@ Host faction changes clear affected influence and apply grace. Repeated
 command IDs do not apply a change twice.
 
 Default settings: 30 m entry radius, 40 m retention radius, 15 m uncertainty
-limit, two-second dwell, three-second grace, and a ten-minute round.
+limit, 30-second conversion time, three-second grace, and a ten-minute round.
 The host can change these under **Host controls > Advanced settings** before starting.
+Use **Conversion time (seconds)** to set the required continuous influence time.
+New rooms use 30 seconds; existing rooms keep their saved settings.
 Retention must be at least entry radius. Settings stay fixed while running
 or paused. The 30-second inactivity rule is fixed; no mode or approval step
 is part of game setup. **Start game** and **Resume round** stay outside the

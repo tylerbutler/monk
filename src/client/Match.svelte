@@ -16,10 +16,10 @@
     snapshot.phase === "ended" ? "Round ended" : "Round running");
   let advancedOpen = $state(false), validation = $state("");
   let hostTools = $state<HTMLDetailsElement>();
-  const fields: [keyof RuleParameters, string][] = [
-    ["entryRadiusM", "Entry radius (m)"], ["retentionRadiusM", "Retention radius (m)"],
-    ["maxAccuracyM", "Influence uncertainty limit (m)"], ["dwellMs", "Continuous dwell (ms)"],
-    ["graceMs", "Grace period (ms)"], ["roundDurationMs", "Round duration (minutes)"],
+  const fields: [keyof RuleParameters, string, number][] = [
+    ["entryRadiusM", "Entry radius (m)", 1], ["retentionRadiusM", "Retention radius (m)", 1],
+    ["maxAccuracyM", "Influence uncertainty limit (m)", 1], ["dwellMs", "Conversion time (seconds)", 1000],
+    ["graceMs", "Grace period (ms)", 1], ["roundDurationMs", "Round duration (minutes)", 60000],
   ];
   function showSettings() {
     if (hostTools) hostTools.open = true;
@@ -31,8 +31,10 @@
     const values = new FormData(event.currentTarget);
     const parsed = configureSchema.safeParse({
       type: "configure", mode: "test", approved: false, deviceLimitations: "",
-      parameters: { ...Object.fromEntries(fields.map(([name]) =>
-        [name, Number(values.get(name)) * (name === "roundDurationMs" ? 60000 : 1)])), freshnessMs: locationInactivityMs },
+      parameters: { ...Object.fromEntries(fields.map(([name, , unit]) => {
+        const value = Number(values.get(name)) * unit;
+        return [name, name === "dwellMs" ? Math.round(value) : value];
+      })), freshnessMs: locationInactivityMs },
     });
     if (!parsed.success) {
       validation = "Use positive finite values, whole milliseconds, and retention at least entry.";
@@ -157,10 +159,10 @@
             <h3>Round settings</h3>
             <p>Settings stay fixed while the round is running or paused.</p>
             <div class="form-grid">
-              {#each fields as [name, label]}
+              {#each fields as [name, label, unit]}
                 <label>{label}
-                  <input id={name} {name} type="number" required min="0.001" step="any" data-retain
-                    value={name === "roundDurationMs" ? parameters.roundDurationMs / 60000 : parameters[name]}
+                  <input id={name} {name} type="number" required min="0.001" step={name === "dwellMs" ? "0.001" : "any"} data-retain
+                    value={parameters[name] / unit}
                     oninvalid={showSettings} />
                 </label>
               {/each}
