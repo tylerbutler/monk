@@ -2,21 +2,31 @@ import { afterEach, expect, it, vi } from "vitest";
 import { env } from "cloudflare:workers";
 import { SELF, evictDurableObject, reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { advanceEngine, checkpointEngine, restoreEngine, snapshotFor } from "../../src/worker/engine";
-import { loadRecord } from "../../src/worker/storage";
+import { commitRecord, loadRecord } from "../../src/worker/storage";
 import { command, pulse, runningFixture } from "../fixtures";
 import { closeSockets, connect, createMatch, hostCommand, joinMatch, probe, runningMatch } from "./helpers";
 
 afterEach(async () => { await closeSockets(); vi.restoreAllMocks(); await reset(); });
 
-async function trial() {
+async function trial(withoutParameters = false) {
   const credentials = await createMatch();
+  if (withoutParameters) {
+    const stub = env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode));
+    await runInDurableObject(stub, async (_, state) => {
+      const record = await loadRecord(state.storage);
+      if (!record) throw new Error("Missing legacy lobby fixture");
+      await state.storage.put("record", { ...record, checkpoint: { ...record.checkpoint, parameters: null } });
+    });
+    await evictDurableObject(stub);
+  }
   const host = await connect(credentials);
   const a = await connect(await joinMatch(credentials.matchCode));
   const b = await connect(await joinMatch(credentials.matchCode));
   const stranger = await connect(await joinMatch(credentials.matchCode));
   host.send({ version: 1, type: "snapshot_request" });
   const state = await host.next("snapshot");
-  const ids: [string, string] = [state.snapshot.roster[0].id, state.snapshot.roster[1].id];
+  const guests = state.snapshot.roster.filter(player => player.id !== state.snapshot.ownPlayerId);
+  const ids: [string, string] = [guests[0].id, guests[1].id];
   host.messages.length = 0;
   host.send({ version: 1, type: "trial_begin", playerIds: ids, referenceM: 4 });
   let started = await host.next("update");
@@ -25,7 +35,7 @@ async function trial() {
 }
 
 it("runs a lobby trial without parameters only after both consents and sends private samples", async () => {
-  const { a, b, stranger, host } = await trial();
+  const { a, b, stranger, host } = await trial(true);
   a.send({ version: 1, type: "trial_ready", consent: true });
   let update = await a.next("update");
   while (update.trial?.readyIds.length !== 1) update = await a.next("update");
@@ -124,13 +134,46 @@ it("recovers running as paused, preserves committed duration, and clears observa
     await state.storage.put("record", { ...record,
       checkpoint: { ...checkpoint, id: record.matchCode, hostId: record.checkpoint.hostId, createdAtMs: record.createdAtMs } });
   });
+
   await evictDurableObject(stub);
-  const client = await connect(credentials);
+  const client = await connect({ ...credentials, playerToken: null });
   client.send({ version: 1, type: "snapshot_request" });
   expect(await client.next("snapshot")).toMatchObject({ snapshot: {
     phase: "paused", remainingMs: 599000, outgoing: null, resumeChecking: false,
     roster: [{ active: false }, { active: false }],
   } });
+});
+
+it("loads older matches and drops removed play-area metadata on the next commit", async () => {
+  const credentials = await createMatch();
+  const stub = env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode));
+  await runInDurableObject(stub, async (_, state) => {
+    const original = await loadRecord(state.storage);
+    if (!original) throw new Error("Missing fixture record");
+    await state.storage.put("record", { ...original, checkpoint: { ...original.checkpoint, playArea: "Old test note" } });
+    const loaded = await loadRecord(state.storage);
+    if (!loaded) throw new Error("Older match was lost");
+    expect(loaded.checkpoint).not.toHaveProperty("playArea");
+    expect(loaded.sessions).toEqual(original.sessions);
+    await commitRecord(state.storage, loaded, []);
+    expect(await state.storage.get("record")).toEqual(original);
+  });
+  const client = await connect(credentials);
+  client.send({ version: 1, type: "snapshot_request" });
+  expect((await client.next("snapshot")).snapshot).not.toHaveProperty("playArea");
+});
+
+it("still rejects unrelated stored checkpoint fields during legacy cleanup", async () => {
+  const credentials = await createMatch();
+  const stub = env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode));
+  await runInDurableObject(stub, async (_, state) => {
+    const original = await loadRecord(state.storage);
+    if (!original) throw new Error("Missing fixture record");
+    await state.storage.put("record", { ...original,
+      checkpoint: { ...original.checkpoint, playArea: "Old test note", latitude: 1 } });
+    await expect(loadRecord(state.storage)).rejects.toThrow("Stored match record is invalid");
+    await state.storage.put("record", original);
+  });
 });
 
 it("does not advance paused clocks during a resume check and clears canceled/timed-out checks", () => {

@@ -11,12 +11,48 @@ afterEach(async () => {
   await reset();
 });
 
+it("creates a room with the host already playing and unapproved test defaults", async () => {
+  const credentials = await createMatch();
+  expect(credentials.playerToken).not.toBeNull();
+  const client = await connect(credentials);
+  client.send({ version: 1, type: "snapshot_request" });
+  const { snapshot } = await client.next("snapshot");
+  expect(snapshot).toMatchObject({
+    phase: "lobby", mode: "test", canHost: true, approved: false, ownFaction: "rock",
+    roster: [{ label: "Player 1" }],
+    parameters: { entryRadiusM: 30, retentionRadiusM: 40, maxAccuracyM: 15,
+      freshnessMs: 5000, dwellMs: 2000, graceMs: 3000, roundDurationMs: 600000 },
+  });
+  expect(snapshot.ownPlayerId).not.toBeNull();
+  expect(snapshot).not.toHaveProperty("playArea");
+});
+
+it("starts from automatic room settings after the invited player joins", async () => {
+  const credentials = await createMatch();
+  const host = await connect(credentials);
+  const other = await connect(await joinMatch(credentials.matchCode));
+  host.send({ version: 1, type: "snapshot_request" });
+  const { snapshot } = await host.next("snapshot");
+  expect(snapshot.roster.map(player => player.label)).toEqual(["Player 1", "Test player"]);
+  host.messages.length = 0;
+  host.send({ version: 1, type: "host_command", commandId: "direct-start", command: { type: "start" } });
+  const checking = await host.next("update");
+  expect(checking.startChecking).toBe(true);
+  await Promise.all([probe(host), probe(other)]);
+  const capturedAtMs = Date.now();
+  host.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
+  other.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 0.001, accuracyM: 1 } });
+  let started = await host.next("update");
+  while (started.outcome?.commandId !== "direct-start") started = await host.next("update");
+  expect(started).toMatchObject({ outcome: { accepted: true }, snapshot: { phase: "running" } });
+});
+
 it("starts a two-phone round from a fresh consent check without a trial", async () => {
   const credentials = await createMatch();
-  const host = await connect({ ...await joinMatch(credentials.matchCode), hostToken: credentials.hostToken });
+  const host = await connect(credentials);
   const other = await connect(await joinMatch(credentials.matchCode));
   await hostCommand(host, { type: "configure", mode: "test", parameters, approved: false,
-    deviceLimitations: "Synthetic pair", playArea: "Marked test area" });
+    deviceLimitations: "Synthetic pair" });
   host.send({ version: 1, type: "host_command", commandId: "start-check", command: { type: "start" } });
   let check = await host.next("update");
   while (!check.startChecking) check = await host.next("update");
@@ -66,14 +102,14 @@ it("a join code grants no host authority, and wrong-match tokens fail", async ()
   wrong.send({ version: 1, type: "authenticate", hostToken: b.hostToken, playerToken: null });
   expect(await wrong.next("error")).toMatchObject({ code: "unauthorized" });
 });
-it("the host can also join as a player without gaining credentials for others", async () => {
+it("joining guests receive only their own player credential", async () => {
   const host = await createMatch();
   const player = await joinMatch(host.matchCode, host.hostToken);
   expect(player.hostToken).toBeNull();
   expect(player.playerToken).toBeTruthy();
-  const client = await connect({ ...player, hostToken: host.hostToken });
+  const client = await connect(player);
   client.send({ version: 1, type: "snapshot_request" });
-  expect(await client.next("snapshot")).toMatchObject({ snapshot: { canHost: true, ownFaction: "rock" } });
+  expect(await client.next("snapshot")).toMatchObject({ snapshot: { canHost: false, ownFaction: "paper" } });
 });
 it("returns visible invalid-JSON errors without logging secrets or locations", async () => {
   const logs = vi.spyOn(console, "warn");

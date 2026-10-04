@@ -118,6 +118,38 @@ function browserApp(snapshot: ReturnType<typeof snapshotFor>) {
   } };
 }
 
+it("shows a public-code-only invite link and keeps configuration out of the main lobby path", async () => {
+  const app = browserApp({ ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true });
+  const writeText = vi.fn(async (_value: string) => {});
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+  try {
+    const link = app.root.querySelector<HTMLAnchorElement>("[data-invite-link]");
+    if (!link) throw new Error("Invite link is missing");
+    const url = new URL(link.href);
+    expect([...url.searchParams]).toEqual([["room", "ABCDEFGH"]]);
+    expect(url.origin).toBe("https://monk.test");
+    expect(link.href).not.toMatch(/token/i);
+    expect(app.root.querySelector('[data-action="configure"]')?.closest("details")?.id).toBe("advanced-settings");
+    expect(app.root.querySelector('[data-action="start"]')?.textContent).toBe("Start game");
+    const copy = app.root.querySelector<HTMLButtonElement>('[data-action="copy-invite"]');
+    if (!copy) throw new Error("Copy action is missing");
+    copy.click();
+    await vi.waitFor(() => expect(app.root.textContent).toContain("Link copied"));
+    expect(writeText).toHaveBeenCalledWith("https://monk.test/?room=ABCDEFGH");
+  } finally { app.cleanup(); }
+});
+
+it("opens an invite with its room code filled in and ready to join", () => {
+  sessionStorage.clear();
+  history.replaceState(null, "", "/?room=ABCDEFGH");
+  const root = document.createElement("main"); document.body.append(root);
+  const cleanup = mountApp(root);
+  try {
+    expect(root.querySelector<HTMLInputElement>("#matchCode")?.value).toBe("ABCDEFGH");
+    expect(root.querySelector<HTMLButtonElement>(".join-form button")?.textContent).toBe("Join room");
+  } finally { cleanup(); root.remove(); history.replaceState(null, "", "/"); sessionStorage.clear(); }
+});
+
 function permissionBrowser() {
   let success: PositionCallback = () => { throw new Error("No permission request"); };
   let failure: PositionErrorCallback = () => { throw new Error("No permission request"); };
@@ -136,6 +168,37 @@ function permissionBrowser() {
   return { request, watch, grant: () => success(position), deny: (code: number) => failure(error(code)),
     revoke: () => watchError(error(1)) };
 }
+
+it("requests host location from Start game before sending the start command", () => {
+  const browser = permissionBrowser();
+  const app = browserApp({ ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true });
+  try {
+    app.root.querySelector<HTMLButtonElement>('[data-action="start"]')?.click();
+    expect(browser.request).toHaveBeenCalledTimes(1);
+    expect(app.frames.some(frame => JSON.parse(frame).type === "host_command")).toBe(false);
+    browser.grant();
+    expect(app.frames.map(frame => JSON.parse(frame)).filter(frame =>
+      frame.type === "host_command" && frame.command.type === "start")).toHaveLength(1);
+    expect(browser.watch).not.toHaveBeenCalled();
+  } finally { app.cleanup(); }
+});
+
+it("keeps Start game retryable with the same command ID after a storage error", () => {
+  const browser = permissionBrowser();
+  const app = browserApp({ ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true });
+  try {
+    app.root.querySelector<HTMLButtonElement>('[data-action="start"]')?.click();
+    browser.grant();
+    const original = app.frames.map(frame => JSON.parse(frame)).find(frame => frame.type === "host_command");
+    app.socket.receive({ version: 1, type: "error", streamId: "app-stream", streamSeq: 5,
+      code: "storage_failed", reason: "State was not saved. Retry the same command ID.", commandId: original.commandId });
+    const retry = app.root.querySelector<HTMLButtonElement>('[data-action="start"]');
+    expect(retry?.disabled).toBe(false);
+    retry?.click();
+    const starts = app.frames.map(frame => JSON.parse(frame)).filter(frame => frame.type === "host_command");
+    expect(starts.map(frame => frame.commandId)).toEqual([original.commandId, original.commandId]);
+  } finally { app.cleanup(); }
+});
 
 it("collects one fresh resume-check fix with prior consent without showing running, then stops on cancel", () => {
   let callback: PositionCallback = () => {};
@@ -307,30 +370,30 @@ it("does not acknowledge conversion text clipped by its notification container",
   } finally { app.cleanup(); }
 });
 
-it("saves a fresh unapproved testing preset after the host enters only the play area", () => {
+it("saves a fresh unapproved testing preset without entering any fields", () => {
   const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true,
-    parameters: null, approved: false, deviceLimitations: "", playArea: "" };
+    parameters: null, approved: false, deviceLimitations: "" };
   const app = browserApp(snapshot);
   try {
     const form = app.root.querySelector<HTMLFormElement>(".configuration");
-    const playArea = app.root.querySelector<HTMLInputElement>("#playArea");
-    if (!form || !playArea) throw new Error("Round setup is missing");
-    expect(playArea.value).toBe("");
+    if (!form) throw new Error("Round setup is missing");
+    expect(app.root.querySelector("#playArea")).toBeNull();
     expect(app.root.querySelector<HTMLButtonElement>('[data-action="start"]')?.disabled).toBe(true);
-    playArea.value = "Marked lawn; keep away from the road";
+    expect(form.reportValidity()).toBe(true);
     form.requestSubmit();
     const configured = app.frames.map(f => JSON.parse(f)).find(m => m.type === "host_command" && m.command.type === "configure");
     expect(configured?.command).toMatchObject({
-      type: "configure", mode: "test", approved: false, playArea: "Marked lawn; keep away from the road",
+      type: "configure", mode: "test", approved: false,
       parameters: { entryRadiusM: 30, retentionRadiusM: 40, maxAccuracyM: 15,
         freshnessMs: 5000, dwellMs: 2000, graceMs: 3000, roundDurationMs: 600000 },
     });
+    expect(configured.command).not.toHaveProperty("playArea");
     expect(configured.command.deviceLimitations).toMatch(/uncalibrated/i);
     expect(app.root.querySelector('[data-action="approve"]')).toBeNull();
   } finally { app.cleanup(); }
 });
 
-it("shows only the play-area input while advanced controls and measurements are collapsed", () => {
+it("needs no visible inputs while advanced controls and measurements are collapsed", () => {
   const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true };
   const app = browserApp(snapshot);
   try {
@@ -343,11 +406,13 @@ it("shows only the play-area input while advanced controls and measurements are 
       }
       return true;
     });
-    expect(visible.map(input => input.id)).toEqual(["playArea"]);
+    expect(visible).toHaveLength(0);
+    expect(app.root.textContent).not.toContain("Agreed play area");
     expect(app.root.querySelector<HTMLInputElement>("#device-0")?.value).toBe("");
     expect(app.root.querySelector<HTMLInputElement>("#os-0")?.value).toBe("");
     expect(app.root.querySelector('[data-action="approve"]')?.closest("details")?.id).toBe("advanced-settings");
-    expect(app.root.querySelector('[data-action="round-consent"]')).not.toBeNull();
+    expect(app.root.querySelector('[data-action="round-consent"]')).toBeNull();
+    expect(app.root.querySelector('[data-action="start"]')).not.toBeNull();
   } finally { app.cleanup(); }
 });
 
@@ -380,14 +445,12 @@ it("keeps open disclosures and draft settings across authority updates", () => {
 
 it("opens invalid advanced settings instead of hiding the field that needs correction", () => {
   const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true,
-    parameters: null, approved: false, deviceLimitations: "", playArea: "" };
+    parameters: null, approved: false, deviceLimitations: "" };
   const app = browserApp(snapshot);
   try {
     const form = app.root.querySelector<HTMLFormElement>(".configuration");
-    const playArea = app.root.querySelector<HTMLInputElement>("#playArea");
     const dwell = app.root.querySelector<HTMLInputElement>("#dwellMs");
-    if (!form || !playArea || !dwell) throw new Error("Round setup is missing");
-    playArea.value = "Marked lawn";
+    if (!form || !dwell) throw new Error("Round setup is missing");
     dwell.value = "0";
     expect(form.reportValidity()).toBe(false);
     expect(app.root.querySelector<HTMLDetailsElement>("#advanced-settings")?.open).toBe(true);
@@ -414,16 +477,16 @@ it.each(["test", "normal"] as const)("preserves saved %s settings and explicit N
   renderMatch(root, snapshot, { ...actions, configure });
   expect(root.querySelector<HTMLInputElement>("#entryRadiusM")?.value).toBe("12");
   expect(root.querySelector<HTMLInputElement>("#deviceLimitations")?.value).toBe("Synthetic tests only");
-  expect(root.querySelector<HTMLInputElement>("#playArea")?.value).toBe("Marked test area");
+  expect(root.querySelector("#playArea")).toBeNull();
   expect(root.querySelector<HTMLButtonElement>('[data-action="start"]')?.disabled).toBe(mode === "normal");
   root.querySelector<HTMLButtonElement>('[data-action="approve"]')?.click();
   expect(configure).toHaveBeenCalledWith({ type: "configure", mode, parameters: snapshot.parameters,
-    approved: true, deviceLimitations: "Synthetic tests only", playArea: "Marked test area" });
+    approved: true, deviceLimitations: "Synthetic tests only" });
 });
 
 it("does not prefill location parameters for an unconfigured Normal-mode match", () => {
   const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"], "normal"), "p1", 0), canHost: true,
-    parameters: null, approved: false, deviceLimitations: "", playArea: "" };
+    parameters: null, approved: false, deviceLimitations: "" };
   const root = document.createElement("section");
   renderMatch(root, snapshot, actions);
   expect(root.querySelector<HTMLInputElement>("#entryRadiusM")?.value).toBe("");

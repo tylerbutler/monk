@@ -46,23 +46,27 @@ is reported evidence, not a guaranteed physical boundary.
 
 ## Try a two-player testing round
 
-Stop any active location trial before starting a round. New Testing-mode matches
-prefill uncalibrated starter values: entry 30 m, retention 40 m, maximum
+Stop any active location trial before starting a round. New Testing-mode rooms
+use uncalibrated starter values: entry 30 m, retention 40 m, maximum
 uncertainty 15 m, freshness 5000 ms, dwell 2000 ms, grace 3000 ms, and a ten-minute
-round. Set the agreed play area and save. These values do not establish GPS
-accuracy; you can try a Testing round before taking measurements.
+round. The settings are saved automatically; no play-area field or setup form
+is required. These values do not establish GPS accuracy; you can try a Testing
+round before taking measurements.
+
+Select **Create room** to join as the host player. Share **Copy invite link**;
+the other player opens the link and selects **Join room**. Watch the player list
+update in the waiting room.
 
 Expand **Advanced settings** to use measured or other provisional values and
 describe the device limits. Keep **Testing mode** checked for two-player rounds.
 Saved settings take priority over the preset.
 
-Both players select **Allow location for this round** and answer the browser
-permission prompt. This requests access immediately and discards the
+The guest selects **Allow location for this round**. The host selects
+**Start game**. Both actions request browser access when needed and discard the
 permission-check fix. If the site is already blocked, change browser and device
 location settings, then retry; the browser may not show another prompt.
 The app does not report location until a trial, round, or freshness check needs it.
-The host selects
-**Check fresh locations and start**. The ten-second check requests fresh fixes;
+The ten-second check requests fresh fixes;
 it does not run the gameplay clock. A trial is not a start prerequisite.
 If it times out, check consent, clock, connection, and reported uncertainty,
 then start a new check.

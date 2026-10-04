@@ -82,10 +82,10 @@ export async function hostCommand(client: Awaited<ReturnType<typeof connect>>, c
 }
 export async function runningMatch(roundDurationMs = 600000, overrides: Partial<RuleParameters> = {}) {
   const credentials = await createMatch();
-  const host = await connect({ ...await joinMatch(credentials.matchCode, credentials.hostToken), hostToken: credentials.hostToken });
+  const host = await connect(credentials);
   const other = await connect(await joinMatch(credentials.matchCode));
   await hostCommand(host, { type: "configure", mode: "test", parameters: { ...parameters, ...overrides, roundDurationMs },
-    approved: false, deviceLimitations: "Synthetic worker tests", playArea: "Synthetic test area" });
+    approved: false, deviceLimitations: "Synthetic worker tests" });
   host.send({ version: 1, type: "snapshot_request" });
   const snapshot = await host.next("snapshot");
   const ids: [string, string] = [snapshot.snapshot.roster[0].id, snapshot.snapshot.roster[1].id];

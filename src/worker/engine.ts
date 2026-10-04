@@ -30,7 +30,7 @@ function toCommand(c: DomainCommand): d.Command$ {
   switch (c.type) {
     case "join": return d.Command$Join(c.playerId, c.label, factions[c.faction]);
     case "leave": return d.Command$Leave(c.playerId);
-    case "configure": return d.Command$Configure(c.mode, toParameters(c.parameters), c.approved, c.deviceLimitations, c.playArea);
+    case "configure": return d.Command$Configure(c.mode, toParameters(c.parameters), c.approved, c.deviceLimitations);
     case "start": return d.Command$Start();
     case "pause": return d.Command$Pause();
     case "begin_resume": return d.Command$BeginResume();
@@ -44,7 +44,7 @@ function fromCheckpoint(c: d.Checkpoint$): EngineCheckpoint {
   return checkpointSchema.parse({
     id: c.id, hostId: c.host_id, createdAtMs: c.created_at, phase: c.phase, mode: c.mode,
     parameters: fromParameters(nullable(c.parameters)), approved: c.approved,
-    deviceLimitations: c.limitations, playArea: c.play_area, players: c.players.toArray().map(player),
+    deviceLimitations: c.limitations, players: c.players.toArray().map(player),
     remainingMs: c.remaining, eventSeq: c.event_seq,
   });
 }
@@ -73,7 +73,7 @@ export function checkpointEngine(state: EngineState, nowMs: number): EngineCheck
 export function restoreEngine(raw: EngineCheckpoint, nowMs: number): EngineState {
   const c = checkpointSchema.parse(raw);
   return rules.restore(d.Checkpoint$Checkpoint(c.id, c.hostId, c.createdAtMs, c.phase, c.mode,
-    option(c.parameters && toParameters(c.parameters)), c.approved, c.deviceLimitations, c.playArea,
+    option(c.parameters && toParameters(c.parameters)), c.approved, c.deviceLimitations,
     toList(c.players.map(p => d.Player$Player(p.id, p.label, factions[p.faction], p.graceMs))), c.remainingMs, c.eventSeq), nowMs);
 }
 export function snapshotFor(state: EngineState, playerId: string | null, nowMs: number): PlayerSnapshot {
@@ -97,7 +97,7 @@ export function snapshotFor(state: EngineState, playerId: string | null, nowMs: 
       paper: nearby.filter(p => faction(p.faction) === "paper").length,
       scissors: nearby.filter(p => faction(p.faction) === "scissors").length },
     qualityReasons: v.quality.toArray(), parameters: c.parameters, approved: c.approved,
-    deviceLimitations: c.deviceLimitations, playArea: c.playArea,
+    deviceLimitations: c.deviceLimitations,
     resumeChecking: v.resume_checking, canHost: false,
   });
 }

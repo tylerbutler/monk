@@ -147,7 +147,7 @@ it("freezes settings, round time and grace while paused and recovers running as 
   state = command(state, 500, { type: "pause" }).state;
   const paused = snapshotFor(state, "p1", 500);
   expect(command(state, 10000, { type: "configure", mode: "normal", parameters, approved: true,
-    deviceLimitations: "Tests", playArea: "Test area" }).rejections).toHaveLength(1);
+    deviceLimitations: "Tests" }).rejections).toHaveLength(1);
   state = command(state, 10000).state;
   expect(snapshotFor(state, "p1", 10000).remainingMs).toBe(paused.remainingMs);
   expect(snapshotFor(state, "p1", 10000).graceMs).toBe(paused.graceMs);
@@ -162,7 +162,7 @@ it("calculates horizontal haversine distance", () => {
 it("resets parameter approval when settings change, even when approval is supplied", () => {
   const state = lobbyFixture(["rock", "paper"], "normal");
   const changed = command(state, 0, { type: "configure", mode: "normal",
-    parameters: { ...parameters, entryRadiusM: 11 }, approved: true, deviceLimitations: "Measured pair", playArea: "Marked test area" });
+    parameters: { ...parameters, entryRadiusM: 11 }, approved: true, deviceLimitations: "Measured pair" });
   expect(snapshotFor(changed.state, "p1", 0).approved).toBe(false);
 });
 it("excludes stale, uncertain and suspended nearby players", () => {

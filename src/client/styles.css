@@ -33,6 +33,7 @@ button:disabled { cursor: wait; opacity: .55; }
 :focus-visible { outline: 3px solid #b64b11; outline-offset: 3px; }
 ::selection { background: #d3e4ba; color: var(--ink); }
 .join-form { margin-top: 1rem; border-top: 1px solid var(--line); padding-top: .5rem; }
+.invite-link { display: block; color: var(--accent); overflow-wrap: anywhere; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1rem; }
 .trial { border-top: 1px solid var(--line); }
 .roster { list-style: none; padding: 0; }

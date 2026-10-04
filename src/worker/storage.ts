@@ -6,10 +6,13 @@ const sessionSchema = z.strictObject({
   id: z.string().min(1), host: z.boolean(), playerId: z.string().nullable(),
   verifier: z.string().regex(/^[0-9a-f]{64}$/),
 });
+const storedCheckpointSchema = checkpointSchema.extend({
+  playArea: z.string().max(1000).optional(),
+}).transform(({ playArea: _removed, ...checkpoint }) => checkpoint);
 export const recordSchema = z.strictObject({
   matchCode: z.string().regex(/^[A-Z2-9]{8}$/),
   createdAtMs: z.number().int().nonnegative(), expiresAtMs: z.number().int().nonnegative(),
-  checkpoint: checkpointSchema,
+  checkpoint: storedCheckpointSchema,
   sessions: z.array(sessionSchema).max(101),
   events: z.array(eventSchema),
   outcomes: z.array(outcomeSchema).max(10000),

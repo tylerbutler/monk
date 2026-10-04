@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { parseClientMessage, parseServerMessage, parametersSchema } from "./protocol";
 import { checkpointEngine } from "../worker/engine";
-import { pulse, runningFixture } from "../../test/fixtures";
+import { parameters, pulse, runningFixture } from "../../test/fixtures";
 
 it("rejects a client-selected host role and internal joins", () => {
   expect(parseClientMessage({ version: 1, type: "host_command", commandId: "test-1", role: "host",
@@ -19,6 +19,12 @@ it("accepts a versioned authorized-command shape, but not invalid coordinates", 
 it("stores no location or dwell in a checkpoint", () => {
   const record = checkpointEngine(pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state, 0);
   expect(JSON.stringify(record)).not.toMatch(/latitude|longitude|capturedAtMs|dwellStart/);
+  expect(record).not.toHaveProperty("playArea");
+});
+it("accepts round configuration without play-area metadata", () => {
+  expect(parseClientMessage({ version: 1, type: "host_command", commandId: "configure-1",
+    command: { type: "configure", mode: "test", parameters, approved: false,
+      deviceLimitations: "Synthetic tests only" } }).ok).toBe(true);
 });
 it("rejects invalid tracking parameters", () => {
   expect(parametersSchema.safeParse({ entryRadiusM: 12, retentionRadiusM: 10,

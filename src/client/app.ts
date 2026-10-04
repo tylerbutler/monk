@@ -32,6 +32,11 @@ export function mountApp(root: HTMLElement): () => void {
   let stopLocation: (() => void) | null = null;
   let stopPermissionCheck: (() => void) | null = null, requestingPermission = false;
   let error = "";
+  let inviteStatus = "";
+  const rawInvite = new URLSearchParams(window.location.search).get("room");
+  const invitedCode = rawInvite?.trim().toUpperCase() ?? null;
+  const validInvite = invitedCode !== null && /^[A-Z2-9]{8}$/.test(invitedCode);
+  if (invitedCode !== null && !validInvite) error = "This invite link has an invalid room code. Enter a valid eight-character code.";
   const retained = new Map<string, { value: string; checked: boolean }>();
   const disclosures = new Map<string, boolean>();
 
@@ -52,7 +57,7 @@ export function mountApp(root: HTMLElement): () => void {
     if (requestingPermission) location = { ...location, reason: "Location permission check canceled." };
     requestingPermission = false;
   }
-  function requestLocationConsent(forTrial = false) {
+  function requestLocationConsent(forTrial = false, onGranted?: () => void) {
     if (requestingPermission) return;
     cancelPermissionCheck(); consent = false; stopCollection();
     requestingPermission = true; error = "";
@@ -64,6 +69,7 @@ export function mountApp(root: HTMLElement): () => void {
       if (result.permission === "granted") {
         consent = true;
         if (forTrial) connection?.send({ version: 1, type: "trial_ready", consent: true });
+        onGranted?.();
         reconcileCollection();
       } else error = result.reason ?? "Location access failed. Try again.";
       render();
@@ -142,7 +148,8 @@ export function mountApp(root: HTMLElement): () => void {
     render();
   }
   function sendCommand(command: HostCommand) {
-    const commandId = crypto.randomUUID();
+    const pending = command.type === "start" ? [...pendingCommands].find(([, value]) => value.type === "start") : undefined;
+    const commandId = pending?.[0] ?? crypto.randomUUID();
     pendingCommands.set(commandId, command); commandStatus = "Waiting for the authority response.";
     connection?.send({ version: 1, type: "host_command", commandId, command });
     render();
@@ -195,7 +202,7 @@ export function mountApp(root: HTMLElement): () => void {
     connection?.close(); connection = null; credentials = null; snapshot = null; trial = null;
     latest = null; summary = null; retained.clear(); disclosures.clear(); error = "";
     pendingCommands.clear(); pendingFeedback.clear(); acknowledged.clear(); feedback = []; startChecking = false;
-    conversionNotices = [];
+    conversionNotices = []; inviteStatus = "";
     sessionStorage.removeItem("monk-session"); render();
   }
   function readDevices(): TrialSummary {
@@ -323,23 +330,40 @@ export function mountApp(root: HTMLElement): () => void {
     if (!credentials) {
       text(root, "h2", "Play together. Change sides.");
       text(root, "p", "Rock converts Scissors. Paper converts Rock. Scissors converts Paper. Confirmed proximity changes your faction; you stay in the game.", "intro");
-      const area = document.createElement("section"); root.append(area); text(area, "h3", "Start a private playtest");
-      button(area, "Create match", async () => { connect(await request("/api/matches", {})); }, "create");
+      const area = document.createElement("section"); root.append(area); text(area, "h3", "Play with friends");
+      if (validInvite) text(area, "p", `You are invited to room ${invitedCode}.`);
+      button(area, "Create room", async () => { connect(await request("/api/matches", {})); }, "create", validInvite ? "secondary" : "");
       const form = document.createElement("form"); form.className = "join-form"; area.append(form);
-      const code = field(form, "Private match code", "matchCode"); code.required = true; code.maxLength = 8; code.autocomplete = "off";
-      const submit = document.createElement("button"); submit.type = "submit"; submit.textContent = "Join match"; form.append(submit);
+      const code = field(form, "Room code", "matchCode", "text", validInvite ? invitedCode : "");
+      code.required = true; code.maxLength = 8; code.autocomplete = "off";
+      if (validInvite && code.parentElement) code.parentElement.hidden = true;
+      const submit = document.createElement("button"); submit.type = "submit"; submit.textContent = "Join room"; form.append(submit);
       form.addEventListener("submit", async event => {
         event.preventDefault(); submit.disabled = true;
         try {
           const matchCode = code.value.trim().toUpperCase();
-          if (!/^[A-Z2-9]{8}$/.test(matchCode)) throw new Error("Enter the eight-character match code.");
+          if (!/^[A-Z2-9]{8}$/.test(matchCode)) throw new Error("Enter the eight-character room code.");
           connect(await request(`/api/matches/${matchCode}/join`, {}));
         } catch (failure) { showError(failure instanceof Error ? failure.message : "Join failed. Try again."); }
         finally { submit.disabled = false; }
       });
     } else {
       const top = document.createElement("div"); top.className = "match-heading"; root.append(top);
-      text(top, "h2", `Match ${credentials.matchCode}`);
+      text(top, "h2", `Room ${credentials.matchCode}`);
+      if (snapshot?.phase === "lobby") {
+        const invite = new URL("/", window.location.origin); invite.searchParams.set("room", credentials.matchCode);
+        text(top, "h3", "Invite players");
+        const link = document.createElement("a"); link.href = invite.href; link.textContent = invite.href;
+        link.className = "invite-link"; link.dataset.inviteLink = ""; link.target = "_blank"; link.rel = "noopener";
+        top.append(link);
+        button(top, "Copy invite link", async () => {
+          inviteStatus = "";
+          if (!navigator.clipboard?.writeText) throw new Error("Copy is unavailable. Copy the invite link from its context menu.");
+          await navigator.clipboard.writeText(invite.href);
+          inviteStatus = "Link copied."; render();
+        }, "copy-invite", "secondary");
+        if (inviteStatus) text(top, "p", inviteStatus, "state-line").setAttribute("role", "status");
+      }
       if (!snapshot) text(root, "p", "Connecting to the private match. Location is not collected.");
       if (snapshot) {
         if (snapshot.canHost && !snapshot.ownPlayerId && snapshot.phase === "lobby") {
@@ -351,11 +375,20 @@ export function mountApp(root: HTMLElement): () => void {
         }
         const section = document.createElement("section"); root.append(section);
         renderMatch(section, snapshot, {
-          start: () => sendCommand({ type: "start" }), pause: () => sendCommand({ type: "pause" }),
+          start: () => {
+            if (snapshot?.ownPlayerId && !consent) requestLocationConsent(false, () => sendCommand({ type: "start" }));
+            else sendCommand({ type: "start" });
+          }, pause: () => sendCommand({ type: "pause" }),
           beginResume: () => sendCommand({ type: "begin_resume" }), cancelResume: () => sendCommand({ type: "cancel_resume" }),
           end: () => sendCommand({ type: "end" }), configure: sendCommand,
           setFaction: (playerId, faction) => sendCommand({ type: "set_faction", playerId, faction }), leave,
         });
+        const start = section.querySelector<HTMLButtonElement>('[data-action="start"]');
+        if (start) {
+          start.disabled ||= requestingPermission || startChecking;
+          if (requestingPermission) start.textContent = "Requesting location access...";
+          else if (startChecking) start.textContent = "Checking fresh locations...";
+        }
         if (startChecking) {
           text(section, "p", "Freshness check before start. The round is not running. Consenting players must provide fresh fixes within 10 seconds.", "state-line");
           for (const node of section.querySelectorAll<HTMLButtonElement | HTMLInputElement>(".configuration input, .configuration button, [data-action='start']")) node.disabled = true;
@@ -364,7 +397,7 @@ export function mountApp(root: HTMLElement): () => void {
         for (const select of section.querySelectorAll<HTMLSelectElement>('[data-action="set-faction"]')) {
           select.disabled = [...pendingCommands.values()].some(c => c.type === "set_faction");
         }
-        if (snapshot.ownPlayerId && !consent && snapshot.phase !== "ended") {
+        if (snapshot.ownPlayerId && !consent && snapshot.phase !== "ended" && !(snapshot.canHost && snapshot.phase === "lobby")) {
           button(section, requestingPermission ? "Requesting location access..." : "Allow location for this round",
             () => requestLocationConsent(), "round-consent").disabled = requestingPermission;
         }
@@ -375,9 +408,11 @@ export function mountApp(root: HTMLElement): () => void {
             render();
           }, "enable-audio", "secondary");
         }
-        text(section, "h3", "Players");
-        const roster = document.createElement("ul"); roster.className = "roster"; section.append(roster);
-        for (const p of snapshot.roster) text(roster, "li", `${p.label} - ${p.faction}${p.id === snapshot.ownPlayerId ? " (you)" : ""}`);
+        if (snapshot.phase !== "lobby") {
+          text(section, "h3", "Players");
+          const roster = document.createElement("ul"); roster.className = "roster"; section.append(roster);
+          for (const p of snapshot.roster) text(roster, "li", `${p.label} - ${p.faction}${p.id === snapshot.ownPlayerId ? " (you)" : ""}`);
+        }
         if (snapshot.phase === "lobby") trialView(root);
         if (feedback.length) {
           const events = document.createElement("section"); events.className = "feedback"; events.setAttribute("aria-label", "Match feedback"); root.append(events);
@@ -426,6 +461,9 @@ export function mountApp(root: HTMLElement): () => void {
       const parsed = sessionCredentialsSchema.safeParse(JSON.parse(raw));
       if (!parsed.success) throw new Error("Stored session is invalid. Leave and join again.");
       connect(parsed.data);
+      if (validInvite && parsed.data.matchCode !== invitedCode) {
+        error = `You are already in room ${parsed.data.matchCode}. Leave it before joining room ${invitedCode}.`;
+      }
     }
   } catch { error = "Stored session could not be loaded. Clear this browser session or join again."; }
   render();

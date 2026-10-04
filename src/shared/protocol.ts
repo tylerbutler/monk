@@ -17,6 +17,11 @@ export const parametersSchema = z.strictObject({
   roundDurationMs: positive.int().max(86400000),
 }).refine(p => p.retentionRadiusM >= p.entryRadiusM, { message: "Retention radius must be at least the entry radius." });
 export type RuleParameters = z.infer<typeof parametersSchema>;
+export const testPreset: RuleParameters = {
+  entryRadiusM: 30, retentionRadiusM: 40, maxAccuracyM: 15,
+  freshnessMs: 5000, dwellMs: 2000, graceMs: 3000, roundDurationMs: 600000,
+};
+export const testDeviceLimitations = "Uncalibrated test preset; phone accuracy not measured.";
 export const positionSchema = z.strictObject({
   seq: time, capturedAtMs: time, latitude: z.number().finite().min(-90).max(90),
   longitude: z.number().finite().min(-180).max(180), accuracyM: positive.max(100000),
@@ -28,7 +33,7 @@ export const actorSchema = z.strictObject({ id, host: z.boolean(), playerId: id.
 export type VerifiedActor = z.infer<typeof actorSchema>;
 export const configureSchema = z.strictObject({
   type: z.literal("configure"), mode: modeSchema, parameters: parametersSchema,
-  approved: z.boolean(), deviceLimitations: z.string().max(1000), playArea: z.string().min(1).max(1000),
+  approved: z.boolean(), deviceLimitations: z.string().max(1000),
 });
 export const hostCommandSchema = z.discriminatedUnion("type", [
   configureSchema,
@@ -62,7 +67,7 @@ const playerSchema = z.strictObject({ id, label: z.string().max(80), faction: fa
 export const checkpointSchema = z.strictObject({
   id, hostId: id, createdAtMs: time, phase: phaseSchema, mode: modeSchema,
   parameters: parametersSchema.nullable(), approved: z.boolean(),
-  deviceLimitations: z.string().max(1000), playArea: z.string().max(1000),
+  deviceLimitations: z.string().max(1000),
   players: z.array(playerSchema).max(100), remainingMs: time, eventSeq: time,
 });
 export type EngineCheckpoint = z.infer<typeof checkpointSchema>;
@@ -81,7 +86,7 @@ export const snapshotSchema = z.strictObject({
   outgoing: progressSchema.nullable(), incoming: z.array(progressSchema),
   nearby: z.strictObject({ rock: time, paper: time, scissors: time }),
   qualityReasons: z.array(z.string()), parameters: parametersSchema.nullable(),
-  approved: z.boolean(), deviceLimitations: z.string(), playArea: z.string(),
+  approved: z.boolean(), deviceLimitations: z.string(),
   resumeChecking: z.boolean(), canHost: z.boolean(),
   feedback: feedbackSummarySchema.optional(),
 });

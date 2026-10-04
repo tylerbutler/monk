@@ -87,11 +87,17 @@ Export, then select **Discard measurement summary** before changing phones,
 conditions, or parameter candidates. The app does not combine incompatible
 measurements or discard earlier blocks without that action.
 
-For a quick Testing round, new matches prefill an **uncalibrated test preset**:
+Select **Create room**, then **Copy invite link** and share it. The host joins
+as a player automatically. Guests open the link and select **Join room**; the
+player list updates as they join. Invite links contain only the room code,
+never host or player credentials.
+
+New rooms save an **uncalibrated test preset** automatically:
 entry 30 m, retention 40 m, maximum uncertainty 15 m, freshness 5000 ms,
-dwell 2000 ms, grace 3000 ms, and a ten-minute round. Enter the actual agreed
-play area and save before starting. The preset fills the form; it does not
-approve measured accuracy or override saved settings.
+dwell 2000 ms, grace 3000 ms, and a ten-minute round. No configuration step
+is required. The preset does not approve measured accuracy or override saved
+settings. The play-area text field has been removed; agree on safe routes
+in person rather than entering a note that the game cannot enforce.
 
 Expand **Advanced settings** to adjust values, switch modes, or record device
 limits. Expand **Change player factions** for host faction controls, or
@@ -100,7 +106,8 @@ its consent controls. Open sections and draft inputs stay open across authority
 updates. Retention must be at least entry radius, and parameters must be positive
 and finite. Settings freeze while running or paused.
 
-Use **Allow location for this round** on both phones. The host starts a
+Guests select **Allow location for this round**. The host selects **Start game**,
+which requests browser location access if needed, then starts a
 ten-second freshness check; a prior trial is not required. A test round needs
 at least two fresh, usable player fixes. Host faction changes clear affected
 attacks, apply grace, and have distinct visible feedback. Repeated command IDs

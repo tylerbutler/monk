@@ -24,7 +24,6 @@ pub fn new_match(id: String, host_id: String, created_at: Int) -> Match {
     None,
     False,
     "",
-    "",
     [],
     [],
     [],
@@ -178,7 +177,7 @@ fn apply_command(
           )
       }
     }
-    Configure(mode, parameters, approved, limitations, play_area) -> {
+    Configure(mode, parameters, approved, limitations) -> {
       case state.phase != "lobby" {
         True -> reject(result, "Settings are fixed for this round.")
         False -> {
@@ -191,7 +190,6 @@ fn apply_command(
               parameters: Some(parameters),
               approved: approved && limitations != "" && state.parameters == Some(parameters),
               limitations: limitations,
-              play_area: play_area,
               remaining: parameters.duration,
             ),
           )
@@ -203,14 +201,13 @@ fn apply_command(
         "lobby", Some(_) -> {
           case
             ready(state, input.now, True)
-            && state.play_area != ""
             && { state.mode == "test" || state.approved }
           {
             True -> phase(result, "running", "Round started.", input.now)
             False ->
               reject(
                 result,
-                "Fresh consenting players, balanced normal factions, approved parameters and play area are required.",
+                "Fresh consenting players, balanced normal factions and approved parameters are required.",
               )
           }
         }
@@ -403,7 +400,6 @@ pub fn checkpoint(state: Match, now: Int) -> Checkpoint {
     state.parameters,
     state.approved,
     state.limitations,
-    state.play_area,
     state.players,
     state.remaining,
     state.event_seq,
@@ -423,7 +419,6 @@ pub fn restore(saved: Checkpoint, now: Int) -> Match {
     saved.parameters,
     saved.approved,
     saved.limitations,
-    saved.play_area,
     saved.players,
     [],
     [],

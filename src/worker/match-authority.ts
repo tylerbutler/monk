@@ -5,7 +5,7 @@ import type { EngineState, EngineTransition } from "./engine";
 import { issueToken, verifyToken } from "./auth";
 import { commitRecord, loadRecord } from "./storage";
 import type { MatchRecord } from "./storage";
-import { actorSchema, parseClientMessage, serverMessageSchema } from "../shared/protocol";
+import { actorSchema, parseClientMessage, serverMessageSchema, testDeviceLimitations, testPreset } from "../shared/protocol";
 import type { ClockEstimate, ClockProbeSample, CommandOutcome, EngineEvent, FeedbackSummary, Observation, ServerBody, TrialStatus, VerifiedActor } from "../shared/protocol";
 import { estimateClock, normalizeObservation } from "../shared/clock";
 
@@ -186,18 +186,31 @@ export class MatchAuthority extends DurableObject<Env> {
         let raw: unknown;
         try { raw = await request.json(); } catch { return Response.json({ error: "Invalid JSON." }, { status: 400 }); }
         if (!z.strictObject({}).safeParse(raw).success) return Response.json({ error: "Invalid match creation request." }, { status: 400 });
-        const now = Date.now(), hostId = crypto.randomUUID(), credential = await issueToken();
-        const engine = createEngine({ id: code, hostId, createdAtMs: now });
+        const now = Date.now(), hostId = crypto.randomUUID(), playerId = crypto.randomUUID();
+        const [credential, playerCredential] = await Promise.all([issueToken(), issueToken()]);
+        const next = advanceEngine(createEngine({ id: code, hostId, createdAtMs: now }), {
+          nowMs: now, actor: { id: hostId, host: true, playerId: null }, observations: [],
+          commands: [
+            { type: "configure", mode: "test", parameters: testPreset, approved: false, deviceLimitations: testDeviceLimitations },
+            { type: "join", playerId, label: "Player 1", faction: "rock" },
+          ],
+        });
+        if (next.rejections.length) throw new Error("Initial room setup failed.");
+        const engine = next.state;
         const record: MatchRecord = {
           matchCode: code, createdAtMs: now, expiresAtMs: now + 86400000,
           checkpoint: checkpointEngine(engine, now),
-          sessions: [{ id: hostId, host: true, playerId: null, verifier: credential.verifier }],
+          sessions: [
+            { id: hostId, host: true, playerId: null, verifier: credential.verifier },
+            { id: playerId, host: false, playerId, verifier: playerCredential.verifier },
+          ],
           events: [], outcomes: [], feedback: [],
         };
         await commitRecord(this.ctx.storage, record, []);
         this.record = record; this.engine = engine;
         await this.ctx.storage.setAlarm(record.expiresAtMs);
-        return Response.json({ matchCode: code, hostToken: credential.token, playerToken: null }, { status: 201, headers: { "Cache-Control": "no-store" } });
+        return Response.json({ matchCode: code, hostToken: credential.token, playerToken: playerCredential.token },
+          { status: 201, headers: { "Cache-Control": "no-store" } });
       }
       if (!this.record || !this.engine) return Response.json({ error: "Match not found." }, { status: 404 });
       if (Date.now() >= this.record.expiresAtMs) {
@@ -208,7 +221,7 @@ export class MatchAuthority extends DurableObject<Env> {
         let raw: unknown;
         try { raw = await request.json(); } catch { return Response.json({ error: "Invalid JSON." }, { status: 400 }); }
         const input = z.strictObject({
-          label: z.string().trim().min(1).max(80).default("Player"),
+          label: z.string().trim().min(1).max(80).optional(),
           hostToken: z.string().min(32).max(128).nullable().default(null),
         }).safeParse(raw);
         if (!input.success) return Response.json({ error: "Invalid join request." }, { status: 400 });
@@ -217,12 +230,18 @@ export class MatchAuthority extends DurableObject<Env> {
           return Response.json({ error: "Host credential is invalid." }, { status: 401 });
         }
         const playerId = crypto.randomUUID(), credential = await issueToken();
+        let label = input.data.label;
+        if (label === undefined) {
+          let number = 1;
+          while (this.record.checkpoint.players.some(p => p.label === `Player ${number}`)) number++;
+          label = `Player ${number}`;
+        }
         const factions = ["rock", "paper", "scissors"] as const;
         const faction = factions.reduce((best, f) => this.record!.checkpoint.players.filter(p => p.faction === f).length <
           this.record!.checkpoint.players.filter(p => p.faction === best).length ? f : best);
         const next = advanceEngine(this.engine, {
           nowMs: Date.now(), actor: { id: this.record.checkpoint.hostId, host: true, playerId: null },
-          commands: [{ type: "join", playerId, label: input.data.label, faction }], observations: [],
+          commands: [{ type: "join", playerId, label, faction }], observations: [],
         });
         if (next.rejections.length) return Response.json({ error: next.rejections[0].reason }, { status: 409 });
         const record = { ...this.record, sessions: [...this.record.sessions,
@@ -297,7 +316,7 @@ export class MatchAuthority extends DurableObject<Env> {
           const c = this.record.checkpoint;
           const rosterReady = c.mode === "test" ? c.players.length >= 2 :
             c.players.length === 6 && ["rock", "paper", "scissors"].every(f => c.players.filter(p => p.faction === f).length === 2);
-          if (c.parameters && c.playArea && rosterReady && (c.mode === "test" || c.approved)) {
+          if (c.parameters && rosterReady && (c.mode === "test" || c.approved)) {
             for (const p of c.players) this.engine = suspendEngine(this.engine, p.id);
             this.pendingStart = { commandId: message.commandId, actor, deadlineMs: Date.now() + 10000, caller: socket };
             this.trial = null; this.clearMeasurements();

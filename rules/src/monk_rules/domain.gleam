@@ -14,7 +14,6 @@ pub type Match {
     parameters: Option(Parameters),
     approved: Bool,
     limitations: String,
-    play_area: String,
     players: List(Player),
     observations: List(Position),
     attacks: List(Attack),
@@ -70,7 +69,6 @@ pub type Command {
     parameters: Parameters,
     approved: Bool,
     limitations: String,
-    play_area: String,
   )
   Start
   Pause
@@ -117,7 +115,6 @@ pub type Checkpoint {
     parameters: Option(Parameters),
     approved: Bool,
     limitations: String,
-    play_area: String,
     players: List(Player),
     remaining: Int,
     event_seq: Int,
