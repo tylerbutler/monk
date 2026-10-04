@@ -74,7 +74,10 @@ The app ignores late callbacks after collection stops. A phone clock change
 does not stop ordinary reporting.
 
 **Player radar** shows north-up directions, distance rounded to 5 m, and
-numbered faction markers. Your last-known position is the reference.
+numbered faction markers. **T** marks a target faction, **!** marks a threat
+faction, and **=** marks your own faction. The faction guide and player list
+name these roles. Roles do not confirm an attack. Your last-known position
+is the reference.
 Without your position, the radar identifies a known peer reference by name.
 An absent position shows a waiting state. Old and approximate positions
 remain visible; the app updates their age labels even while offline.
@@ -87,10 +90,12 @@ new progress. Stopping sharing or disconnecting stops influence at once.
 An unrelated old marker does not stop a fresh encounter.
 
 **Influencing** identifies a confirmed outgoing attack and its progress.
-Incoming influence identifies the player affecting you. Solid radar links
-show outgoing influence; dashed links show incoming influence. Proximity
-alone does not confirm influence. The server must accept continuous dwell
-before **You converted...** appears and the player's faction changes.
+Incoming influence identifies the player affecting you. Solid radar arrows
+point to players you influence; dashed arrows point from players influencing
+you. Rings around these players show confirmed conversion progress. The
+player list shows the same named influence and percentage.
+Proximity alone does not confirm influence. The server must accept continuous
+dwell before **You converted...** appears and the player's faction changes.
 An interruption explains why influence stopped; progress does not continue
 through missing observations.
 

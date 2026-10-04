@@ -7,7 +7,12 @@ export type MatchActions = {
   setFaction(playerId: string, faction: Faction): void;
 };
 const names = { rock: "Rock", paper: "Paper", scissors: "Scissors" };
-const targets = { rock: "Scissors", paper: "Rock", scissors: "Paper" };
+const targets: Record<Faction, Faction> = { rock: "scissors", paper: "rock", scissors: "paper" };
+const radarRoles = {
+  target: { label: "Target", symbol: "T" }, threat: { label: "Threat", symbol: "!" },
+  same: { label: "Same faction", symbol: "=" }, you: { label: "You", symbol: "" },
+  player: { label: "Player", symbol: "" },
+};
 const symbols = {
   rock: "M5 4 16 2 22 10 19 21 7 22 2 13Z",
   paper: "M5 2H15L21 8V22H5ZM15 2V8H21M9 12H17M9 16H17",
@@ -60,7 +65,29 @@ function renderRadar(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean,
   const section = document.createElement("section"); section.className = "player-radar";
   section.setAttribute("aria-label", "Player radar"); root.append(section);
   text(section, "h3", "Player radar");
-  text(section, "p", "North stays at the top. Find players by number, faction, and approximate distance.", "radar-note");
+  text(section, "p", "North stays at the top. Numbers match the player list.", "radar-note");
+  const relationship = (faction: Faction, playerId?: string) => playerId === snapshot.ownPlayerId ? "you" :
+    !snapshot.ownFaction ? "player" : faction === snapshot.ownFaction ? "same" :
+      faction === targets[snapshot.ownFaction] ? "target" : "threat";
+  const attackFor = (playerId: string) => snapshot.outgoing?.targetId === playerId ? snapshot.outgoing :
+    snapshot.incoming.find(attack => attack.attackerId === playerId);
+  const combatLabel = (player: PlayerSnapshot["roster"][number]) => snapshot.outgoing?.targetId === player.id ?
+    `You are influencing ${player.label}` : `${player.label} is influencing you`;
+  if (snapshot.ownFaction) {
+    const guide = document.createElement("div"); guide.className = "radar-guide";
+    guide.setAttribute("aria-label", "Faction guide"); section.append(guide);
+    const own = snapshot.ownFaction;
+    for (const [relation, faction] of [
+      ["target", targets[own]], ["threat", targets[targets[own]]], ["same", own],
+    ] as const) {
+      const role = radarRoles[relation];
+      const item = document.createElement("span"); item.className = "radar-guide-item"; guide.append(item);
+      const badge = text(item, "span", role.symbol, "radar-role-badge");
+      badge.dataset.relationship = relation; badge.setAttribute("aria-hidden", "true");
+      text(item, "span", `${role.label}: ${names[faction]}`);
+    }
+    text(guide, "p", "Faction roles only. Arrows and rings show confirmed influence.", "radar-note");
+  }
   if (!live) text(section, "p", "Offline or hidden. Showing last-known positions.", "state-line");
   const reference = radar.reference;
   const label = (id: string) => snapshot.roster.find(p => p.id === id)?.label ?? "Player";
@@ -78,6 +105,7 @@ function renderRadar(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean,
     for (const [direction, x, y] of [["North", 160, 19], ["S", 160, 311], ["E", 307, 165], ["W", 13, 165]] as const) {
       svg(chart, "text", { x: String(x), y: String(y), "text-anchor": "middle", class: "radar-compass" }).textContent = direction;
     }
+    const connections = svg(chart, "g"), markers = svg(chart, "g");
     const placed = [{ x: 160, y: 160 }];
     radar.players.forEach((p, index) => {
       const player = snapshot.roster.find(player => player.id === p.playerId);
@@ -85,59 +113,91 @@ function renderRadar(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean,
       const angle = p.position.bearingDegrees * Math.PI / 180;
       const radius = 120 * p.position.distanceM / scale;
       const x = 160 + Math.sin(angle) * radius, y = 160 - Math.cos(angle) * radius;
-      const influence = snapshot.outgoing?.targetId === p.playerId ? "outgoing" :
-        snapshot.incoming.some(a => a.attackerId === p.playerId) ? "incoming" : "none";
-      if (influence !== "none") svg(chart, "line", { x1: "160", y1: "160", x2: String(x), y2: String(y),
-        class: `radar-link ${influence}` });
+      const attack = attackFor(p.playerId);
+      const influence = !attack ? "none" : snapshot.outgoing?.targetId === p.playerId ? "outgoing" : "incoming";
       let markerX = x, markerY = y;
-      for (let attempt = 0; attempt < 32 && placed.some(p => Math.hypot(p.x - markerX, p.y - markerY) < 38); attempt++) {
-        const angle = attempt * Math.PI / 4, offset = 38 * (1 + Math.floor(attempt / 8));
+      for (let attempt = 0; attempt < 32 && placed.some(p => Math.hypot(p.x - markerX, p.y - markerY) < 56); attempt++) {
+        const angle = attempt * Math.PI / 4, offset = 56 * (1 + Math.floor(attempt / 8));
         markerX = Math.max(40, Math.min(280, x + Math.cos(angle) * offset));
         markerY = Math.max(40, Math.min(280, y + Math.sin(angle) * offset));
       }
       placed.push({ x: markerX, y: markerY });
       if (markerX !== x || markerY !== y) {
-        svg(chart, "line", { x1: String(x), y1: String(y), x2: String(markerX), y2: String(markerY), class: "radar-leader" });
-        svg(chart, "circle", { cx: String(x), cy: String(y), r: "3", class: "radar-estimate" });
+        svg(connections, "line", { x1: String(x), y1: String(y), x2: String(markerX), y2: String(markerY), class: "radar-leader" });
+        svg(connections, "circle", { cx: String(x), cy: String(y), r: "3", class: "radar-estimate" });
       }
-      const marker = svg(chart, "g", { transform: `translate(${markerX} ${markerY})`, "data-radar-player": p.playerId,
+      if (attack) {
+        const angle = Math.atan2(markerY - 160, markerX - 160);
+        const dx = Math.cos(angle), dy = Math.sin(angle);
+        const start = { x: 160 + dx * 11, y: 160 + dy * 11 };
+        const end = { x: markerX - dx * 25, y: markerY - dy * 25 };
+        const from = influence === "outgoing" ? start : end, to = influence === "outgoing" ? end : start;
+        const direction = influence === "outgoing" ? 1 : -1;
+        const backX = to.x - dx * direction * 8, backY = to.y - dy * direction * 8;
+        svg(connections, "line", { x1: String(from.x), y1: String(from.y), x2: String(to.x), y2: String(to.y),
+          "data-from": attack.attackerId, "data-to": attack.targetId, class: `radar-link ${influence}` });
+        svg(connections, "path", { d: `M${to.x} ${to.y}L${backX - dy * 4} ${backY + dx * 4}L${backX + dy * 4} ${backY - dx * 4}Z`,
+          class: `radar-arrow ${influence}` });
+      }
+      const relation = relationship(player.faction, player.id), role = radarRoles[relation];
+      const marker = svg(markers, "g", { transform: `translate(${markerX} ${markerY})`, "data-radar-player": p.playerId,
+        "data-relationship": relation,
         "data-influence": influence, "data-faction": player.faction,
         "data-current": String(live && isCurrentPosition(p.position, elapsedMs)), class: "radar-marker" });
-      svg(marker, "title").textContent = `${index + 1}. ${player.label} - ${names[player.faction]}`;
-      svg(marker, "circle", { r: "16" });
+      svg(marker, "title").textContent = `${index + 1}. ${player.label} - ${names[player.faction]} - ${role.label}` +
+        (attack ? `. ${combatLabel(player)} - ${Math.round(attack.progress * 100)}%.` : "");
+      if (attack) {
+        svg(marker, "circle", { r: "22", class: "radar-progress-track" });
+        svg(marker, "circle", { r: "22", pathLength: "100", transform: "rotate(-90)",
+          "stroke-dasharray": `${attack.progress * 100} 100`, class: `radar-progress ${influence}` });
+      }
+      svg(marker, "circle", { r: "16", class: "radar-marker-body" });
       const icon = factionIcon(marker, player.faction);
       icon.setAttribute("x", "-11"); icon.setAttribute("y", "-11");
       icon.setAttribute("width", "22"); icon.setAttribute("height", "22");
       svg(marker, "text", { x: "20", y: "-14", class: "radar-number" }).textContent = String(index + 1);
+      if (role.symbol) {
+        const badge = svg(marker, "g", { transform: "translate(-19 19)", class: "radar-role", "data-relationship": relation });
+        svg(badge, "circle", { r: "9" });
+        svg(badge, "text", { y: "4", "text-anchor": "middle", "data-radar-role": "" }).textContent = role.symbol;
+      }
     });
     svg(chart, "circle", { cx: "160", cy: "160", r: "7", class: "radar-center",
       "data-current": String(live && isCurrentPosition(reference, elapsedMs)) });
     svg(chart, "text", { x: "160", y: "186", "text-anchor": "middle", class: "radar-compass" })
       .textContent = reference.playerId === snapshot.ownPlayerId ? "You" : "Reference";
-    text(figure, "figcaption", `Outer ring: ${scale} m. Dashed ring: entry radius. Offset markers link to their estimated positions.`, "radar-note");
+    text(figure, "figcaption", `Outer ring: ${scale} m. Dashed circle: entry radius. Thin lines locate offset markers.`, "radar-note");
   }
   const details = document.createElement("div"); layout.append(details);
   if (reference) {
     text(details, "p", reference.playerId === snapshot.ownPlayerId ? "Reference: you" : `Reference: ${label(reference.playerId)}`, "state-line");
     text(details, "p", `GPS uncertainty ${reference.accuracyM} m. ${updated(reference.ageMs, elapsedMs)}.`, "radar-note");
     if (reference.accuracyM > (snapshot.parameters?.maxAccuracyM ?? gamePreset.maxAccuracyM)) text(details, "p", "Location is approximate.", "radar-note");
-    else if (!live || !isCurrentPosition(reference, elapsedMs)) text(details, "p", "Last-known position.", "radar-note");
+    if (!live || !isCurrentPosition(reference, elapsedMs)) text(details, "p", "Last-known position.", "radar-location-state");
   } else text(details, "p", "Waiting for location.", "radar-note");
   const list = document.createElement("ol"); list.className = "radar-players"; details.append(list);
   const directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
   for (const p of radar.players) {
     const player = snapshot.roster.find(player => player.id === p.playerId);
     if (!player) continue;
-    const row = document.createElement("li"); row.dataset.playerId = p.playerId; list.append(row);
-    text(row, "strong", `${player.label} - ${names[player.faction]}`);
+    const relation = relationship(player.faction, player.id), role = radarRoles[relation], attack = attackFor(p.playerId);
+    const row = document.createElement("li"); row.dataset.playerId = p.playerId;
+    row.dataset.relationship = relation;
+    row.dataset.influence = !attack ? "none" : snapshot.outgoing?.targetId === p.playerId ? "outgoing" : "incoming";
+    list.append(row);
+    const heading = document.createElement("div"); heading.className = "radar-player-heading"; row.append(heading);
+    text(heading, "strong", `${player.label} - ${names[player.faction]}`);
+    if (relation !== "player") {
+      const badge = text(heading, "span", role.label, "radar-relationship");
+      badge.dataset.relationship = relation;
+    }
+    if (attack) text(row, "p", `${combatLabel(player)} - ${Math.round(attack.progress * 100)}%.`, "radar-combat-status");
     if (p.position) {
       text(row, "p", p.position.distanceM === 0 ? "Within about 5 m." :
         `about ${p.position.distanceM} m ${directions[p.position.bearingDegrees / 45]}`);
       text(row, "p", `GPS uncertainty ${p.position.accuracyM} m. ${updated(p.position.ageMs, elapsedMs)}.`, "radar-note");
       if (p.position.accuracyM > (snapshot.parameters?.maxAccuracyM ?? gamePreset.maxAccuracyM)) text(row, "p", "Location is approximate.", "radar-note");
-      else if (!live || !isCurrentPosition(p.position, elapsedMs)) text(row, "p", "Last-known position.", "radar-note");
-      if (snapshot.outgoing?.targetId === p.playerId) text(row, "p", "You are influencing this player.", "influence-label");
-      if (snapshot.incoming.some(a => a.attackerId === p.playerId)) text(row, "p", "This player is influencing you.", "influence-label");
+      if (!live || !isCurrentPosition(p.position, elapsedMs)) text(row, "p", "Last-known position.", "radar-location-state");
     } else text(row, "p", "Waiting for location.", "radar-note");
   }
 }
@@ -186,7 +246,7 @@ export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions
   if (snapshot.ownFaction) {
     const own = document.createElement("div"); own.className = "own-faction"; root.append(own);
     factionIcon(own, snapshot.ownFaction);
-    text(own, "strong", names[snapshot.ownFaction]); text(root, "p", `${names[snapshot.ownFaction]} converts ${targets[snapshot.ownFaction]}.`);
+    text(own, "strong", names[snapshot.ownFaction]); text(root, "p", `${names[snapshot.ownFaction]} converts ${names[targets[snapshot.ownFaction]]}.`);
   } else text(root, "p", "Host view. Join as a player to participate.");
   if (snapshot.phase !== "lobby") {
     text(root, "p", `Round time: ${clock(snapshot.remainingMs)}`, "round-clock");

@@ -94,6 +94,115 @@ it("shows a north-up radar with player identities and location quality", () => {
   expect(root.textContent).not.toMatch(/latitude|longitude/);
 });
 
+it.each([
+  ["rock", ["same", "threat", "target"]],
+  ["paper", ["target", "same", "threat"]],
+  ["scissors", ["threat", "target", "same"]],
+] as const)("shows radar relationships from the player's %s faction", (faction, relationships) => {
+  const root = document.createElement("section");
+  const state = pulse(runningFixture([faction, "rock", "paper", "scissors"]), 0, [0, 50, 60, 70]).state;
+  renderMatch(root, snapshotFor(state, "p1", 500), actions);
+  const labels = { same: "Same faction", target: "Target", threat: "Threat" };
+  const symbols = { same: "=", target: "T", threat: "!" };
+  relationships.forEach((relationship, index) => {
+    const marker = root.querySelector(`[data-radar-player="p${index + 2}"]`);
+    const row = root.querySelector(`[data-player-id="p${index + 2}"]`);
+    expect(marker?.getAttribute("data-relationship")).toBe(relationship);
+    expect(marker?.querySelector("[data-radar-role]")?.textContent).toBe(symbols[relationship]);
+    expect(row?.getAttribute("data-relationship")).toBe(relationship);
+    expect(row?.textContent).toContain(labels[relationship]);
+  });
+  expect(root.querySelector(".radar-guide")?.textContent).toContain("Faction roles only");
+  expect(root.querySelector(".radar-link")).toBeNull();
+  expect(root.querySelector(".radar-progress")).toBeNull();
+});
+
+it("keeps faction relationships player-relative when a peer is the location reference", () => {
+  const root = document.createElement("section");
+  const snapshot = snapshotFor(runningFixture(["rock", "paper", "scissors"]), "p1", 100);
+  if (!snapshot.radar?.reference) throw new Error("Missing radar fixture");
+  snapshot.radar = { ...snapshot.radar, reference: { ...snapshot.radar.reference, playerId: "p2" },
+    players: [{ playerId: "p1", reason: null, position: null }, ...snapshot.radar.players.filter(p => p.playerId !== "p2")] };
+  renderMatch(root, snapshot, actions);
+  expect(root.querySelector('[data-radar-player="p3"]')?.getAttribute("data-relationship")).toBe("target");
+  expect(root.querySelector('[data-player-id="p1"]')?.textContent).toContain("You");
+  expect(root.textContent).toContain("Reference: Player 2");
+});
+
+it("does not assign personal targets or threats to a spectator host", () => {
+  const root = document.createElement("section");
+  renderMatch(root, snapshotFor(runningFixture(["rock", "paper", "scissors"]), null, 100, true), actions);
+  expect(root.querySelector('.radar-guide')).toBeNull();
+  expect(root.querySelector('[data-relationship="target"]')).toBeNull();
+  expect(root.querySelector('[data-relationship="threat"]')).toBeNull();
+  expect(root.querySelector('[data-radar-player="p2"]')?.getAttribute("data-relationship")).toBe("player");
+});
+
+it.each([
+  ["p1", "p2", "outgoing", "p1", "p2"],
+  ["p2", "p1", "incoming", "p1", "p2"],
+] as const)("shows directed confirmed influence and marker progress for %s", (viewer, other, influence, from, to) => {
+  const root = document.createElement("section");
+  const state = pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state;
+  renderMatch(root, snapshotFor(state, viewer, 500), actions);
+  const link = root.querySelector(`.radar-link.${influence}`);
+  expect(link?.getAttribute("data-from")).toBe(from);
+  expect(link?.getAttribute("data-to")).toBe(to);
+  if (!link) throw new Error("Missing influence link");
+  const startDistance = Math.hypot(Number(link.getAttribute("x1")) - 160, Number(link.getAttribute("y1")) - 160);
+  const endDistance = Math.hypot(Number(link.getAttribute("x2")) - 160, Number(link.getAttribute("y2")) - 160);
+  expect(influence === "outgoing" ? endDistance > startDistance : startDistance > endDistance).toBe(true);
+  expect(root.querySelector(`.radar-arrow.${influence}`)).not.toBeNull();
+  const marker = root.querySelector(`[data-radar-player="${other}"]`);
+  const progress = marker?.querySelector(".radar-progress");
+  expect(progress).not.toBeNull();
+  if (!progress) throw new Error("Missing influence progress");
+  expect(Number.parseFloat(progress.getAttribute("stroke-dasharray") ?? "")).toBeCloseTo(100 / 6);
+  expect(marker?.querySelector("title")?.textContent).toContain("17%");
+  const status = root.querySelector(`[data-player-id="${other}"] .radar-combat-status`);
+  expect(status?.textContent).toContain("17%");
+  expect(status?.textContent).toContain(influence === "outgoing" ? "You are influencing" : "is influencing you");
+});
+
+it("shows progress for each incoming player alongside outgoing influence", () => {
+  const root = document.createElement("section");
+  const state = pulse(runningFixture(["rock", "paper", "paper", "scissors"]), 0, [0, 4, -4, 3]).state;
+  renderMatch(root, snapshotFor(state, "p1", 500), actions);
+  expect(root.querySelectorAll(".radar-progress")).toHaveLength(3);
+  expect(root.querySelectorAll(".radar-arrow.incoming")).toHaveLength(2);
+  expect(root.querySelectorAll(".radar-arrow.outgoing")).toHaveLength(1);
+});
+
+it.each(["offline", "expired", "paused", "unknown-age"] as const)(
+  "removes radar combat cues when influence is %s but keeps faction relationships", condition => {
+    const root = document.createElement("section");
+    const snapshot = snapshotFor(pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state, "p1", 500);
+    if (condition === "paused") snapshot.phase = "paused";
+    if (condition === "unknown-age") {
+      if (!snapshot.radar?.reference) throw new Error("Missing radar fixture");
+      snapshot.radar.reference.ageMs = null;
+    }
+    renderMatch(root, snapshot, actions, condition !== "offline", condition === "expired" ? 30000 : 0);
+    expect(root.querySelector('[data-radar-player="p2"]')?.getAttribute("data-relationship")).toBe("target");
+    expect(root.querySelector(".radar-link")).toBeNull();
+    expect(root.querySelector(".radar-arrow")).toBeNull();
+    expect(root.querySelector(".radar-progress")).toBeNull();
+    expect(root.querySelector(".radar-combat-status")).toBeNull();
+  });
+
+it("shows last-known state separately from poor location accuracy", () => {
+  const root = document.createElement("section");
+  const snapshot = snapshotFor(runningFixture(["rock", "scissors"]), "p1", 100);
+  const position = snapshot.radar?.players[0].position;
+  if (!position) throw new Error("Missing radar fixture");
+  position.accuracyM = 60;
+  renderMatch(root, snapshot, actions, true, 30000);
+  const row = root.querySelector('[data-player-id="p2"]');
+  expect(row?.textContent).toContain("Location is approximate");
+  expect(row?.textContent).toContain("Last-known position");
+  expect(root.querySelector('[data-radar-player="p2"]')?.getAttribute("data-current")).toBe("false");
+});
+
 it("does not invent a fresh age for unknown radar timestamps", () => {
   const root = document.createElement("section");
   const snapshot = snapshotFor(pulse(runningFixture(["rock", "paper"]), 0, [0, 21]).state, "p1", 0);

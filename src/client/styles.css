@@ -8,6 +8,7 @@
   --muted: #45564b;
   --line: #bdc9bd;
   --accent: #254e37;
+  --threat: #85221b;
 }
 * { box-sizing: border-box; }
 body { margin: 0; overflow-wrap: anywhere; }
@@ -46,9 +47,17 @@ button:disabled { cursor: wait; opacity: .55; }
 .round-clock { font-size: 1.4rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 progress { width: 100%; height: 1.25rem; accent-color: var(--accent); }
 .influence { padding: .75rem 0; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
-.influence-label { font-weight: 700; color: var(--accent); }
 .player-radar { border-top: 1px solid var(--line); }
 .radar-note { color: var(--muted); font-size: .95rem; }
+.radar-guide { display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin: 1rem 0; }
+.radar-guide-item { display: inline-flex; align-items: center; gap: .4rem; font-size: .95rem; font-weight: 650; }
+.radar-guide > p { flex-basis: 100%; margin: 0; }
+.radar-role-badge { display: inline-grid; place-items: center; width: 1.25rem; height: 1.25rem; border: 1px solid currentColor; border-radius: 50%; font-size: .8rem; line-height: 1; }
+.radar-role, .radar-role-badge, .radar-relationship { color: var(--muted); }
+[data-relationship="target"].radar-role, [data-relationship="target"].radar-role-badge, [data-relationship="target"].radar-relationship { color: var(--accent); }
+[data-relationship="threat"].radar-role, [data-relationship="threat"].radar-role-badge, [data-relationship="threat"].radar-relationship { color: var(--threat); }
+.radar-role > circle { fill: #f7f8f1; stroke: currentColor; stroke-width: 1.5; }
+.radar-role > text { fill: currentColor; font-size: 12px; font-weight: 750; }
 .radar-layout { display: grid; grid-template-columns: minmax(0, 20rem) minmax(0, 1fr); gap: 1.5rem; align-items: start; }
 .radar-layout figure { margin: 0; }
 .radar-layout figure > svg { display: block; width: 100%; max-width: 20rem; height: auto; color: var(--ink); }
@@ -59,21 +68,33 @@ progress { width: 100%; height: 1.25rem; accent-color: var(--accent); }
 .radar-marker { color: var(--accent); }
 .radar-marker[data-faction="paper"] { color: #805016; }
 .radar-marker[data-faction="scissors"] { color: #693864; }
-.radar-marker > circle { fill: #f7f8f1; stroke: currentColor; stroke-width: 1.5; }
-.radar-marker[data-current="false"] > circle { stroke-dasharray: 3 3; }
+.radar-marker-body { fill: #f7f8f1; stroke: currentColor; stroke-width: 1.5; }
+.radar-marker[data-current="false"] > .radar-marker-body { stroke-dasharray: 3 3; }
+.radar-progress-track, .radar-progress { fill: none; stroke-width: 3; }
+.radar-progress-track { stroke: var(--line); }
+.radar-progress { stroke: var(--accent); }
+.radar-progress.incoming { stroke: var(--threat); }
 .radar-center[data-current="false"] { fill: #f7f8f1; stroke: var(--ink); stroke-dasharray: 2 2; }
 .location-sharing { font-weight: 650; }
 .host-controls > details { margin-top: 1.5rem; }
-.radar-marker[data-influence="outgoing"] > circle { stroke-width: 3; }
-.radar-marker[data-influence="incoming"] > circle { stroke-width: 3; stroke-dasharray: 4 3; }
 .radar-link { stroke: var(--accent); stroke-width: 3; }
-.radar-link.incoming { stroke: #85221b; stroke-dasharray: 5 4; }
+.radar-link.incoming { stroke: var(--threat); stroke-dasharray: 5 4; }
+.radar-arrow { fill: var(--accent); }
+.radar-arrow.incoming { fill: var(--threat); }
 .radar-leader { stroke: var(--muted); stroke-width: 1; }
 .radar-estimate { fill: var(--muted); }
 .radar-number { fill: var(--ink); stroke: #f7f8f1; stroke-width: 4; paint-order: stroke; font-size: 14px; font-weight: 750; }
 .radar-players { padding-left: 1.5rem; margin: 0; }
 .radar-players li { padding: .7rem 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .radar-players p { margin: .25rem 0; }
+.radar-player-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .5rem; }
+.radar-relationship { font-size: .85rem; font-weight: 650; padding: .1rem .4rem; border: 1px solid currentColor; border-radius: .2rem; }
+.radar-combat-status { color: var(--accent); font-weight: 750; font-variant-numeric: tabular-nums; }
+.radar-players li[data-influence="incoming"] .radar-combat-status { color: var(--threat); }
+.radar-players li[data-influence="incoming"] { background: #fff1eb; }
+.radar-players li[data-influence="outgoing"] { background: #e2e9df; }
+.radar-players li[data-influence]:not([data-influence="none"]) { padding-inline: .5rem; }
+.radar-location-state { color: var(--muted); font-size: .85rem; font-weight: 650; }
 .host-controls { border-top: 1px solid var(--line); padding-top: 1rem; }
 .feedback { border-top: 2px solid var(--ink); }
 .feedback p:first-of-type { font-weight: 700; }
