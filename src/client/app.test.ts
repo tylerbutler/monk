@@ -65,24 +65,77 @@ it("keeps in-game location warnings and faction displays out of the waiting-room
   expect(root.querySelector(".roster")?.textContent).toContain("Player 1 - rock (you)");
   expect(root.querySelector('[data-action="start"]')?.textContent).toBe("Start game");
 });
-it("shows outgoing and incoming attack progress", () => {
+it("names confirmed influence and links it to radar markers", () => {
   const root = document.createElement("section");
   const state = pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state;
   renderMatch(root, snapshotFor(state, "p1", 500), actions);
-  expect(root.textContent).toContain("Outgoing attack");
+  expect(root.textContent).toContain("Influencing Player 2");
+  expect(root.textContent).toContain("17%");
   expect(root.querySelector("progress")?.value).toBeCloseTo(1 / 6);
+  expect(root.querySelector('[data-radar-player="p2"]')?.getAttribute("data-influence")).toBe("outgoing");
   renderMatch(root, snapshotFor(state, "p2", 500), actions);
-  expect(root.textContent).toContain("Incoming attack");
+  expect(root.textContent).toContain("Player 1 is influencing you");
+  expect(root.querySelector('[data-radar-player="p1"]')?.getAttribute("data-influence")).toBe("incoming");
+});
+
+it("shows a north-up radar with player identities and location quality", () => {
+  const root = document.createElement("section");
+  const state = pulse(runningFixture(["rock", "paper"]), 0, [0, 21]).state;
+  renderMatch(root, snapshotFor(state, "p1", 500), actions);
+  expect(root.querySelector('[data-radar]')?.getAttribute("viewBox")).toBe("0 0 320 320");
+  expect(root.textContent).toContain("North");
+  expect(root.textContent).toContain("Player 2");
+  expect(root.textContent).toContain("about 20 m E");
+  expect(root.textContent).toContain("GPS uncertainty 1 m");
+  expect(root.textContent).toContain("Fix age 0.5 s");
+  expect(root.querySelector('[data-radar-player="p2"] [data-faction-symbol="paper"]')).not.toBeNull();
+  expect(root.textContent).toContain("No confirmed influence");
+  expect(root.querySelectorAll("progress")).toHaveLength(0);
+  expect(root.textContent).not.toMatch(/latitude|longitude/);
+});
+
+it("does not place unknown locations or keep radar markers while paused", () => {
+  const root = document.createElement("section");
+  const state = pulse(runningFixture(["rock", "paper"]), 0, [0, 21]).state;
+  renderMatch(root, snapshotFor(state, "p1", 1500), actions);
+  expect(root.querySelectorAll("[data-radar-player]")).toHaveLength(0);
+  expect(root.querySelectorAll("progress")).toHaveLength(0);
+  expect(root.textContent).toMatch(/location.*stale|location.*unavailable/i);
+  renderMatch(root, snapshotFor(command(state, 100, { type: "pause" }).state, "p1", 100), actions);
+  expect(root.querySelector("[data-radar]")).toBeNull();
+  renderMatch(root, snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), actions);
+  expect(root.querySelector("[data-radar]")).toBeNull();
+});
+
+it("keeps co-located player markers distinct from each other and the reference", () => {
+  const root = document.createElement("section");
+  const state = pulse(runningFixture(["rock", "scissors", "paper"]), 0, [0, 0, 0]).state;
+  renderMatch(root, snapshotFor(state, "p1", 100), actions);
+  const transforms = [...root.querySelectorAll("[data-radar-player]")].map(p => p.getAttribute("transform"));
+  expect(transforms).toHaveLength(2);
+  expect(new Set(transforms).size).toBe(2);
+  expect(transforms).not.toContain("translate(160 160)");
+  expect(root.textContent).toContain("Within about 5 m");
+});
+
+it("identifies the host radar reference rather than calling it your position", () => {
+  const root = document.createElement("section");
+  renderMatch(root, snapshotFor(runningFixture(["rock", "paper"]), null, 100, true), actions);
+  expect(root.textContent).toContain("Reference: Player 1");
+  expect(root.querySelector('[data-radar-player="p2"]')).not.toBeNull();
 });
 
 it("distinguishes conversions, host changes, attack starts, and interruption reasons", () => {
   const snapshot = snapshotFor(runningFixture(["rock", "scissors"]), "p1", 0);
   const base: EngineEvent = { type: "conversion", attackerId: "p1", targetId: "p2",
     faction: "rock", reason: null, hostId: null, oldFaction: null, eventSeq: 1, atMs: 0 };
-  expect(describeEvent(base, snapshot)).toContain("converted");
+  expect(describeEvent(base, snapshot)).toBe("You converted Player 2 to Rock.");
+  expect(describeEvent(base, { ...snapshot, ownPlayerId: "p2" })).toBe("Player 1 converted you to Rock.");
+  expect(describeEvent(base, { ...snapshot, ownPlayerId: null })).toBe("Player 1 converted Player 2 to Rock.");
   expect(describeEvent({ ...base, type: "manual_faction_change", oldFaction: "scissors" }, snapshot)).toContain("Host changed");
-  expect(describeEvent({ ...base, type: "attack_started" }, snapshot)).toContain("Attack started");
-  expect(describeEvent({ ...base, type: "attack_interrupted", reason: "Location is stale or unavailable." }, snapshot)).toContain("Location is stale");
+  expect(describeEvent({ ...base, type: "attack_started" }, snapshot)).toContain("You are influencing Player 2");
+  expect(describeEvent({ ...base, type: "attack_interrupted", reason: "Location is stale or unavailable." }, snapshot))
+    .toContain("Influence on Player 2 stopped: Location is stale");
 });
 
 function browserApp(snapshot: ReturnType<typeof snapshotFor>) {
@@ -126,6 +179,54 @@ function browserApp(snapshot: ReturnType<typeof snapshotFor>) {
     cleanup(); root.remove(); sessionStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals();
   } };
 }
+
+it("clears live radar markers and influence when the connection fails", () => {
+  const state = pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state;
+  const app = browserApp(snapshotFor(state, "p1", 500));
+  try {
+    expect(app.root.querySelector("[data-radar-player]")).not.toBeNull();
+    expect(app.root.querySelector("progress")).not.toBeNull();
+    app.socket.dispatchEvent(new Event("error"));
+    expect(app.root.querySelector("[data-radar-player]")).toBeNull();
+    expect(app.root.querySelector("progress")).toBeNull();
+    expect(app.root.textContent).toMatch(/live.*unavailable/i);
+  } finally { app.cleanup(); }
+});
+
+it("expires radar and influence locally if server updates stop, then accepts a fresh snapshot", () => {
+  vi.useFakeTimers();
+  const state = pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state;
+  const snapshot = snapshotFor(state, "p1", 500);
+  const app = browserApp(snapshot);
+  try {
+    expect(app.root.querySelector("[data-radar-player]")).not.toBeNull();
+    vi.advanceTimersByTime(1000);
+    expect(app.root.querySelector("[data-radar-player]")).toBeNull();
+    expect(app.root.querySelector("progress")).toBeNull();
+    expect(app.root.textContent).toMatch(/live.*unavailable/i);
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
+      snapshot: snapshotFor(pulse(state, 1500, [0, 4]).state, "p1", 1500), trial: null, startChecking: false });
+    expect(app.root.querySelector("[data-radar-player]")).not.toBeNull();
+  } finally { app.cleanup(); vi.useRealTimers(); }
+});
+
+it("keeps live markers cleared when an update arrives while the app is hidden", () => {
+  const state = pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state;
+  const snapshot = snapshotFor(state, "p1", 500);
+  const app = browserApp(snapshot);
+  try {
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(app.root.querySelector("[data-radar-player]")).toBeNull();
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
+      snapshot, trial: null, startChecking: false });
+    expect(app.root.querySelector("[data-radar-player]")).toBeNull();
+    expect(app.root.querySelector("progress")).toBeNull();
+  } finally {
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    app.cleanup();
+  }
+});
 
 it("shows a public-code-only invite link and keeps configuration out of the main lobby path", async () => {
   const app = browserApp({ ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true });

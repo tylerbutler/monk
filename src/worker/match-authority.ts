@@ -73,7 +73,7 @@ export class MatchAuthority extends DurableObject<Env> {
   }
   private view(actor: VerifiedActor) {
     if (!this.engine) throw new Error("Match engine is unavailable.");
-    return { ...snapshotFor(this.engine, actor.playerId, Date.now()), canHost: actor.host, feedback: this.feedbackSummary() };
+    return { ...snapshotFor(this.engine, actor.playerId, Date.now(), actor.host), feedback: this.feedbackSummary() };
   }
   private feedbackSummary(): FeedbackSummary {
     const records = this.record?.feedback ?? [];

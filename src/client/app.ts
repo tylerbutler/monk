@@ -20,6 +20,7 @@ function field(parent: HTMLElement, label: string, name: string, type = "text", 
 export function mountApp(root: HTMLElement): () => void {
   let credentials: SessionCredentials | null = null, connection: MatchConnection | null = null;
   let snapshot: PlayerSnapshot | null = null, trial: TrialStatus | null = null;
+  let snapshotLive = false, snapshotTimer: ReturnType<typeof setTimeout> | null = null;
   let latest: TrialSample | null = null, summary: TrialSummary | null = null;
   let connectionStatus: ConnectionStatus = { state: "connecting", reason: null };
   let location: LocationStatus = { collecting: false, permission: "unknown", visible: true, wakeLock: "unsupported", reason: null };
@@ -41,6 +42,11 @@ export function mountApp(root: HTMLElement): () => void {
   const disclosures = new Map<string, boolean>();
 
   function showError(reason: string) { error = reason; render(); }
+  function stopLiveUpdates() {
+    snapshotLive = false;
+    if (snapshotTimer !== null) clearTimeout(snapshotTimer);
+    snapshotTimer = null;
+  }
   function button(parent: HTMLElement, label: string, action: () => void | Promise<void>, name: string, className = "") {
     const node = document.createElement("button");
     node.type = "button"; node.textContent = label; node.dataset.action = name; node.className = className;
@@ -103,6 +109,14 @@ export function mountApp(root: HTMLElement): () => void {
     if (message.type === "snapshot" || message.type === "update") {
       const previousTrial = trial;
       snapshot = message.snapshot; trial = message.trial; startChecking = message.startChecking;
+      if (snapshotTimer !== null) clearTimeout(snapshotTimer);
+      snapshotTimer = null; snapshotLive = document.visibilityState === "visible";
+      if (snapshot.mode === "test" && snapshot.phase === "running" && snapshot.parameters) {
+        const ages = [snapshot.radar?.reference?.ageMs ?? 0,
+          ...(snapshot.radar?.players.map(p => p.position?.ageMs ?? 0) ?? [])];
+        snapshotTimer = setTimeout(() => { snapshotTimer = null; snapshotLive = false; render(); },
+          Math.max(0, snapshot.parameters.freshnessMs - Math.max(...ages)));
+      }
       if (snapshot.phase === "ended" || previousTrial && (!trial || previousTrial.referenceM !== trial.referenceM ||
         previousTrial.playerIds.some((id, index) => id !== trial?.playerIds[index]))) cancelPermissionCheck();
       if (message.type === "update") {
@@ -134,6 +148,7 @@ export function mountApp(root: HTMLElement): () => void {
   function connect(next: SessionCredentials) {
     if (credentials?.matchCode !== next.matchCode) { pendingCommands.clear(); commandStatus = ""; }
     cancelPermissionCheck(); connection?.close(); stopCollection();
+    stopLiveUpdates();
     credentials = next; snapshot = null; trial = null; clockReady = false; error = "";
     try { sessionStorage.setItem("monk-session", JSON.stringify(next)); }
     catch { throw new Error("Session storage is unavailable. Allow storage to keep private credentials."); }
@@ -142,6 +157,7 @@ export function mountApp(root: HTMLElement): () => void {
       onStatus(status) {
         connectionStatus = status;
         if (status.state !== "connected" || status.reason) { clockReady = false; stopCollection(); }
+        if (status.state !== "connected") stopLiveUpdates();
         if (!disposed) render();
       },
     });
@@ -197,7 +213,7 @@ export function mountApp(root: HTMLElement): () => void {
     return parsed.data;
   }
   function leave() {
-    cancelPermissionCheck(); stopCollection(); consent = false;
+    cancelPermissionCheck(); stopCollection(); stopLiveUpdates(); consent = false;
     connection?.send({ version: 1, type: "leave" });
     connection?.close(); connection = null; credentials = null; snapshot = null; trial = null;
     latest = null; summary = null; retained.clear(); disclosures.clear(); error = "";
@@ -382,7 +398,7 @@ export function mountApp(root: HTMLElement): () => void {
           beginResume: () => sendCommand({ type: "begin_resume" }), cancelResume: () => sendCommand({ type: "cancel_resume" }),
           end: () => sendCommand({ type: "end" }), configure: sendCommand,
           setFaction: (playerId, faction) => sendCommand({ type: "set_faction", playerId, faction }), leave,
-        });
+        }, connectionStatus.state === "connected" && (snapshot.mode !== "test" || snapshotLive));
         const start = section.querySelector<HTMLButtonElement>('[data-action="start"]');
         if (start) {
           start.disabled ||= requestingPermission || startChecking;
@@ -433,7 +449,7 @@ export function mountApp(root: HTMLElement): () => void {
     const safety = document.createElement("footer"); root.append(safety);
     text(safety, "h3", "Location and safe play");
     text(safety, "p", "Agree on a bounded outdoor area and safe routes. No running or touching is needed. You can leave without a gameplay penalty. Keep this app visible and the screen on.");
-    text(safety, "p", "Allow location requests browser access and discards its permission-check fix. Location reports require a consenting trial, active round, or fresh start or resume check. Opponent coordinates are not shown. Locations are not retained in match records or exports. Matches and credentials expire within 24 hours.");
+    text(safety, "p", "Allow location requests browser access and discards its permission-check fix. Location reports require a consenting trial, active round, or fresh start or resume check. Testing-mode radar shares approximate direction and distance with players and the host, not raw opponent coordinates. Locations are not retained in match records or exports. Matches and credentials expire within 24 hours.");
     for (const input of root.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-retain]")) {
       const value = retained.get(input.id);
       if (value) { input.value = value.value; if (input instanceof HTMLInputElement) input.checked = value.checked; }
@@ -447,7 +463,7 @@ export function mountApp(root: HTMLElement): () => void {
   }
   function visibility() {
     if (document.visibilityState !== "visible") {
-      stopCollection(); connection?.send({ version: 1, type: "suspend", reason: "App is hidden." });
+      stopCollection(); stopLiveUpdates(); connection?.send({ version: 1, type: "suspend", reason: "App is hidden." }); render();
     } else if (connection) {
       clockReady = false;
       connection.send({ version: 1, type: "snapshot_request" });
@@ -468,7 +484,7 @@ export function mountApp(root: HTMLElement): () => void {
   } catch { error = "Stored session could not be loaded. Clear this browser session or join again."; }
   render();
   return () => {
-    disposed = true; cancelPermissionCheck(); stopCollection(); connection?.close();
+    disposed = true; cancelPermissionCheck(); stopCollection(); stopLiveUpdates(); connection?.close();
     if (audio) void audio.close().catch(() => console.warn("monk", "audio_close_failed"));
     document.removeEventListener("visibilitychange", visibility); root.replaceChildren();
   };

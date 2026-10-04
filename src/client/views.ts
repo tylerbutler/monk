@@ -32,18 +32,113 @@ function clock(ms: number): string {
   const seconds = Math.ceil(ms / 1000);
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
+function svg<K extends keyof SVGElementTagNameMap>(parent: Element, tag: K, attributes: Record<string, string> = {}): SVGElementTagNameMap[K] {
+  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, value);
+  parent.append(node); return node;
+}
+function factionIcon(parent: Element, faction: Faction) {
+  const icon = svg(parent, "svg", { viewBox: "0 0 24 24", "aria-hidden": "true" });
+  icon.dataset.factionSymbol = faction;
+  svg(icon, "path", { d: symbols[faction], fill: "none", stroke: "currentColor", "stroke-width": "1.6",
+    "stroke-linecap": "round", "stroke-linejoin": "round" });
+  return icon;
+}
+function renderRadar(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean) {
+  const radar = snapshot.radar;
+  if (!radar) return;
+  const section = document.createElement("section"); section.className = "player-radar";
+  section.setAttribute("aria-label", "Player radar"); root.append(section);
+  text(section, "h3", "Player radar");
+  text(section, "p", "North stays at the top. Distances are rounded to 5 m; directions use eight compass points. GPS estimates are not confirmed influence.", "radar-note");
+  const reference = live ? radar.reference : null;
+  const label = (id: string) => snapshot.roster.find(p => p.id === id)?.label ?? "Player";
+  const layout = document.createElement("div"); layout.className = "radar-layout"; section.append(layout);
+  if (reference) {
+    const figure = document.createElement("figure"); layout.append(figure);
+    const chart = svg(figure, "svg", { viewBox: "0 0 320 320", "aria-hidden": "true" });
+    chart.dataset.radar = "";
+    const scale = Math.ceil(Math.max(25, snapshot.parameters?.entryRadiusM ?? 0,
+      ...radar.players.map(p => p.position?.distanceM ?? 0)) / 25) * 25;
+    for (const radius of [60, 120]) svg(chart, "circle", { cx: "160", cy: "160", r: String(radius), class: "radar-ring" });
+    svg(chart, "path", { d: "M160 40V280M40 160H280", class: "radar-axis" });
+    if (snapshot.parameters) svg(chart, "circle", { cx: "160", cy: "160",
+      r: String(120 * snapshot.parameters.entryRadiusM / scale), class: "radar-entry" });
+    for (const [direction, x, y] of [["North", 160, 19], ["S", 160, 311], ["E", 307, 165], ["W", 13, 165]] as const) {
+      svg(chart, "text", { x: String(x), y: String(y), "text-anchor": "middle", class: "radar-compass" }).textContent = direction;
+    }
+    const placed = [{ x: 160, y: 160 }];
+    radar.players.forEach((p, index) => {
+      const player = snapshot.roster.find(player => player.id === p.playerId);
+      if (!p.position || !player) return;
+      const angle = p.position.bearingDegrees * Math.PI / 180;
+      const radius = 120 * p.position.distanceM / scale;
+      const x = 160 + Math.sin(angle) * radius, y = 160 - Math.cos(angle) * radius;
+      const influence = snapshot.outgoing?.targetId === p.playerId ? "outgoing" :
+        snapshot.incoming.some(a => a.attackerId === p.playerId) ? "incoming" : "none";
+      if (influence !== "none") svg(chart, "line", { x1: "160", y1: "160", x2: String(x), y2: String(y),
+        class: `radar-link ${influence}` });
+      let markerX = x, markerY = y;
+      for (let attempt = 0; attempt < 32 && placed.some(p => Math.hypot(p.x - markerX, p.y - markerY) < 38); attempt++) {
+        const angle = attempt * Math.PI / 4, offset = 38 * (1 + Math.floor(attempt / 8));
+        markerX = Math.max(40, Math.min(280, x + Math.cos(angle) * offset));
+        markerY = Math.max(40, Math.min(280, y + Math.sin(angle) * offset));
+      }
+      placed.push({ x: markerX, y: markerY });
+      if (markerX !== x || markerY !== y) {
+        svg(chart, "line", { x1: String(x), y1: String(y), x2: String(markerX), y2: String(markerY), class: "radar-leader" });
+        svg(chart, "circle", { cx: String(x), cy: String(y), r: "3", class: "radar-estimate" });
+      }
+      const marker = svg(chart, "g", { transform: `translate(${markerX} ${markerY})`, "data-radar-player": p.playerId,
+        "data-influence": influence, "data-faction": player.faction, class: "radar-marker" });
+      svg(marker, "title").textContent = `${index + 1}. ${player.label} - ${names[player.faction]}`;
+      svg(marker, "circle", { r: "16" });
+      const icon = factionIcon(marker, player.faction);
+      icon.setAttribute("x", "-11"); icon.setAttribute("y", "-11");
+      icon.setAttribute("width", "22"); icon.setAttribute("height", "22");
+      svg(marker, "text", { x: "20", y: "-14", class: "radar-number" }).textContent = String(index + 1);
+    });
+    svg(chart, "circle", { cx: "160", cy: "160", r: "7", class: "radar-center" });
+    svg(chart, "text", { x: "160", y: "186", "text-anchor": "middle", class: "radar-compass" })
+      .textContent = reference.playerId === snapshot.ownPlayerId ? "You" : "Reference";
+    text(figure, "figcaption", `Outer ring: ${scale} m. Dashed ring: entry radius. Offset markers link to their estimated positions.`, "radar-note");
+  }
+  const details = document.createElement("div"); layout.append(details);
+  if (reference) {
+    text(details, "p", reference.playerId === snapshot.ownPlayerId ? "Reference: you" : `Reference: ${label(reference.playerId)}`, "state-line");
+    text(details, "p", `GPS uncertainty ${reference.accuracyM} m. Fix age ${(reference.ageMs / 1000).toFixed(1)} s.`, "radar-note");
+  } else text(details, "p", live ? radar.reason ?? "Reference location is unavailable." :
+    "Live player updates are unavailable. Waiting for a fresh server update.", "warning");
+  const list = document.createElement("ol"); list.className = "radar-players"; details.append(list);
+  const directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+  for (const p of radar.players) {
+    const player = snapshot.roster.find(player => player.id === p.playerId);
+    if (!player) continue;
+    const row = document.createElement("li"); row.dataset.playerId = p.playerId; list.append(row);
+    text(row, "strong", `${player.label} - ${names[player.faction]}`);
+    if (live && p.position) {
+      text(row, "p", p.position.distanceM === 0 ? "Within about 5 m." :
+        `about ${p.position.distanceM} m ${directions[p.position.bearingDegrees / 45]}`);
+      text(row, "p", `GPS uncertainty ${p.position.accuracyM} m. Fix age ${(p.position.ageMs / 1000).toFixed(1)} s.`, "radar-note");
+      if (snapshot.outgoing?.targetId === p.playerId) text(row, "p", "You are influencing this player.", "influence-label");
+      if (snapshot.incoming.some(a => a.attackerId === p.playerId)) text(row, "p", "This player is influencing you.", "influence-label");
+    } else text(row, "p", live ? p.reason ?? "Location is unavailable." : "Live location is unavailable.", "radar-note");
+  }
+}
 export function describeEvent(event: EngineEvent, snapshot: PlayerSnapshot): string {
   const label = (id: string | null) => snapshot.roster.find(p => p.id === id)?.label ?? "Player";
   const name = event.faction ? names[event.faction] : "faction";
   switch (event.type) {
-    case "conversion": return `${label(event.attackerId)} converted ${label(event.targetId)} to ${name}.`;
+    case "conversion": return `${event.attackerId === snapshot.ownPlayerId ? "You" : label(event.attackerId)} converted ${event.targetId === snapshot.ownPlayerId ? "you" : label(event.targetId)} to ${name}.`;
     case "manual_faction_change": return `Host changed ${label(event.targetId)} from ${event.oldFaction ? names[event.oldFaction] : "a faction"} to ${name}.`;
-    case "attack_started": return `Attack started: ${label(event.attackerId)} to ${label(event.targetId)}.`;
-    case "attack_interrupted": return `Attack interrupted: ${event.reason ?? "Eligibility changed."}`;
+    case "attack_started": return event.attackerId === snapshot.ownPlayerId ? `You are influencing ${label(event.targetId)}.` :
+      `${label(event.attackerId)} is influencing ${event.targetId === snapshot.ownPlayerId ? "you" : label(event.targetId)}.`;
+    case "attack_interrupted": return `${event.attackerId === snapshot.ownPlayerId ? `Influence on ${label(event.targetId)}` :
+      `${label(event.attackerId)}'s influence on ${event.targetId === snapshot.ownPlayerId ? "you" : label(event.targetId)}`} stopped: ${event.reason ?? "Eligibility changed."}`;
     case "lifecycle": return event.reason ?? "Match state changed.";
   }
 }
-export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions: MatchActions): void {
+export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions: MatchActions, live = true): void {
   root.replaceChildren();
   const calibration = snapshot.approved ? "Measured parameters approved for the stated device limits." :
     "Uncalibrated parameters. Test values are not an accuracy claim.";
@@ -54,28 +149,28 @@ export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions
   if (snapshot.resumeChecking) text(root, "p", "Freshness check. Gameplay and timers remain paused.", "state-line");
   if (snapshot.ownFaction && snapshot.phase !== "lobby") {
     const own = document.createElement("div"); own.className = "own-faction"; root.append(own);
-    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("aria-hidden", "true");
-    icon.dataset.factionSymbol = snapshot.ownFaction;
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", symbols[snapshot.ownFaction]); path.setAttribute("fill", "none");
-    path.setAttribute("stroke", "currentColor"); path.setAttribute("stroke-width", "1.6");
-    path.setAttribute("stroke-linecap", "round"); path.setAttribute("stroke-linejoin", "round"); icon.append(path); own.append(icon);
+    factionIcon(own, snapshot.ownFaction);
     text(own, "strong", names[snapshot.ownFaction]); text(root, "p", `${names[snapshot.ownFaction]} converts ${targets[snapshot.ownFaction]}.`);
   } else if (!snapshot.ownFaction) text(root, "p", "Host view. Join as a player to participate.");
   if (snapshot.phase !== "lobby") {
     text(root, "p", `Round time: ${clock(snapshot.remainingMs)}`, "round-clock");
     if (snapshot.graceMs) text(root, "p", `Grace: ${clock(snapshot.graceMs)}. You cannot attack or be attacked.`);
-    function attack(label: string, progress: NonNullable<PlayerSnapshot["outgoing"]>) {
-      const row = document.createElement("label"); row.textContent = `${label}: ${snapshot.roster.find(p => p.id ===
-        (label === "Outgoing attack" ? progress.targetId : progress.attackerId))?.label ?? "Player"}`;
+    function attack(progress: NonNullable<PlayerSnapshot["outgoing"]>, outgoing: boolean) {
+      const name = snapshot.roster.find(p => p.id === (outgoing ? progress.targetId : progress.attackerId))?.label ?? "Player";
+      const label = outgoing ? `Influencing ${name}` : `${name} is influencing you`;
+      const row = document.createElement("label"); row.className = "influence"; row.textContent = `${label} - ${Math.round(progress.progress * 100)}%`;
       const bar = document.createElement("progress"); bar.max = 1; bar.value = progress.progress;
-      row.append(bar); root.append(row);
+      bar.setAttribute("aria-label", label); row.append(bar); root.append(row);
     }
-    if (snapshot.outgoing) attack("Outgoing attack", snapshot.outgoing);
-    for (const incoming of snapshot.incoming) attack("Incoming attack", incoming);
-    if (!snapshot.outgoing && !snapshot.incoming.length) text(root, "p", "No confirmed attack.");
-    text(root, "p", `Fresh nearby players: Rock ${snapshot.nearby.rock}, Paper ${snapshot.nearby.paper}, Scissors ${snapshot.nearby.scissors}.`);
+    if (live && snapshot.phase === "running") {
+      if (snapshot.outgoing) attack(snapshot.outgoing, true);
+      for (const incoming of snapshot.incoming) attack(incoming, false);
+      if (!snapshot.outgoing && !snapshot.incoming.length) text(root, "p", "No confirmed influence.");
+      if (snapshot.outgoing || snapshot.incoming.length) text(root, "p", "Influence must stay confirmed until the bar fills. Leaving range or losing location quality stops progress.", "radar-note");
+    }
+    text(root, "p", live ? `Fresh nearby players: Rock ${snapshot.nearby.rock}, Paper ${snapshot.nearby.paper}, Scissors ${snapshot.nearby.scissors}.` :
+      "Fresh nearby counts are unavailable.");
+    renderRadar(root, snapshot, live);
   }
   if (snapshot.phase !== "lobby") {
     for (const reason of snapshot.qualityReasons) text(root, "p", reason, "warning");

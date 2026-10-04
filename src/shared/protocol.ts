@@ -78,6 +78,18 @@ export const feedbackSummarySchema = z.strictObject({
   p95UpperMs: z.number().nonnegative().nullable(),
 });
 export type FeedbackSummary = z.infer<typeof feedbackSummarySchema>;
+const radarQualitySchema = z.strictObject({ ageMs: time, accuracyM: positive.int() });
+const radarSchema = z.strictObject({
+  reference: radarQualitySchema.extend({ playerId: id }).nullable(),
+  reason: z.string().nullable(),
+  players: z.array(z.strictObject({
+    playerId: id, reason: z.string().nullable(),
+    position: radarQualitySchema.extend({
+      distanceM: z.number().finite().nonnegative().multipleOf(5),
+      bearingDegrees: z.number().int().min(0).max(315).multipleOf(45),
+    }).nullable(),
+  })).max(100),
+});
 export const snapshotSchema = z.strictObject({
   matchId: id, phase: phaseSchema, mode: modeSchema,
   ownPlayerId: id.nullable(), ownFaction: factionSchema.nullable(),
@@ -88,6 +100,7 @@ export const snapshotSchema = z.strictObject({
   qualityReasons: z.array(z.string()), parameters: parametersSchema.nullable(),
   approved: z.boolean(), deviceLimitations: z.string(),
   resumeChecking: z.boolean(), canHost: z.boolean(),
+  radar: radarSchema.nullable(),
   feedback: feedbackSummarySchema.optional(),
 });
 export type PlayerSnapshot = z.infer<typeof snapshotSchema>;

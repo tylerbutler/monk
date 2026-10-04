@@ -10,6 +10,75 @@ it("calls Gleam faction rules", () => {
   expect(isSuperior("rock", "rock")).toBe(false);
 });
 
+it.each([
+  [0, 21, 20, 0], [14, 14, 20, 45], [21, 0, 20, 90], [14, -14, 20, 135],
+  [0, -21, 20, 180], [-14, -14, 20, 225], [-21, 0, 20, 270], [-14, 14, 20, 315],
+])("shows a rounded radar position for east %s m and north %s m", (east, north, distanceM, bearingDegrees) => {
+  const state = advanceEngine(runningFixture(["rock", "scissors"]), {
+    nowMs: 100, actor: null, commands: [], observations: [
+      fix("p1", 0, 100), { ...fix("p2", east, 100), latitude: north / 6371000 * 180 / Math.PI },
+    ],
+  }).state;
+  const snapshot = snapshotFor(state, "p1", 200);
+  expect(snapshot.radar).toMatchObject({
+    reference: { playerId: "p1", ageMs: 100, accuracyM: 1 },
+    players: [{ playerId: "p2", position: { distanceM, bearingDegrees, ageMs: 100, accuracyM: 1 }, reason: null }],
+  });
+  expect(JSON.stringify(snapshot)).not.toMatch(/latitude|longitude|capturedAtMs|expiresAtMs/);
+});
+
+it("removes expired, suspended, and inaccurate radar positions", () => {
+  const fresh = pulse(runningFixture(["rock", "scissors"]), 0, [0, 21]).state;
+  expect(snapshotFor(fresh, "p1", 1499).radar?.players[0].position).not.toBeNull();
+  expect(snapshotFor(fresh, "p1", 1500).radar?.reference).toBeNull();
+  const influencing = pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state;
+  expect(snapshotFor(influencing, "p1", 1500).outgoing).toBeNull();
+  expect(snapshotFor(influencing, "p2", 1500).incoming).toHaveLength(0);
+  const staleTarget = advanceEngine(fresh, {
+    nowMs: 1500, actor: null, commands: [], observations: [fix("p1", 0, 1500)],
+  }).state;
+  expect(snapshotFor(staleTarget, "p1", 1500).radar?.players[0]).toMatchObject({
+    position: null, reason: expect.stringMatching(/stale|unavailable/i),
+  });
+  const inaccurate = advanceEngine(fresh, {
+    nowMs: 100, actor: null, commands: [], observations: [{ ...fix("p2", 21, 100), accuracyM: 4 }],
+  }).state;
+  expect(snapshotFor(inaccurate, "p1", 100).radar?.players[0]).toMatchObject({
+    position: null, reason: expect.stringMatching(/uncertainty/i),
+  });
+  expect(snapshotFor(suspendEngine(fresh, "p2"), "p1", 100).radar?.players[0].position).toBeNull();
+});
+
+it("reports radar age from normalized expiry rather than the phone clock", () => {
+  const state = advanceEngine(runningFixture(["rock", "paper"]), {
+    nowMs: 100, actor: null, commands: [], observations: [
+      { ...fix("p1", 0, 100), capturedAtMs: 10100 },
+      { ...fix("p2", 21, 100), capturedAtMs: 1 },
+    ],
+  }).state;
+  expect(snapshotFor(state, "p1", 200).radar).toMatchObject({
+    reference: { ageMs: 100 }, players: [{ position: { ageMs: 100 } }],
+  });
+});
+
+it("uses a named fresh reference only for an authorized spectator host", () => {
+  const fresh = pulse(runningFixture(["rock", "scissors", "paper"]), 0, [0, 20, 40]).state;
+  expect(snapshotFor(fresh, null, 100, true).radar?.reference?.playerId).toBe("p1");
+  expect(snapshotFor(suspendEngine(fresh, "p1"), null, 100, true).radar?.reference?.playerId).toBe("p2");
+  expect(snapshotFor(fresh, null, 100).radar).toBeNull();
+  expect(snapshotFor(fresh, "unknown-player", 100).radar).toBeNull();
+  expect(snapshotFor(suspendEngine(fresh, "p1"), "p1", 100, true).radar?.reference).toBeNull();
+});
+
+it("keeps radar positions out of inactive phases and normal-mode rounds", () => {
+  const fresh = pulse(runningFixture(["rock", "scissors"]), 0, [0, 21]).state;
+  expect(snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0).radar).toBeNull();
+  expect(snapshotFor(command(fresh, 100, { type: "pause" }).state, "p1", 100).radar).toBeNull();
+  expect(snapshotFor(command(fresh, 100, { type: "end" }).state, "p1", 100).radar).toBeNull();
+  expect(snapshotFor(runningFixture(["rock", "rock", "paper", "paper", "scissors", "scissors"], "normal"), "p1", 0).radar).toBeNull();
+  expect(snapshotFor(restoreEngine(checkpointEngine(fresh, 100), 200), "p1", 200).radar).toBeNull();
+});
+
 it("requires continuous dwell", () => {
   let state = runningFixture(["rock", "scissors"]);
   for (const now of [0, 500, 1000, 1500, 2000, 2500]) {

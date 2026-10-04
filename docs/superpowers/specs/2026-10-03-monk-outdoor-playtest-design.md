@@ -276,6 +276,23 @@ Nearby counts use only active, fresh, acceptable positions. Do not send exact
 opponent coordinates to a player or provide a movement-history view.
 Provide the host with a prominent pause control.
 
+Testing-mode rounds also provide a north-up player radar. The server derives
+relative distance rounded to 5 m and bearing rounded to eight compass points
+from temporary observations. Send these derived values, fix age, and reported
+uncertainty, not raw coordinates. Use the player's usable fix as the reference.
+A host without a player session uses the first usable player fix as a named
+reference. Do not substitute another reference for a player with an unusable fix.
+Exclude missing, expired, or excessive-uncertainty fixes from position markers.
+Do not show radar positions in the lobby, paused or ended phases, or Normal mode.
+Clear live positions and influence on connection loss, app hiding, or local
+snapshot expiry. Keep derived positions out of checkpoints, logs, and exports.
+
+Label confirmed outgoing attack progress as influence on a named player, and
+identify incoming attackers. Highlight those participants on the radar with
+solid outgoing and dashed incoming links. A radar estimate alone is not
+confirmed influence. Use accepted conversion events for personal conversion
+notifications and use interruption events to explain why influence stopped.
+
 ## Safety and privacy
 
 Players agree to a bounded outdoor area and safe routes. Do not require

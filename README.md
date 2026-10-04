@@ -113,6 +113,23 @@ at least two fresh, usable player fixes. Host faction changes clear affected
 attacks, apply grace, and have distinct visible feedback. Repeated command IDs
 do not apply a change twice.
 
+During a Testing-mode round, **Player radar** shows other players relative to
+you. North stays at the top; it does not follow phone orientation. Distances
+are rounded to 5 m and directions to eight compass points. Numbered faction
+markers match the player list, which shows fix age and reported GPS uncertainty.
+A host who has not joined uses the first player with a usable fix as a named
+reference. Missing, stale, or low-quality fixes have no position marker.
+Pausing, ending, hiding the app, losing the connection, or receiving no fresh
+updates clears the live display. There is no radar in Normal mode or the lobby.
+
+**Influencing** identifies a confirmed outgoing attack and its progress.
+Incoming influence identifies the player affecting you. Solid radar links
+show outgoing influence; dashed links show incoming influence. Proximity
+alone does not confirm influence. The server must accept continuous dwell
+before **You converted...** appears and the player's faction changes.
+An interruption explains why influence stopped; progress does not continue
+through missing observations.
+
 Normal mode requires six active players, two per faction at start, plus a
 separate approval of the saved measured parameters and their device limits.
 Changing parameters resets approval. Normal mode pauses on a missing fresh
@@ -175,7 +192,8 @@ runs software checks without Cloudflare secrets or automatic deployment.
 
 One Durable Object owns each private match. TypeScript validates inputs and
 calls the pure Gleam rules. Accepted checkpoints, events, and command outcomes
-commit before broadcast. Player messages omit exact opponent coordinates.
+commit before broadcast. Player messages omit raw opponent coordinates. Testing-mode radar sends only
+rounded relative distance, compass direction, fix age, and uncertainty.
 Raw fixes and unfinished dwell stay in short-lived memory; they are not saved
 in match records, routine logs, or exports.
 

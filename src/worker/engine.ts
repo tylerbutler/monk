@@ -76,15 +76,58 @@ export function restoreEngine(raw: EngineCheckpoint, nowMs: number): EngineState
     option(c.parameters && toParameters(c.parameters)), c.approved, c.deviceLimitations,
     toList(c.players.map(p => d.Player$Player(p.id, p.label, factions[p.faction], p.graceMs))), c.remainingMs, c.eventSeq), nowMs);
 }
-export function snapshotFor(state: EngineState, playerId: string | null, nowMs: number): PlayerSnapshot {
+function radarFor(state: EngineState, c: EngineCheckpoint, playerId: string | null, nowMs: number, canHost: boolean): PlayerSnapshot["radar"] {
+  if (c.mode !== "test" || c.phase !== "running" || !c.parameters ||
+    (playerId === null ? !canHost : !c.players.some(p => p.id === playerId))) return null;
+  const observations = new Map(state.observations.toArray().map(p => [p.id, p]));
+  const maxAccuracy = c.parameters.maxAccuracyM;
+  const freshnessMs = c.parameters.freshnessMs;
+  function reason(id: string): string | null {
+    const p = observations.get(id);
+    if (!p || p.expires_at <= nowMs) return "Location is stale or unavailable.";
+    return p.accuracy > maxAccuracy ? "GPS uncertainty is above the round limit." : null;
+  }
+  const referenceId = playerId ?? c.players.find(p => reason(p.id) === null)?.id;
+  const reference = referenceId && reason(referenceId) === null ? observations.get(referenceId) : null;
+  // Expiry includes the phone clock offset and its uncertainty.
+  const quality = (p: d.Position$) => ({
+    ageMs: Math.max(0, freshnessMs - (p.expires_at - nowMs)), accuracyM: Math.ceil(p.accuracy),
+  });
+  return {
+    reference: reference ? { playerId: reference.id, ...quality(reference) } : null,
+    reason: reference ? null : referenceId ? reason(referenceId) : "No player has a usable reference location.",
+    players: c.players.filter(p => p.id !== referenceId).map(player => {
+      const unavailable = reason(player.id);
+      const p = observations.get(player.id);
+      if (!reference || unavailable || !p) return {
+        playerId: player.id, position: null, reason: unavailable ?? "Reference location is unavailable.",
+      };
+      const radians = Math.PI / 180;
+      const a = reference.latitude * radians, b = p.latitude * radians;
+      const delta = (p.longitude - reference.longitude) * radians;
+      const bearing = Math.atan2(Math.sin(delta) * Math.cos(b),
+        Math.cos(a) * Math.sin(b) - Math.sin(a) * Math.cos(b) * Math.cos(delta)) / radians;
+      return {
+        playerId: player.id, reason: null,
+        position: {
+          distanceM: Math.round(proximity.distance_between(reference, p) / 5) * 5,
+          bearingDegrees: Math.round(((bearing + 360) % 360) / 45) * 45 % 360,
+          ...quality(p),
+        },
+      };
+    }),
+  };
+}
+
+export function snapshotFor(state: EngineState, playerId: string | null, nowMs: number, canHost = false): PlayerSnapshot {
   const v = rules.view_for(state, option(playerId), nowMs);
   const c = fromCheckpoint(v.state);
   const own = nullable(v.own);
-  const attacks = v.attacks.toArray().map(a => ({
+  const active = new Set(v.active.toArray());
+  const attacks = v.attacks.toArray().filter(a => active.has(a.attacker) && active.has(a.target)).map(a => ({
     attackerId: a.attacker, targetId: a.target,
     progress: Math.min(1, Math.max(0, (nowMs - a.started_at) / (c.parameters?.dwellMs ?? 1))),
   }));
-  const active = new Set(v.active.toArray());
   const nearby = v.nearby.toArray();
   return snapshotSchema.parse({
     matchId: c.id, phase: c.phase, mode: c.mode, ownPlayerId: own?.id ?? null,
@@ -98,7 +141,8 @@ export function snapshotFor(state: EngineState, playerId: string | null, nowMs: 
       scissors: nearby.filter(p => faction(p.faction) === "scissors").length },
     qualityReasons: v.quality.toArray(), parameters: c.parameters, approved: c.approved,
     deviceLimitations: c.deviceLimitations,
-    resumeChecking: v.resume_checking, canHost: false,
+    resumeChecking: v.resume_checking, canHost,
+    radar: radarFor(state, c, playerId, nowMs, canHost),
   });
 }
 export function distanceBetween(a: Observation, b: Observation): number {

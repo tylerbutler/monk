@@ -67,6 +67,25 @@ it("starts a two-phone round from a fresh consent check without a trial", async 
   expect(started).toMatchObject({ startChecking: false, outcome: { accepted: true }, snapshot: { phase: "running", mode: "test" } });
 });
 
+it("sends player-relative radar updates without retaining positions", async () => {
+  const { credentials, host, other, ids } = await runningMatch();
+  host.send({ version: 1, type: "snapshot_request" });
+  other.send({ version: 1, type: "snapshot_request" });
+  const [a, b] = await Promise.all([host.next("snapshot"), other.next("snapshot")]);
+  expect(a.snapshot.radar).toMatchObject({
+    reference: { playerId: ids[0] }, players: [{ playerId: ids[1], position: { distanceM: 100, bearingDegrees: 90 } }],
+  });
+  expect(b.snapshot.radar).toMatchObject({
+    reference: { playerId: ids[1] }, players: [{ playerId: ids[0], position: { distanceM: 100, bearingDegrees: 270 } }],
+  });
+  expect(JSON.stringify([a, b])).not.toMatch(/latitude|longitude/);
+  const stub = env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode));
+  const record = await runInDurableObject(stub, (_, state) => loadRecord(state.storage));
+  expect(JSON.stringify(record)).not.toMatch(/radar|latitude|longitude|bearingDegrees|distanceM/);
+  const paused = await hostCommand(host, { type: "pause" });
+  expect(paused.snapshot.radar).toBeNull();
+});
+
 it("resolves a conversion and measures both visible-recipient acknowledgements", async () => {
   const { host, other, ids } = await runningMatch(30000, { dwellMs: 300, graceMs: 200 });
   await hostCommand(host, { type: "set_faction", playerId: ids[1], faction: "scissors" });
