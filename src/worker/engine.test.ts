@@ -10,6 +10,33 @@ it("calls Gleam faction rules", () => {
   expect(isSuperior("rock", "rock")).toBe(false);
 });
 
+it("starts with two joined players without observations", () => {
+  const started = command(lobbyFixture(["rock", "paper"]), 0, { type: "start" });
+  expect(started.rejections).toEqual([]);
+  expect(snapshotFor(started.state, "p1", 0)).toMatchObject({ phase: "running", outgoing: null, incoming: [] });
+  expect(command(lobbyFixture(["rock"]), 0, { type: "start" }).rejections).toHaveLength(1);
+});
+
+it.each(["running", "paused"] as const)("accepts a late join with grace while %s", phase => {
+  let state = runningFixture(["rock", "paper"]);
+  if (phase === "paused") state = command(state, 100, { type: "pause" }).state;
+  const joined = command(state, 100, { type: "join", playerId: "p3", label: "New player", faction: "scissors" });
+  expect(joined.rejections).toEqual([]);
+  expect(snapshotFor(joined.state, "p3", 100)).toMatchObject({ phase, ownFaction: "scissors", graceMs: 2000 });
+  const ended = command(joined.state, 100, { type: "end" }).state;
+  expect(command(ended, 100, { type: "join", playerId: "p4", label: "Late", faction: "rock" }).rejections).toHaveLength(1);
+});
+
+it("resumes directly without GPS and does not restore old influence", () => {
+  const influencing = pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state;
+  const paused = command(influencing, 500, { type: "pause" }).state;
+  const resumed = command(paused, 10000, { type: "begin_resume" });
+  expect(resumed.rejections).toEqual([]);
+  expect(snapshotFor(resumed.state, "p1", 10000)).toMatchObject({
+    phase: "running", remainingMs: 599500, resumeChecking: false, outgoing: null, incoming: [],
+  });
+});
+
 it.each([
   [0, 21, 20, 0], [14, 14, 20, 45], [21, 0, 20, 90], [14, -14, 20, 135],
   [0, -21, 20, 180], [-14, -14, 20, 225], [-21, 0, 20, 270], [-14, 14, 20, 315],

@@ -17,10 +17,12 @@ export const parametersSchema = z.strictObject({
   roundDurationMs: positive.int().max(86400000),
 }).refine(p => p.retentionRadiusM >= p.entryRadiusM, { message: "Retention radius must be at least the entry radius." });
 export type RuleParameters = z.infer<typeof parametersSchema>;
-export const testPreset: RuleParameters = {
+export const locationInactivityMs = 30000;
+export const gamePreset: RuleParameters = {
   entryRadiusM: 30, retentionRadiusM: 40, maxAccuracyM: 15,
-  freshnessMs: 5000, dwellMs: 2000, graceMs: 3000, roundDurationMs: 600000,
+  freshnessMs: locationInactivityMs, dwellMs: 2000, graceMs: 3000, roundDurationMs: 600000,
 };
+export const testPreset = gamePreset;
 export const testDeviceLimitations = "Uncalibrated test preset; phone accuracy not measured.";
 export const positionSchema = z.strictObject({
   seq: time, capturedAtMs: time, latitude: z.number().finite().min(-90).max(90),

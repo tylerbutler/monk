@@ -5,7 +5,7 @@ import type { EngineState, EngineTransition } from "./engine";
 import { issueToken, verifyToken } from "./auth";
 import { commitRecord, loadRecord } from "./storage";
 import type { MatchRecord } from "./storage";
-import { actorSchema, parseClientMessage, serverMessageSchema, testDeviceLimitations, testPreset } from "../shared/protocol";
+import { actorSchema, gamePreset, locationInactivityMs, parseClientMessage, serverMessageSchema } from "../shared/protocol";
 import type { ClockEstimate, ClockProbeSample, CommandOutcome, EngineEvent, FeedbackSummary, Observation, ServerBody, TrialStatus, VerifiedActor } from "../shared/protocol";
 import { estimateClock, normalizeObservation } from "../shared/clock";
 
@@ -29,7 +29,6 @@ export class MatchAuthority extends DurableObject<Env> {
   private lastReceipts = new Map<string, number>();
   private trial: TrialStatus | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private pendingStart: { commandId: string; actor: VerifiedActor; deadlineMs: number; caller: WebSocket } | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -37,11 +36,9 @@ export class MatchAuthority extends DurableObject<Env> {
       this.record = await loadRecord(ctx.storage);
       if (this.record) {
         this.engine = restoreEngine(this.record.checkpoint, Date.now());
-        if (this.record.checkpoint.phase === "running") {
-          const checkpoint = checkpointEngine(this.engine, Date.now());
-          await commitRecord(ctx.storage, { ...this.record, checkpoint }, []);
-          this.record = { ...this.record, checkpoint };
-        }
+        const checkpoint = checkpointEngine(this.engine, Date.now());
+        await commitRecord(ctx.storage, { ...this.record, checkpoint }, []);
+        this.record = { ...this.record, checkpoint };
         for (const socket of ctx.getWebSockets()) {
           const connection = this.attachment(socket);
           socket.serializeAttachment({ ...connection, streamId: crypto.randomUUID(), streamSeq: 0 });
@@ -92,7 +89,7 @@ export class MatchAuthority extends DurableObject<Env> {
   }
   private snapshot(socket: WebSocket): void {
     const actor = this.attachment(socket).actor;
-    if (actor) this.send(socket, { type: "snapshot", snapshot: this.view(actor), trial: this.trialFor(actor), startChecking: !!this.pendingStart });
+    if (actor) this.send(socket, { type: "snapshot", snapshot: this.view(actor), trial: this.trialFor(actor), startChecking: false });
   }
   private broadcast(events: EngineEvent[], outcome: CommandOutcome | null = null, caller?: WebSocket): void {
     for (const socket of this.ctx.getWebSockets()) {
@@ -101,7 +98,7 @@ export class MatchAuthority extends DurableObject<Env> {
       const privateEvents = events.filter(e => actor.host || e.type === "lifecycle" ||
         e.attackerId === actor.playerId || e.targetId === actor.playerId);
       this.send(socket, { type: "update", snapshot: this.view(actor), events: privateEvents,
-        outcome: socket === caller ? outcome : null, trial: this.trialFor(actor), startChecking: !!this.pendingStart });
+        outcome: socket === caller ? outcome : null, trial: this.trialFor(actor), startChecking: false });
     }
   }
   private async accept(next: EngineTransition, outcome: CommandOutcome | null = null, sessions?: MatchRecord["sessions"]): Promise<void> {
@@ -132,13 +129,13 @@ export class MatchAuthority extends DurableObject<Env> {
   private async scheduleAlarm(): Promise<void> {
     if (!this.record) return;
     const phase = this.record.checkpoint.phase;
-    const recovering = this.pendingStart || phase === "running" || this.engine && snapshotFor(this.engine, null, Date.now()).resumeChecking;
+    const recovering = phase === "running" || this.engine && snapshotFor(this.engine, null, Date.now()).resumeChecking;
     await this.ctx.storage.setAlarm(Math.min(this.record.expiresAtMs, recovering ? Date.now() + 1000 : this.record.expiresAtMs));
   }
   private scheduleTick(): void {
     if (this.timer !== null || !this.engine) return;
     const snapshot = snapshotFor(this.engine, null, Date.now());
-    if (snapshot.phase !== "running" && !snapshot.resumeChecking && !this.trial?.collecting && !this.pendingStart) return;
+    if (snapshot.phase !== "running" && !snapshot.resumeChecking && !this.trial?.collecting) return;
     this.timer = setTimeout(() => {
       this.timer = null;
       this.ctx.waitUntil(this.serialize(() => this.tick()).catch(() => {
@@ -156,25 +153,6 @@ export class MatchAuthority extends DurableObject<Env> {
     const next = advanceEngine(this.engine, { nowMs: Date.now(), actor: null, commands: [], observations: [] });
     await this.accept(next);
     this.broadcast(next.events);
-    await this.resolveStart();
-  }
-  private async resolveStart(): Promise<void> {
-    const pending = this.pendingStart;
-    if (!pending || !this.engine || !this.record) return;
-    let engine = this.engine;
-    const timedOut = Date.now() >= pending.deadlineMs;
-    if (timedOut) {
-      for (const p of this.record.checkpoint.players) engine = suspendEngine(engine, p.id);
-    }
-    const next = advanceEngine(engine, { nowMs: Date.now(), actor: pending.actor,
-      commands: timedOut ? [] : [{ type: "start" }], observations: [] });
-    if (!timedOut && next.rejections.length) return;
-    const outcome = { commandId: pending.commandId, accepted: !timedOut,
-      reason: timedOut ? "Freshness check timed out. All required players must consent and provide usable fixes." : "Round started after fresh observations." };
-    await this.accept(next, outcome);
-    this.pendingStart = null; this.trial = null; this.clearMeasurements();
-    this.broadcast(next.events, outcome, pending.caller);
-    await this.scheduleAlarm();
   }
   async fetch(request: Request): Promise<Response> {
     return this.serialize(async () => {
@@ -185,14 +163,15 @@ export class MatchAuthority extends DurableObject<Env> {
         if (this.record) return Response.json({ error: "Match code collision." }, { status: 409 });
         let raw: unknown;
         try { raw = await request.json(); } catch { return Response.json({ error: "Invalid JSON." }, { status: 400 }); }
-        if (!z.strictObject({}).safeParse(raw).success) return Response.json({ error: "Invalid match creation request." }, { status: 400 });
+        const input = z.strictObject({ label: z.string().trim().max(80).optional() }).safeParse(raw);
+        if (!input.success) return Response.json({ error: "Invalid match creation request." }, { status: 400 });
         const now = Date.now(), hostId = crypto.randomUUID(), playerId = crypto.randomUUID();
         const [credential, playerCredential] = await Promise.all([issueToken(), issueToken()]);
         const next = advanceEngine(createEngine({ id: code, hostId, createdAtMs: now }), {
           nowMs: now, actor: { id: hostId, host: true, playerId: null }, observations: [],
           commands: [
-            { type: "configure", mode: "test", parameters: testPreset, approved: false, deviceLimitations: testDeviceLimitations },
-            { type: "join", playerId, label: "Player 1", faction: "rock" },
+            { type: "configure", mode: "test", parameters: gamePreset, approved: false, deviceLimitations: "" },
+            { type: "join", playerId, label: input.data.label || "Player 1", faction: "rock" },
           ],
         });
         if (next.rejections.length) throw new Error("Initial room setup failed.");
@@ -221,17 +200,17 @@ export class MatchAuthority extends DurableObject<Env> {
         let raw: unknown;
         try { raw = await request.json(); } catch { return Response.json({ error: "Invalid JSON." }, { status: 400 }); }
         const input = z.strictObject({
-          label: z.string().trim().min(1).max(80).optional(),
+          label: z.string().trim().max(80).optional(),
           hostToken: z.string().min(32).max(128).nullable().default(null),
         }).safeParse(raw);
         if (!input.success) return Response.json({ error: "Invalid join request." }, { status: 400 });
-        if (this.record.checkpoint.phase !== "lobby") return Response.json({ error: "Roster is closed." }, { status: 409 });
+        if (this.record.checkpoint.phase === "ended") return Response.json({ error: "This room has ended." }, { status: 409 });
         if (input.data.hostToken && !(await this.verify(input.data.hostToken, true))) {
           return Response.json({ error: "Host credential is invalid." }, { status: 401 });
         }
         const playerId = crypto.randomUUID(), credential = await issueToken();
         let label = input.data.label;
-        if (label === undefined) {
+        if (!label) {
           let number = 1;
           while (this.record.checkpoint.players.some(p => p.label === `Player ${number}`)) number++;
           label = `Player ${number}`;
@@ -310,28 +289,19 @@ export class MatchAuthority extends DurableObject<Env> {
       if (message.type === "host_command") {
         if (!actor.host) { this.error(socket, "forbidden", "Only the host can send this command.", message.commandId); return; }
         const existing = this.record.outcomes.find(o => o.commandId === message.commandId);
-        if (existing) { this.send(socket, { type: "update", snapshot: this.view(actor), events: [], outcome: existing, trial: this.trialFor(actor), startChecking: !!this.pendingStart }); return; }
-        if (this.pendingStart?.commandId === message.commandId) { this.snapshot(socket); return; }
-        if (message.command.type === "start" && this.record.checkpoint.phase === "lobby" && !this.pendingStart) {
-          const c = this.record.checkpoint;
-          const rosterReady = c.mode === "test" ? c.players.length >= 2 :
-            c.players.length === 6 && ["rock", "paper", "scissors"].every(f => c.players.filter(p => p.faction === f).length === 2);
-          if (c.parameters && rosterReady && (c.mode === "test" || c.approved)) {
-            for (const p of c.players) this.engine = suspendEngine(this.engine, p.id);
-            this.pendingStart = { commandId: message.commandId, actor, deadlineMs: Date.now() + 10000, caller: socket };
-            this.trial = null; this.clearMeasurements();
-            await this.scheduleAlarm(); this.scheduleTick(); this.broadcast([]); return;
-          }
-        }
+        if (existing) { this.send(socket, { type: "update", snapshot: this.view(actor), events: [], outcome: existing, trial: this.trialFor(actor), startChecking: false }); return; }
         if (this.record.outcomes.length >= 10000) { this.error(socket, "command_limit", "Command limit reached. End this match.", message.commandId); return; }
-        const next = advanceEngine(this.engine, { nowMs: Date.now(), actor, commands: [message.command], observations: [] });
+        const unsupported = message.command.type === "configure" &&
+          (message.command.mode !== "test" || message.command.parameters.freshnessMs !== locationInactivityMs);
+        const next: EngineTransition = unsupported
+          ? { state: this.engine, events: [], rejections: [{ reason: "Use multiplayer rules with a 30-second location inactivity limit." }] }
+          : advanceEngine(this.engine, { nowMs: Date.now(), actor, commands: [message.command], observations: [] });
         const outcome = { commandId: message.commandId, accepted: !next.rejections.length, reason: next.rejections[0]?.reason ?? "Command accepted." };
         try { await this.accept(next, outcome); } catch { this.error(socket, "storage_failed", "State was not saved. Retry the same command ID.", message.commandId); return; }
         if (outcome.accepted && (message.command.type === "begin_resume" || message.command.type === "cancel_resume" ||
           message.command.type === "pause" || message.command.type === "end" || message.command.type === "start")) {
           this.trial = null; this.clearMeasurements();
         }
-        if (outcome.accepted && message.command.type === "end") this.pendingStart = null;
         this.broadcast(next.events, outcome, socket); return;
       }
       if (message.type === "clock_probe") {
@@ -383,7 +353,7 @@ export class MatchAuthority extends DurableObject<Env> {
         }
         const view = this.view(actor);
         const inTrial = this.trial?.collecting && this.trial.playerIds.includes(actor.playerId);
-        if (view.phase !== "running" && !view.resumeChecking && !inTrial && !this.pendingStart) {
+        if (view.phase !== "running" && !view.resumeChecking && !inTrial) {
           this.error(socket, "collection_stopped", "Location collection is stopped."); return;
         }
         const clockSession = this.clocks.get(socket);
@@ -409,7 +379,6 @@ export class MatchAuthority extends DurableObject<Env> {
           updateGapMs: previousReceiptMs === undefined ? 0 : Math.max(0, receivedAtMs - previousReceiptMs), clock: clockSession.clock });
         this.broadcast(next.events);
         if (inTrial) this.sendTrialSample();
-        await this.resolveStart();
         return;
       }
       if (message.type === "suspend" || message.type === "leave") {
@@ -496,7 +465,7 @@ export class MatchAuthority extends DurableObject<Env> {
     await this.ctx.storage.deleteAll();
     this.record = null; this.engine = null;
     if (this.timer !== null) clearTimeout(this.timer);
-    this.timer = null; this.trial = null; this.pendingStart = null; this.clearMeasurements(); this.reports.clear(); this.clocks.clear();
+    this.timer = null; this.trial = null; this.clearMeasurements(); this.reports.clear(); this.clocks.clear();
   }
   async alarm(): Promise<void> {
     await this.serialize(async () => {

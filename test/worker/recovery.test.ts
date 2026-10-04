@@ -34,7 +34,7 @@ async function trial(withoutParameters = false) {
   return { credentials, host, a, b, stranger, ids };
 }
 
-it("runs a lobby trial without parameters only after both consents and sends private samples", async () => {
+it("runs an optional lobby trial after migrating unset parameters and obtaining both consents", async () => {
   const { a, b, stranger, host } = await trial(true);
   a.send({ version: 1, type: "trial_ready", consent: true });
   let update = await a.next("update");
@@ -43,7 +43,7 @@ it("runs a lobby trial without parameters only after both consents and sends pri
   b.send({ version: 1, type: "trial_ready", consent: true });
   update = await b.next("update");
   while (!update.trial?.collecting) update = await b.next("update");
-  expect(update.snapshot.parameters).toBeNull();
+  expect(update.snapshot.parameters).toMatchObject({ entryRadiusM: 30, freshnessMs: 30000 });
   await Promise.all([probe(a), probe(b)]);
   const capturedAtMs = Date.now();
   a.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
@@ -100,20 +100,14 @@ it("round and grace deadlines run without new messages", async () => {
   }
 });
 
-it("pause and cancel stop collection; a fresh resume check does not immediately run", async () => {
-  const { host, other } = await runningMatch();
+it("resumes a paused round directly without restoring influence", async () => {
+  const { host } = await runningMatch();
   const paused = await hostCommand(host, { type: "pause" });
-  host.send({ version: 1, type: "position", report: { seq: 2, capturedAtMs: Date.now(), latitude: 0, longitude: 0, accuracyM: 1 } });
-  expect(await host.next("error")).toMatchObject({ code: "collection_stopped" });
-  const checking = await hostCommand(host, { type: "begin_resume" });
-  expect(checking.snapshot).toMatchObject({ phase: "paused", resumeChecking: true, remainingMs: paused.snapshot.remainingMs });
-  await probe(host);
-  host.send({ version: 1, type: "position", report: { seq: 3, capturedAtMs: Date.now(), latitude: 0, longitude: 0, accuracyM: 1 } });
-  host.send({ version: 1, type: "snapshot_request" });
-  expect(await host.next("snapshot")).toMatchObject({ snapshot: { phase: "paused", resumeChecking: true } });
-  await hostCommand(host, { type: "cancel_resume" });
-  other.send({ version: 1, type: "position", report: { seq: 2, capturedAtMs: Date.now(), latitude: 0, longitude: 0, accuracyM: 1 } });
-  expect(await other.next("error")).toMatchObject({ code: "collection_stopped" });
+  vi.spyOn(Date, "now").mockReturnValue(Date.now());
+  const resumed = await hostCommand(host, { type: "begin_resume" });
+  expect(resumed.snapshot).toMatchObject({
+    phase: "running", resumeChecking: false, remainingMs: paused.snapshot.remainingMs, outgoing: null, incoming: [],
+  });
 });
 
 it("leaving a selected trial stops collection and removes the player", async () => {
@@ -176,8 +170,8 @@ it("still rejects unrelated stored checkpoint fields during legacy cleanup", asy
   });
 });
 
-it("does not advance paused clocks during a resume check and clears canceled/timed-out checks", () => {
-  const paused = command(runningFixture(["rock", "paper"]), 500, { type: "pause" }).state;
+it("keeps legacy pure normal-mode resume checks frozen and cancelable", () => {
+  const paused = command(runningFixture(["rock", "rock", "paper", "paper", "scissors", "scissors"], "normal"), 500, { type: "pause" }).state;
   const check = command(paused, 10000, { type: "begin_resume" }).state;
   expect(snapshotFor(check, "p1", 15000)).toMatchObject({ phase: "paused", remainingMs: 599500, resumeChecking: true });
   expect(snapshotFor(command(check, 15000, { type: "cancel_resume" }).state, "p1", 15000).resumeChecking).toBe(false);
@@ -185,6 +179,32 @@ it("does not advance paused clocks during a resume check and clears canceled/tim
   const restored = restoreEngine(checkpointEngine(check, 15000), 100000);
   const one = advanceEngine(restored, { nowMs: 100000, actor: null, commands: [], observations: [] });
   expect(snapshotFor(one.state, "p1", 100000).phase).toBe("paused");
+});
+
+it.each(["test", "normal"] as const)("migrates saved %s rooms without losing identity or duration", async mode => {
+  const credentials = await createMatch();
+  await joinMatch(credentials.matchCode);
+  const stub = env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode));
+  const original = await runInDurableObject(stub, async (_, state) => {
+    const record = await loadRecord(state.storage);
+    if (!record) throw new Error("Missing legacy room");
+    const legacy = { ...record, checkpoint: { ...record.checkpoint, mode, phase: "running" as const,
+      remainingMs: 123456, parameters: { ...record.checkpoint.parameters!,
+        entryRadiusM: 19, retentionRadiusM: 29, freshnessMs: 5000, dwellMs: 4000 } } };
+    await state.storage.put("record", legacy);
+    return legacy;
+  });
+  await evictDurableObject(stub);
+  const host = await connect(credentials);
+  host.send({ version: 1, type: "snapshot_request" });
+  const snapshot = (await host.next("snapshot")).snapshot;
+  expect(snapshot).toMatchObject({ phase: "paused", mode: "test", remainingMs: 123456,
+    parameters: { entryRadiusM: 19, retentionRadiusM: 29, freshnessMs: 30000, dwellMs: 4000 } });
+  expect(snapshot.roster.map(({ active: _, ...p }) => p)).toEqual(original.checkpoint.players);
+  const stored = await runInDurableObject(stub, (_, state) => state.storage.get<typeof original>("record"));
+  expect(stored?.sessions).toEqual(original.sessions);
+  expect(stored?.checkpoint).toMatchObject({ phase: "paused", mode: "test", remainingMs: 123456 });
+  expect((await hostCommand(host, { type: "begin_resume" })).snapshot.phase).toBe("running");
 });
 
 it("pauses normal mode when a connected faction has stale fixes but not test mode", () => {

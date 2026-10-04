@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { checkpointSchema, eventSchema, outcomeSchema } from "../shared/protocol";
+import { checkpointSchema, eventSchema, gamePreset, locationInactivityMs, outcomeSchema } from "../shared/protocol";
 import type { EngineEvent } from "../shared/protocol";
 
 const sessionSchema = z.strictObject({
@@ -29,7 +29,9 @@ export async function loadRecord(storage: DurableObjectStorage): Promise<MatchRe
   if (raw === undefined) return null;
   const result = recordSchema.safeParse(raw);
   if (!result.success) throw new Error("Stored match record is invalid.");
-  return result.data;
+  const record = result.data;
+  return { ...record, checkpoint: { ...record.checkpoint, mode: "test",
+    parameters: { ...(record.checkpoint.parameters ?? gamePreset), freshnessMs: locationInactivityMs } } };
 }
 export async function commitRecord(storage: DurableObjectStorage, record: MatchRecord, events: EngineEvent[]): Promise<void> {
   const validated = recordSchema.parse({ ...record, events: [...record.events, ...events] });

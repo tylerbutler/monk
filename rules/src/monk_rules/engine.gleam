@@ -112,7 +112,7 @@ fn populations(players: List(Player)) -> Bool {
 fn ready(state: Match, now: Int, start: Bool) -> Bool {
   let players = active(state, now)
   case state.mode {
-    "test" -> list.length(players) >= 2
+    "test" -> list.length(state.players) >= 2
     _ ->
       list.length(players) == 6
       && populations(players)
@@ -160,7 +160,8 @@ fn apply_command(
     _ if !host -> reject(result, "Host authorization is required.")
     Join(id, label, faction) -> {
       case
-        state.phase != "lobby"
+        state.phase == "ended"
+        || { state.mode != "test" && state.phase != "lobby" }
         || list.any(state.players, fn(p) { p.id == id })
         || list.length(state.players) >= 100
       {
@@ -171,7 +172,10 @@ fn apply_command(
             state: Match(
               ..state,
               players: list.append(state.players, [
-                Player(id, label, faction, 0),
+                Player(id, label, faction, case state.parameters, state.phase {
+                  Some(p), "running" | Some(p), "paused" -> p.grace
+                  _, _ -> 0
+                }),
               ]),
             ),
           )
@@ -188,7 +192,9 @@ fn apply_command(
               ..state,
               mode: mode,
               parameters: Some(parameters),
-              approved: approved && limitations != "" && state.parameters == Some(parameters),
+              approved: approved
+                && limitations != ""
+                && state.parameters == Some(parameters),
               limitations: limitations,
               remaining: parameters.duration,
             ),
@@ -205,10 +211,11 @@ fn apply_command(
           {
             True -> phase(result, "running", "Round started.", input.now)
             False ->
-              reject(
-                result,
-                "Fresh consenting players, balanced normal factions and approved parameters are required.",
-              )
+              reject(result, case state.mode {
+                "test" -> "Join at least two players before starting."
+                _ ->
+                  "Fresh consenting players, balanced normal factions and approved parameters are required."
+              })
           }
         }
         _, _ ->
@@ -222,10 +229,18 @@ fn apply_command(
     BeginResume ->
       case state.phase == "paused" && state.resume_at == None {
         True ->
-          StepResult(
-            ..result,
-            state: Match(..state, observations: [], resume_at: Some(input.now)),
-          )
+          case state.mode {
+            "test" -> phase(result, "running", "Round resumed.", input.now)
+            _ ->
+              StepResult(
+                ..result,
+                state: Match(
+                  ..state,
+                  observations: [],
+                  resume_at: Some(input.now),
+                ),
+              )
+          }
         False -> reject(result, "Round must be paused before a resume check.")
       }
     CancelResume ->

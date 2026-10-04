@@ -11,7 +11,7 @@ afterEach(async () => {
   await reset();
 });
 
-it("creates a room with the host already playing and unapproved test defaults", async () => {
+it("creates a room with the host already playing and automatic game defaults", async () => {
   const credentials = await createMatch();
   expect(credentials.playerToken).not.toBeNull();
   const client = await connect(credentials);
@@ -21,7 +21,7 @@ it("creates a room with the host already playing and unapproved test defaults", 
     phase: "lobby", mode: "test", canHost: true, approved: false, ownFaction: "rock",
     roster: [{ label: "Player 1" }],
     parameters: { entryRadiusM: 30, retentionRadiusM: 40, maxAccuracyM: 15,
-      freshnessMs: 5000, dwellMs: 2000, graceMs: 3000, roundDurationMs: 600000 },
+      freshnessMs: 30000, dwellMs: 2000, graceMs: 3000, roundDurationMs: 600000 },
   });
   expect(snapshot.ownPlayerId).not.toBeNull();
   expect(snapshot).not.toHaveProperty("playArea");
@@ -30,41 +30,70 @@ it("creates a room with the host already playing and unapproved test defaults", 
 it("starts from automatic room settings after the invited player joins", async () => {
   const credentials = await createMatch();
   const host = await connect(credentials);
-  const other = await connect(await joinMatch(credentials.matchCode));
+  await joinMatch(credentials.matchCode);
   host.send({ version: 1, type: "snapshot_request" });
   const { snapshot } = await host.next("snapshot");
   expect(snapshot.roster.map(player => player.label)).toEqual(["Player 1", "Test player"]);
   host.messages.length = 0;
-  host.send({ version: 1, type: "host_command", commandId: "direct-start", command: { type: "start" } });
-  const checking = await host.next("update");
-  expect(checking.startChecking).toBe(true);
-  await Promise.all([probe(host), probe(other)]);
-  const capturedAtMs = Date.now();
-  host.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
-  other.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 0.001, accuracyM: 1 } });
-  let started = await host.next("update");
-  while (started.outcome?.commandId !== "direct-start") started = await host.next("update");
-  expect(started).toMatchObject({ outcome: { accepted: true }, snapshot: { phase: "running" } });
+  const started = await hostCommand(host, { type: "start" }, "direct-start");
+  expect(started).toMatchObject({ startChecking: false, outcome: { accepted: true },
+    snapshot: { phase: "running", roster: [{ active: false }, { active: false }] } });
 });
 
-it("starts a two-phone round from a fresh consent check without a trial", async () => {
+it("lets players join running and paused rooms and resumes without observations", async () => {
   const credentials = await createMatch();
   const host = await connect(credentials);
-  const other = await connect(await joinMatch(credentials.matchCode));
-  await hostCommand(host, { type: "configure", mode: "test", parameters, approved: false,
-    deviceLimitations: "Synthetic pair" });
-  host.send({ version: 1, type: "host_command", commandId: "start-check", command: { type: "start" } });
-  let check = await host.next("update");
-  while (!check.startChecking) check = await host.next("update");
-  expect(check.snapshot.phase).toBe("lobby");
-  expect(check.trial).toBeNull();
-  await Promise.all([probe(host), probe(other)]);
-  const capturedAtMs = Date.now();
-  host.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 0, accuracyM: 1 } });
-  other.send({ version: 1, type: "position", report: { seq: 1, capturedAtMs, latitude: 0, longitude: 0.001, accuracyM: 1 } });
-  let started = await host.next("update");
-  while (started.outcome?.commandId !== "start-check") started = await host.next("update");
-  expect(started).toMatchObject({ startChecking: false, outcome: { accepted: true }, snapshot: { phase: "running", mode: "test" } });
+  await joinMatch(credentials.matchCode);
+  await hostCommand(host, { type: "start" });
+  const late = await connect(await joinMatch(credentials.matchCode));
+  late.send({ version: 1, type: "snapshot_request" });
+  expect((await late.next("snapshot")).snapshot).toMatchObject({ phase: "running", ownFaction: "scissors" });
+  const paused = await hostCommand(host, { type: "pause" });
+  await joinMatch(credentials.matchCode);
+  vi.spyOn(Date, "now").mockReturnValue(Date.now());
+  const resumed = await hostCommand(host, { type: "begin_resume" });
+  expect(resumed).toMatchObject({ startChecking: false, outcome: { accepted: true }, snapshot: {
+    phase: "running", remainingMs: paused.snapshot.remainingMs, resumeChecking: false, outgoing: null,
+  } });
+  expect(resumed.snapshot.roster).toHaveLength(4);
+});
+
+it("uses trimmed display names and numbered fallback for empty names", async () => {
+  const credentials = await createMatch("  River  ");
+  const host = await connect(credentials);
+  const response = await SELF.fetch(`https://monk.test/api/matches/${credentials.matchCode}/join`, {
+    method: "POST", body: JSON.stringify({ label: "  " }),
+  });
+  expect(response.status).toBe(201);
+  host.send({ version: 1, type: "snapshot_request" });
+  expect((await host.next("snapshot")).snapshot.roster.map(p => p.label)).toEqual(["River", "Player 1"]);
+});
+
+it("serializes concurrent joins at the room limit and balances factions", async () => {
+  const credentials = await createMatch();
+  for (let i = 0; i < 98; i++) await joinMatch(credentials.matchCode);
+  const responses = await Promise.all([0, 1].map(() => SELF.fetch(
+    `https://monk.test/api/matches/${credentials.matchCode}/join`, { method: "POST", body: "{}" })));
+  expect(responses.map(r => r.status).sort()).toEqual([201, 409]);
+  const host = await connect(credentials);
+  host.send({ version: 1, type: "snapshot_request" });
+  const { roster } = (await host.next("snapshot")).snapshot;
+  expect(roster).toHaveLength(100);
+  expect(new Set(roster.map(p => p.id)).size).toBe(100);
+  expect(["rock", "paper", "scissors"].map(f => roster.filter(p => p.faction === f).length).sort()).toEqual([33, 33, 34]);
+});
+
+it("rejects legacy mode and configurable inactivity with retryable command outcomes", async () => {
+  const host = await connect(await createMatch());
+  for (const [mode, freshnessMs] of [["normal", 30000], ["test", 5000]] as const) {
+    const commandId = crypto.randomUUID();
+    const rejected = await hostCommand(host, { type: "configure", mode,
+      parameters: { ...parameters, freshnessMs }, approved: true, deviceLimitations: "" }, commandId);
+    expect(rejected.outcome?.accepted).toBe(false);
+    const duplicate = await hostCommand(host, { type: "end" }, commandId);
+    expect(duplicate.outcome).toEqual(rejected.outcome);
+    expect(duplicate.snapshot.phase).toBe("lobby");
+  }
 });
 
 it("sends player-relative radar updates without retaining positions", async () => {
