@@ -4,11 +4,13 @@
 
 **Goal:** Verify location-driven gameplay without physical travel, with repeatable rule checks and two-player browser tests.
 
-**Architecture:** Keep Vitest, jsdom, and the Workers runtime tests for controlled inputs and exact time boundaries. Add Playwright tests that supply browser geolocation while the real Svelte UI, WebSocket client, local Worker, Durable Object, and Gleam rules process each interaction. Keep simulated inputs in test code.
+**Architecture:** Keep Vitest, jsdom, and the Workers runtime tests for controlled inputs and exact time boundaries. Add Playwright tests with a test-only replacement for `navigator.geolocation`. Keep the real location collector, Svelte UI, WebSocket client, local Worker, Durable Object, and Gleam rules. Keep simulated inputs in test code.
 
 **Tech Stack:** Existing TypeScript, Svelte, Gleam, Vitest, jsdom, and Cloudflare test tools; add `@playwright/test` with Chromium and WebKit.
 
 **Spec:** The testing approach approved in this conversation, recorded under Scope and Acceptance below. Use `README.md`, `src/shared/protocol.ts`, and the current tests as the behavior references. The original outdoor-playtest spec and plan contain superseded startup, mode, and freshness requirements; do not restore them.
+
+**Approved revision:** The user approved replacing the location API after native overrides failed in Playwright 1.63.0 and 1.58.2. Chromium emits `POSITION_UNAVAILABLE` during an override change; WebKit supplies invalid capture timestamps. The revised suite supplies asynchronous fixes and errors, supports cancellation, and uses the browser's real clock for captures. It does not certify native geolocation or OS permissions. Production code stays unchanged.
 
 ## Global Constraints
 
@@ -27,7 +29,7 @@
 
 ## Review Focus
 
-1. Two players can accidentally share a geolocation override or session. Task 2 checks independent factions and reciprocal radar directions.
+1. Two players can accidentally share a simulated location source or session. Task 2 checks independent factions and reciprocal radar directions.
 2. A test can pass with stale UI left from an earlier position. Tasks 2 and 3 wait for the expected radar change before checking influence.
 3. Distance tests can ignore uncertainty and approve an invalid encounter. Task 1 checks entry, retention, and per-player accuracy separately.
 4. A malformed fix or storage failure can send invalid or unsequenced data. Task 1 checks explicit status errors and no position delivery.
@@ -42,7 +44,8 @@ The work adds automated coverage, not a location simulator product.
 | Browser API, jsdom | Permission errors, cached timestamps, cancellation, hidden pages, wake locks, clock changes | Preserve current tests; add invalid-fix and storage-failure cases. |
 | Pure rules and location policy | Conversion duration, age, range, uncertainty, interruption | Preserve timing tests; add production-range and accuracy boundaries. |
 | Workers integration | Real protocol, authority, expiry, duplicate captures, disconnects, persistence | Reuse the existing suite without copying it into Playwright. |
-| Real browser integration | Create/join, native geolocation overrides, radar, progress, conversion, interruption | Add Chromium and WebKit tests against Wrangler. |
+| Real browser integration | Create/join, simulated location callbacks, radar, progress, conversion, interruption | Add Chromium and WebKit tests against Wrangler. |
+| Test location helper | Asynchronous fixes/errors, real-clock timestamps, watch cancellation | Check the helper in both browser projects. |
 | Physical checks | GPS error and cadence, OS prompts, compass quality, locking/background behavior | Retain a short device checklist; do not claim these from simulation. |
 
 Acceptance requires:
@@ -66,7 +69,9 @@ Do not add route recording, real movement history, maps, a scenario-file format,
 | `playwright.config.ts` | Local server lifecycle, browser projects, timeouts, and outputs. |
 | `tsconfig.e2e.json` | Type-check browser automation without Worker globals. |
 | `tsconfig.test.json` | Exclude the Playwright config from the existing `*.config.ts` inclusion. |
-| `test/e2e/fixtures.ts` | Two independent players, native location overrides, UI-only room setup, and teardown. |
+| `test/e2e/geolocation.ts` | Test-only location API, independent page state, asynchronous callbacks, and cancellation. |
+| `test/e2e/geolocation.spec.ts` | Check the test helper's callback, error, timestamp, and cancellation behavior. |
+| `test/e2e/fixtures.ts` | Two independent players, simulated location callbacks, UI-only room setup, and teardown. |
 | `test/e2e/location.spec.ts` | Successful conversion and interrupted/invalid-location scenarios. |
 | `.gitignore` | Ignore browser reports and test outputs. |
 | `.github/workflows/ci.yml` | Install browsers and run the new suite in its own job. |
@@ -76,7 +81,7 @@ No production source changes are expected. If a new test exposes a product defec
 
 ## Execution Order
 
-Task 1 has no dependency on Task 2. Task 3 depends on Task 2. Task 4 depends on Tasks 1, 2, and 3. Native, sequential execution is recommended because the browser scenarios share one small fixture. Implementation requires a separate user request.
+Task 1 has no dependency on Task 2. Task 3 depends on Task 2. Task 4 depends on Tasks 1, 2, and 3. Sequential execution is recommended because the browser scenarios share one small fixture. The user approved the revised design and requested implementation.
 
 ## Task 1: Complete Deterministic Location Checks
 
@@ -87,7 +92,7 @@ Task 1 has no dependency on Task 2. Task 3 depends on Task 2. Task 4 depends on 
 - Reuse `command`, `fix`, `lobbyFixture`, `advanceEngine`, `snapshotFor`, and `gamePreset`.
 - Produce regression tests only; do not add a shared simulation API.
 
-- [ ] **Step 1: Establish the targeted baseline.**
+- [x] **Step 1: Establish the targeted baseline.**
 
   Run:
 
@@ -98,7 +103,7 @@ Task 1 has no dependency on Task 2. Task 3 depends on Task 2. Task 4 depends on 
 
   Expected: existing cases pass. Record a pre-existing failure before making changes.
 
-- [ ] **Step 2: Add invalid browser-fix and storage tests.**
+- [x] **Step 2: Add invalid browser-fix and storage tests.**
 
   Extend `position(timestamp: number, coordinates?: Partial<GeolocationCoordinates>): GeolocationPosition` in the same test file. Merge overrides into its current coordinates. Add these named cases:
 
@@ -110,7 +115,7 @@ Task 1 has no dependency on Task 2. Task 3 depends on Task 2. Task 4 depends on 
 
   Use `try/finally` to stop collectors. Restore spies and test globals with the existing cleanup.
 
-- [ ] **Step 3: Add production range and accuracy tests.**
+- [x] **Step 3: Add production range and accuracy tests.**
 
   Configure a `lobbyFixture(["rock", "scissors"])` with `gamePreset` before starting. Construct observations from `fix`, replacing `expiresAtMs` with `nowMs + 30000` and supplying the chosen `accuracyM`. The shared fixture uses a 1,500 ms lifetime; do not mistake that for production behavior.
 
@@ -131,11 +136,11 @@ Task 1 has no dependency on Task 2. Task 3 depends on Task 2. Task 4 depends on 
 
   Keep the existing exact conversion-time and inactivity tests unchanged. The `0.1` m margin avoids asserting equality after floating-point distance calculations.
 
-- [ ] **Step 4: Run the targeted tests and check sensitivity.**
+- [x] **Step 4: Run the targeted tests and check sensitivity.**
 
   Repeat Step 1's test command. Expected: all cases pass. These additions specify existing behavior, so an initial pass is valid. Temporarily invert one new expected result in each edited file, confirm that its selected test fails, then restore only those deliberate edits. Do not change production behavior to manufacture a red test.
 
-- [ ] **Step 5: Commit the deterministic coverage.**
+- [x] **Step 5: Commit the deterministic coverage.**
 
   ```sh
   git add src/client/location.test.ts src/worker/engine.test.ts
@@ -144,7 +149,7 @@ Task 1 has no dependency on Task 2. Task 3 depends on Task 2. Task 4 depends on 
 
 ## Task 2: Prove Two-Player Conversion in Real Browsers
 
-**Files:** Create `playwright.config.ts`, `tsconfig.e2e.json`, `test/e2e/fixtures.ts`, and `test/e2e/location.spec.ts`. Modify `package.json`, `package-lock.json`, `tsconfig.test.json`, and `.gitignore`.
+**Files:** Create `playwright.config.ts`, `tsconfig.e2e.json`, `test/e2e/geolocation.ts`, `test/e2e/geolocation.spec.ts`, `test/e2e/fixtures.ts`, and `test/e2e/location.spec.ts`. Modify `package.json`, `package-lock.json`, `tsconfig.test.json`, and `.gitignore`.
 
 **Interfaces:**
 
@@ -160,9 +165,9 @@ export type Duel = {
 // Export test = base.extend<{ duel: Duel }>(...) and re-export expect.
 ```
 
-The fixture supplies a running room with host `"Test Rock"` as Rock and guest `"Test Scissors"` as Scissors. Both share location with accuracy `1` m. The host is at latitude/longitude `0, 0`; the guest starts `60` m east. `moveGuest` defaults to accuracy `1` and changes only the guest context's native geolocation override.
+The fixture supplies a running room with host `"Test Rock"` as Rock and guest `"Test Scissors"` as Scissors. Both share location with accuracy `1` m. The host is at latitude/longitude `0, 0`; the guest starts `60` m east. `moveGuest` defaults to accuracy `1` and supplies a fix to only the guest page's simulated location API.
 
-- [ ] **Step 1: Add the dependency and runner configuration.**
+- [x] **Step 1: Add the dependency and runner configuration.**
 
   Add a compatible stable `@playwright/test` dev dependency with an exact version, then update the lockfile with npm. Do not upgrade existing dependencies.
 
@@ -173,7 +178,7 @@ The fixture supplies a running room with host `"Test Rock"` as Rock and guest `"
   - Projects `chromium` and `webkit`; use their corresponding `browserName`.
   - One worker, no retries, test timeout `45000`, assertion timeout `10000`, and `forbidOnly` in CI.
   - Base URL and readiness URL `http://127.0.0.1:8788`.
-  - Web server command `npm run dev -- --local --ip 127.0.0.1 --port 8788 --persist-to .wrangler/e2e`.
+  - Web server command `npm run dev -- --local --ip 127.0.0.1 --port 8788 --local-upstream 127.0.0.1:8788 --persist-to .wrangler/e2e`. The local upstream prevents the configured deployed route from replacing the loopback request origin.
   - Startup timeout `120000`; `reuseExistingServer: false`; graceful shutdown with `SIGTERM` and `5000` ms.
   - Line reporter plus HTML report with `open: "never"`. Ignore `playwright-report/` and `test-results/`.
   - Disable traces, video, and automatic screenshots for the first suite. Traces can contain authentication frames; do not upload them.
@@ -182,7 +187,7 @@ The fixture supplies a running room with host `"Test Rock"` as Rock and guest `"
 
   Make `tsconfig.e2e.json` extend `tsconfig.json`, with DOM/DOM.Iterable/ES2023 libraries, Node types, and includes for `playwright.config.ts` and `test/e2e/**/*.ts`. Append `tsc -p tsconfig.e2e.json` to `typecheck`. Exclude `playwright.config.ts` from `tsconfig.test.json`.
 
-- [ ] **Step 2: Write the conversion test before the fixture.**
+- [x] **Step 2: Write the conversion test before the fixture.**
 
   Test name: `converts two independently located players through the real server`.
 
@@ -206,15 +211,17 @@ The fixture supplies a running room with host `"Test Rock"` as Rock and guest `"
 
   Open `#radar-details-toggle` before checking its text. Use exact accessible names or existing data attributes; do not add product test IDs.
 
-- [ ] **Step 3: Confirm the fixture is missing.**
+- [x] **Step 3: Confirm the fixture is missing.**
 
   Run `npm run test:e2e -- --list`.
 
   Expected: failure resolving the fixture import. This step does not require browser binaries.
 
-- [ ] **Step 4: Implement the `duel` fixture.**
+- [x] **Step 4: Implement the `duel` fixture.**
 
-  Create two contexts from the project's `browser`, each with the local `baseURL`, viewport `1280 x 1000`, and a distinct geolocation. Grant `geolocation` for the loopback origin before navigation. Assert both pages report `document.visibilityState === "visible"`.
+  First write the helper contract test in `geolocation.spec.ts` and confirm its missing-helper import fails. Implement `installGeolocation` in `geolocation.ts` with `BrowserContext.addInitScript`. Replace only `navigator.geolocation`: register watches, deliver callbacks asynchronously, cancel queued watch callbacks after `clearWatch`, and support `getCurrentPosition` and explicit errors. Generate capture timestamps with `Date.now()` and retain the timestamp when returning a cached fix. Keep the simulated source independent for each page. Do not emulate permission prompts, automatic GPS cadence, or the full browser location algorithm.
+
+  Create two contexts from the project's `browser`, each with the local `baseURL` and viewport `1280 x 1000`. Install the helper with a distinct initial position before navigation. Assert both pages report `document.visibilityState === "visible"`.
 
   Use the equatorial offset formula already used in `test/fixtures.ts`: `longitude = eastM / 6371000 * 180 / Math.PI`, `latitude = 0`. Implement it locally in this fixture; do not import the engine fixture and compiled Gleam code into the Playwright helper.
 
@@ -230,21 +237,22 @@ The fixture supplies a running room with host `"Test Rock"` as Rock and guest `"
 
   Attach a passive `page.on("websocket")` observer before navigating the host, so the test can observe its connection. Where setup needs an acknowledgement, register a bounded response waiter before the UI action and parse received messages with `parseServerMessage`. Require an accepted configure outcome with `snapshot.parameters.dwellMs === 5000` and `graceMs === 1`. Ignore unrelated frames, report malformed server messages, and remove listeners on completion or teardown. Do not log raw frames, inject responses, send commands from the test, or read private tokens.
 
-  Implement `moveGuest` using `guestContext.setGeolocation`. It resolves when the override completes; each test must then wait for the changed UI. Do not freeze the browser clock, override timestamps, mock WebSocket, or use unbounded sleeps.
+  Implement `moveGuest` using `guest.evaluate` to supply a position through the test helper. It resolves after queuing the location callbacks; each test must then wait for the changed UI. Do not freeze the browser clock, mock WebSocket, or use unbounded sleeps. Do not add test controls to production source.
 
-  Use fixture teardown with `try/finally` to close both contexts, including partial setup failures. Use a fresh room per test. Never fall back to an already-running server on the chosen port.
+  In fixture teardown, end any started, still-active round through the host UI and wait for `"Round ended"`. Closing sockets alone leaves the ten-minute round ticking and writing storage. Use `try/finally` to close both contexts even after partial setup or cleanup failures. Use a fresh room per test. Never fall back to an already-running server on the chosen port.
 
-- [ ] **Step 5: Install browsers and run the first integration test.**
+- [x] **Step 5: Install browsers and run the first integration test.**
 
   ```sh
   npx playwright install --with-deps chromium webkit
   npm run test:e2e -- --grep "converts two independently located players"
+  npm run test:e2e -- geolocation.spec.ts
   npm run typecheck
   ```
 
-  Expected: the scenario passes once in each browser project. The test sees native geolocation callbacks, real progress, and notifications on both clients. A browser initialization or missing-dependency error is not evidence of a product defect.
+  Expected: the conversion scenario and helper contract test pass once in each browser project. The test sees simulated geolocation callbacks, real progress, and notifications on both clients. A browser initialization or missing-dependency error is not evidence of a product defect.
 
-- [ ] **Step 6: Commit the working browser test.**
+- [x] **Step 6: Commit the working browser test.**
 
   ```sh
   git add package.json package-lock.json playwright.config.ts tsconfig.e2e.json tsconfig.test.json .gitignore test/e2e
@@ -257,7 +265,7 @@ The fixture supplies a running room with host `"Test Rock"` as Rock and guest `"
 
 **Interfaces:** Consume `test`, `expect`, and `Duel` from Task 2. No new exported interfaces are required.
 
-- [ ] **Step 1: Add range-exit and stop-sharing scenarios.**
+- [x] **Step 1: Add range-exit and stop-sharing scenarios.**
 
   Parameterize `clears both influence roles after <interruption>` for `"range exit"` and `"stop sharing"`.
 
@@ -279,9 +287,9 @@ The fixture supplies a running room with host `"Test Rock"` as Rock and guest `"
 
   Confirm the stop-sharing case keeps the guest marker in the host radar. Neither case removes a player from the room.
 
-  Recover by moving the guest back to `10` m or selecting `"Share location"` and supplying a new override at `10.1` m. Wait for new influence and then the accepted conversion on both pages. Exact progress reset and dwell timing remain the responsibility of the existing deterministic tests; do not assert exact zero from a real-time UI snapshot.
+  Recover by moving the guest back to `10` m or selecting `"Share location"` and supplying a new fix at `10.1` m. Wait for new influence and then the accepted conversion on both pages. Exact progress reset and dwell timing remain the responsibility of the existing deterministic tests; do not assert exact zero from a real-time UI snapshot.
 
-- [ ] **Step 2: Add the poor-accuracy scenario.**
+- [x] **Step 2: Add the poor-accuracy scenario.**
 
   Test name: `shows an inaccurate nearby player without allowing influence`.
 
@@ -291,24 +299,24 @@ The fixture supplies a running room with host `"Test Rock"` as Rock and guest `"
 
   Move the guest to `10.1` m with accuracy `1`. Wait for the changed uncertainty label, then require influence and conversion on both pages.
 
-- [ ] **Step 3: Run the scenarios and the timing guards.**
+- [x] **Step 3: Run the scenarios and the timing guards.**
 
   ```sh
   npm run test:e2e
   npm run test:unit -- src/worker/engine.test.ts src/worker/locations.test.ts src/client/location.test.ts src/client/app.test.ts
   ```
 
-  Expected: four E2E cases pass in each browser project, plus the selected deterministic suite. Use UI assertions and bounded polling. Do not increase global timeouts or enable retries to hide an ordering failure.
+  Expected: four gameplay cases and one helper contract test pass in each browser project, plus the selected deterministic suite. Use UI assertions and bounded polling. Do not increase global timeouts or enable retries to hide an ordering failure.
 
   Withhold the recovery action in one local run and confirm its conversion assertion times out. Restore that deliberate edit. This checks that the recovery test requires a real new eligible encounter.
 
-- [ ] **Step 4: Check repeatability.**
+- [x] **Step 4: Check repeatability.**
 
   Run `npm run test:e2e -- --repeat-each=3`.
 
-  Expected: 24 successful cases, no retries, leaked contexts, or occupied server port after completion. Investigate any failure before committing.
+  Expected: 30 successful cases (24 gameplay and six helper checks), no retries, leaked contexts, or occupied server port after completion. Investigate any failure before committing.
 
-- [ ] **Step 5: Commit the interruption coverage.**
+- [x] **Step 5: Commit the interruption coverage.**
 
   ```sh
   git add test/e2e/location.spec.ts test/e2e/fixtures.ts
@@ -321,7 +329,7 @@ The fixture supplies a running room with host `"Test Rock"` as Rock and guest `"
 
 **Interfaces:** Consume the existing `npm test` and `npm run typecheck` commands and Task 2's `npm run test:e2e`.
 
-- [ ] **Step 1: Add a separate `browser` CI job.**
+- [x] **Step 1: Add a separate `browser` CI job.**
 
   Keep the existing `verify` job. Use the repository's current checkout and mise actions, Ubuntu, and a 15-minute job timeout. Run:
 
@@ -335,7 +343,7 @@ The fixture supplies a running room with host `"Test Rock"` as Rock and guest `"
 
   Upload `playwright-report/` on failure with `actions/upload-artifact`, using the repository-compatible stable major, a seven-day retention limit, and `if-no-files-found: ignore`. Do not upload `.wrangler/`, profiles, storage state, or raw traffic.
 
-- [ ] **Step 2: Document automated and desktop testing.**
+- [x] **Step 2: Document automated and desktop testing.**
 
   Extend README's Software verification section with:
 
@@ -355,11 +363,11 @@ The fixture supplies a running room with host `"Test Rock"` as Rock and guest `"
 
   Explain the test-only five-second conversion and one-millisecond grace settings. The production defaults stay unchanged; the deterministic suite verifies the 30-second rules.
 
-  Add Chrome DevTools instructions: start `npm run dev`, open two independent player sessions in visible windows, select **Show Sensors**, and set a **Custom location** per page. Explain **Location unavailable**. Include synthetic equatorial coordinates for `0` m and approximately `60` m east (`0, 0` and `0, 0.00053959`). State that browser permission is still required.
+  Add Chrome DevTools instructions: start `npm run dev` with the loopback IP, port, and local-upstream arguments above, open two independent player sessions in visible windows, select **Show Sensors**, and set a **Custom location** per page. Explain **Location unavailable**. Include synthetic equatorial coordinates for `0` m and approximately `60` m east (`0, 0` and `0, 0.00053959`). State that browser permission is still required. Document the native override failures separately; do not claim that manual overrides prove uninterrupted movement.
 
   State that WebKit automation is not a physical iPhone or installed-PWA test. Link the existing `docs/playtests/two-iphone-trial.md` for device checks. Keep physical GPS accuracy, stationary/moving update cadence, compass quality, OS permissions, and lock/background behavior unverified by this suite. Do not change the recorded status of the physical trial.
 
-- [ ] **Step 3: Run final acceptance from the documented setup.**
+- [x] **Step 3: Run final acceptance from the documented setup.**
 
   ```sh
   npm test
@@ -371,7 +379,7 @@ The fixture supplies a running room with host `"Test Rock"` as Rock and guest `"
 
   Review `git diff --check` and the changed-file list. Confirm that no production source, game default, raw location history, generated report, or credential file entered the change.
 
-- [ ] **Step 4: Commit CI and documentation.**
+- [x] **Step 4: Commit CI and documentation.**
 
   ```sh
   git add .github/workflows/ci.yml README.md
@@ -388,3 +396,11 @@ The fixture supplies a running room with host `"Test Rock"` as Rock and guest `"
 ## Completion Boundary
 
 This work is complete when the documented local and CI checks verify gameplay with simulated locations. It does not certify GPS accuracy, physical separation estimates, mobile power behavior, or field latency. Keep the device trial separate from software regression checks.
+
+## Implementation Results
+
+The revised suite passed all 30 cases across three repetitions in Chromium and WebKit, without retries or longer timeouts. Two earlier repeat runs failed. Review found that fixture teardown left active rounds running; teardown now ends each round through the host UI before closing its contexts. The new cleanup assertion failed before the End round action was added, then passed in the repeated suite.
+
+A fresh source copy passed `npm ci`, all 260 existing tests, full type checks, the production build, and the Wrangler dry-run bundle check. The workflow passed `actionlint`. Normal completion and an interrupted runner both released the local server port. The production bundle contains no test location helper.
+
+Local verification used task-local temporary storage and file polling because shared temporary-storage inodes and file watchers were exhausted. Browser binaries were installed without `--with-deps`, using OS libraries already available on this host; the full dependency-install command requires sudo. The CI job includes that command but has not yet run on GitHub. These checks do not change the pending physical trial.

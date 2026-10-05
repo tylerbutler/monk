@@ -43,15 +43,84 @@ Wrangler dry run; it does not deploy.
 The engine scenarios use synthetic positions. Production UI never generates
 synthetic locations. Automated checks do not count as physical measurements.
 
+### Browser gameplay checks
+
+After the setup commands, run:
+
+```sh
+# Existing deterministic and Workers checks
+npm test
+
+# Once after npm ci, or after a Playwright browser-version change
+npx playwright install --with-deps chromium webkit
+
+# Real local app, synthetic locations
+npm run test:e2e
+
+# Watch one browser project
+npm run test:e2e -- --project=chromium --headed
+```
+
+The browser suite starts and stops its own local Wrangler server at
+`http://127.0.0.1:8788`. Keep that port free. Wrangler builds the app through
+its existing build hook; no separate Vite server, deployment, or Cloudflare
+credentials are required.
+
+Playwright creates independent player sessions in Chromium and WebKit. A
+test-only replacement for `navigator.geolocation` supplies asynchronous fixes
+and errors and supports watch cancellation. The suite uses the real location
+collector, storage sequencing, Svelte UI, WebSocket, Worker, and Gleam rules.
+It checks conversion on both screens, range exit, stopping sharing, and a
+visible nearby player whose location is too inaccurate for influence.
+Each interruption case includes recovery and conversion.
+
+The fixture uses the host controls to set a five-second conversion time and
+one-millisecond grace period. All other settings retain their defaults.
+Browser and server clocks run at normal speed. The deterministic suite checks
+the production 30-second conversion and inactivity boundaries.
+
+CI runs browser checks in a separate job, with no retries or deployment
+secrets. On failure, CI retains the HTML report for seven days. Traces, video,
+and automatic screenshots are disabled; profiles, local match storage, and
+raw authenticated traffic are not uploaded.
+
+### Desktop location overrides and limits
+
+For manual checks, start the server under **Local use**. Open two independent
+sessions in visible windows, such as a normal window and an Incognito window.
+Open DevTools in each window and use its Command Menu to select **Show Sensors**.
+Under **Geolocation**, select **Custom location**. Use latitude/longitude
+`0, 0` for one player and `0, 0.00053959` for the other, about 60 m east.
+The browser still requires location permission when you select **Share location**.
+Select **Location unavailable** to check the error message and stopped sharing.
+See [Chrome's Sensors instructions](https://developer.chrome.com/docs/devtools/sensors#geolocation).
+
+Changing Chromium's native override can report a location error before the
+new fix. Select **Share location** again if this stops sharing. This extra stop
+means a manual override cannot prove uninterrupted movement. The tested
+Playwright releases also supplied invalid capture timestamps in WebKit.
+The automated gameplay suite replaces the location API to avoid these
+automation defects; it does not verify the browser's native location provider
+or permission prompts.
+
+WebKit automation does not substitute for a physical iPhone or an installed
+PWA. Physical GPS accuracy, stationary and moving update cadence, compass
+quality, OS permissions, and screen-lock or background behavior remain
+unverified by this suite. Follow the
+[two-iPhone trial checklist](docs/playtests/two-iphone-trial.md) for device checks.
+The physical trial remains **pending**.
+
 ## Local use
 
 ```sh
-npm run dev
+npm run dev -- --local --ip 127.0.0.1 --port 8788 --local-upstream 127.0.0.1:8788
 ```
 
 Open the loopback URL printed by Wrangler. This command builds static assets
 and serves them on the same origin as the API and WebSocket. Rebuild and restart
 after edits. There is no separate Vite server, offline cache, or service worker.
+The local upstream keeps the request origin on loopback instead of the
+deployed route configured in `wrangler.jsonc`.
 
 ## Play with friends
 
