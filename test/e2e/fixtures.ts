@@ -94,7 +94,16 @@ export const test = base.extend<{ duel: Duel }>({
               coordinates => window.monkTestGeolocation.setPosition(coordinates), geolocation(eastM, accuracyM)),
           });
         } finally {
-          host.off("websocket", observeConnection);
+          try {
+            const endRound = host.locator('[data-action="end"]');
+            if (await endRound.count()) {
+              if (!(await endRound.isVisible())) await host.locator("#host-tools-toggle").click();
+              await endRound.click();
+              await expect(host.getByText("Round ended", { exact: true })).toBeVisible();
+            }
+          } finally {
+            host.off("websocket", observeConnection);
+          }
         }
       } finally {
         await guestContext.close();
