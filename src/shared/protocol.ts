@@ -64,8 +64,13 @@ export const eventSchema = z.strictObject({
   attackerId: id.nullable(), targetId: id.nullable(), faction: factionSchema.nullable(),
   reason: z.string().nullable(), hostId: id.nullable(), oldFaction: factionSchema.nullable(),
   eventSeq: time, atMs: time,
+  attackerLabel: z.string().max(80).nullable().optional(),
+  targetLabel: z.string().max(80).nullable().optional(),
 });
 export type EngineEvent = z.infer<typeof eventSchema>;
+export function isFactionChange(event: EngineEvent): boolean {
+  return event.type === "conversion" || event.type === "manual_faction_change";
+}
 const playerSchema = z.strictObject({ id, label: z.string().max(80), faction: factionSchema, graceMs: time });
 export const checkpointSchema = z.strictObject({
   id, hostId: id, createdAtMs: time, phase: phaseSchema, mode: modeSchema,
@@ -133,7 +138,8 @@ export const trialSampleSchema = z.strictObject({
 export type TrialSample = z.infer<typeof trialSampleSchema>;
 const envelope = { version: z.literal(1) };
 export const clientMessageSchema = z.discriminatedUnion("type", [
-  z.strictObject({ ...envelope, type: z.literal("authenticate"), hostToken: token.nullable(), playerToken: token.nullable() }),
+  z.strictObject({ ...envelope, type: z.literal("authenticate"), hostToken: token.nullable(), playerToken: token.nullable(),
+    supportsFactionHistory: z.boolean().optional() }),
   z.strictObject({ ...envelope, type: z.literal("clock_probe"), nonce: id, clientSendMs: time }),
   z.strictObject({ ...envelope, type: z.literal("clock_confirm"), nonce: id, clientReceiveMs: time }),
   z.strictObject({ ...envelope, type: z.literal("position"), report: positionSchema }),
@@ -157,7 +163,7 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
   z.strictObject({ ...stream, type: z.literal("authenticated"), playerId: id.nullable(), canHost: z.boolean(), expiresAtMs: time }),
   z.strictObject({ ...stream, type: z.literal("clock_reply"), nonce: id, clientSendMs: time, serverReceiveMs: time, serverSendMs: time }),
   z.strictObject({ ...stream, type: z.literal("clock_ready"), clock: clockSchema }),
-  z.strictObject({ ...stream, type: z.literal("snapshot"), ...stateMessage }),
+  z.strictObject({ ...stream, type: z.literal("snapshot"), ...stateMessage, factionHistory: z.array(eventSchema).optional() }),
   z.strictObject({ ...stream, type: z.literal("update"), ...stateMessage, events: z.array(eventSchema), outcome: outcomeSchema.nullable() }),
   z.strictObject({ ...stream, type: z.literal("trial_sample"), sample: trialSampleSchema }),
   z.strictObject({ ...stream, type: z.literal("error"), code: id, reason: z.string(), commandId: id.nullable() }),

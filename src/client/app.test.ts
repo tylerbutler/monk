@@ -40,6 +40,25 @@ it.each(["/", "/?room=ABCDEFGH"])("puts open rules before room setup at %s witho
   } finally { cleanup(); root.remove(); history.replaceState(null, "", "/"); }
 });
 
+it("adds decorative icons without replacing entry action labels", () => {
+  sessionStorage.clear();
+  const root = document.createElement("main"); document.body.append(root);
+  const cleanup = mountApp(root);
+  try {
+    for (const [selector, label] of [
+      ['[data-action="create"]', "Create room"],
+      [".join-form button", "Join room"],
+      ["#safe-play-toggle", "Location and safe play"],
+    ]) {
+      const control = root.querySelector(selector);
+      expect(control?.textContent).toBe(label);
+      expect(control?.querySelector("img")?.getAttribute("src")).toBeTruthy();
+      expect(control?.querySelector("img")?.getAttribute("alt")).toBe("");
+      expect(control?.querySelector("img")?.getAttribute("aria-hidden")).toBe("true");
+    }
+  } finally { cleanup(); root.remove(); }
+});
+
 it("shows game identity and host-only faction controls without testing gates", () => {
   const root = document.createElement("section");
   const playerTestSnapshot = snapshotFor(runningFixture(["rock", "scissors"]), "p1", 0);
@@ -71,6 +90,12 @@ it.each(["rock", "paper", "scissors"] as const)("shares the %s icon and faction 
     expect(game.querySelector(".own-faction svg image")?.getAttribute("href")).toBe(reference);
     expect(game.querySelector('[data-radar-player="p2"]')?.getAttribute("data-faction")).toBe(faction);
     expect(game.querySelector('[data-radar-player="p2"] svg image')?.getAttribute("href")).toBe(reference);
+    const playerBadge = game.querySelector('[data-player-id="p2"] .faction-icon');
+    expect(playerBadge?.getAttribute("data-faction")).toBe(faction);
+    expect(playerBadge?.getAttribute("src")).toBe(reference);
+    renderMatch(game, snapshotFor(lobbyFixture([faction, faction]), "p1", 0), actions);
+    expect(game.querySelectorAll(".roster .faction-icon")).toHaveLength(2);
+    expect(game.querySelector(".roster .faction-icon")?.getAttribute("src")).toBe(reference);
   } finally { cleanup(); home.remove(); }
 });
 it("shows a direct resume action with frozen paused settings", () => {
@@ -120,13 +145,59 @@ it("names confirmed influence and links it to radar markers", () => {
   const root = document.createElement("section");
   const state = pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state;
   renderMatch(root, snapshotFor(state, "p1", 500), actions);
-  expect(root.textContent).toContain("Influencing Player 2");
+  expect(root.textContent).toContain("You are converting Player 2");
+  expect(root.querySelector(".conversion-countdown")?.textContent).toBe("3 s left");
   expect(root.textContent).toContain("17%");
   expect(root.querySelector("progress")?.value).toBeCloseTo(1 / 6);
   expect(root.querySelector('[data-radar-player="p2"]')?.getAttribute("data-influence")).toBe("outgoing");
   renderMatch(root, snapshotFor(state, "p2", 500), actions);
-  expect(root.textContent).toContain("Player 1 is influencing you");
+  expect(root.textContent).toContain("You are being converted by Player 1");
   expect(root.querySelector('[data-radar-player="p1"]')?.getAttribute("data-influence")).toBe("incoming");
+});
+
+it("counts down confirmed conversion time without declaring success and stops when offline", () => {
+  const root = document.createElement("section");
+  const snapshot = snapshotFor(pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state, "p1", 500);
+  if (!snapshot.outgoing) throw new Error("Missing outgoing fixture");
+  renderMatch(root, { ...snapshot, outgoing: { ...snapshot.outgoing, progress: 1 } }, actions);
+  expect(root.querySelector(".conversion-countdown")?.textContent).toBe("Confirming...");
+  expect(root.textContent).not.toContain("You converted");
+  renderMatch(root, snapshot, actions, false);
+  expect(root.querySelector(".conversion-countdown")).toBeNull();
+  expect(root.textContent).toContain("Conversion stopped");
+});
+
+it.each([[0, "30 s left"], [.5, "15 s left"], [.7, "9 s left"], [1, "Confirming..."]] as const)(
+  "uses the configured duration for confirmed progress %s without rounding up an extra second", (progress, expected) => {
+    const root = document.createElement("section");
+    const snapshot = snapshotFor(pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state, "p1", 0);
+    if (!snapshot.outgoing || !snapshot.parameters) throw new Error("Missing conversion fixture");
+    renderMatch(root, { ...snapshot, parameters: { ...snapshot.parameters, dwellMs: 30000 },
+      outgoing: { ...snapshot.outgoing, progress } }, actions, true, 500);
+    expect(root.querySelector(".conversion-countdown")?.textContent).toBe(expected);
+  });
+
+it("shows a separate countdown for each incoming converter", () => {
+  const root = document.createElement("section");
+  const snapshot = snapshotFor(pulse(runningFixture(["rock", "paper", "paper"]), 0, [0, 4, 6]).state, "p1", 0);
+  expect(snapshot.incoming).toHaveLength(2);
+  renderMatch(root, { ...snapshot, incoming: snapshot.incoming.map((attack, index) =>
+    ({ ...attack, progress: index ? .75 : .25 })) }, actions);
+  expect([...root.querySelectorAll(".conversion-heading")].map(node => node.textContent)).toEqual([
+    "You are being converted by Player 2", "You are being converted by Player 3",
+  ]);
+  expect([...root.querySelectorAll(".conversion-countdown")].map(node => node.textContent)).toEqual(["3 s left", "1 s left"]);
+});
+
+it.each(["pause", "location expiry"] as const)("stops conversion timers after %s", reason => {
+  const root = document.createElement("section");
+  const snapshot = snapshotFor(pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state, "p1", 0);
+  renderMatch(root, snapshot, actions);
+  expect(root.querySelector(".conversion-countdown")).not.toBeNull();
+  if (reason === "pause") snapshot.phase = "paused";
+  renderMatch(root, snapshot, actions, true, reason === "location expiry" ? 30000 : 0);
+  expect(root.querySelector(".conversion-countdown")).toBeNull();
+  expect(root.querySelector(".conversion-stopped")?.textContent).toContain("Conversion stopped");
 });
 
 it("shows a north-up radar with player identities and location quality", () => {
@@ -317,7 +388,7 @@ it("distinguishes conversions, host changes, attack starts, and interruption rea
   expect(describeEvent({ ...base, type: "manual_faction_change", oldFaction: "scissors" }, snapshot)).toContain("Host changed");
   expect(describeEvent({ ...base, type: "attack_started" }, snapshot)).toContain("You are influencing Player 2");
   expect(describeEvent({ ...base, type: "attack_interrupted", reason: "Location is stale or unavailable." }, snapshot))
-    .toContain("Influence on Player 2 stopped: Location is stale");
+    .toContain("Conversion stopped: you were converting Player 2. Location is stale");
 });
 
 function browserApp(snapshot: ReturnType<typeof snapshotFor>) {
@@ -358,6 +429,52 @@ function browserApp(snapshot: ReturnType<typeof snapshotFor>) {
     cleanup(); root.remove(); sessionStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals();
   } };
 }
+
+it("keeps game-message badges tied to the recorded faction rather than the current roster", () => {
+  const state = runningFixture(["rock", "scissors"]);
+  const snapshot = snapshotFor(command(state, 0, { type: "set_faction", playerId: "p2", faction: "paper" }).state, "p1", 0);
+  const app = browserApp(snapshot);
+  try {
+    const event: EngineEvent = { type: "conversion", attackerId: "p1", targetId: "p2", faction: "rock",
+      reason: null, hostId: null, oldFaction: null, eventSeq: 99, atMs: 0 };
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 5,
+      snapshot, trial: null, startChecking: false, events: [event], outcome: null });
+    for (const selector of [".conversion-notice p", "#match-feedback p"]) {
+      const message = app.root.querySelector(selector);
+      expect(message?.textContent).toBe("You converted Player 2 to Rock.");
+      expect(message?.querySelector(".faction-icon")?.getAttribute("data-faction")).toBe("rock");
+      expect(message?.querySelector(".faction-icon")?.getAttribute("alt")).toBe("");
+    }
+  } finally { app.cleanup(); }
+});
+
+it("restores faction history without replaying alerts and keeps changes out of the noisy feedback limit", () => {
+  const snapshot = snapshotFor(runningFixture(["rock", "paper"]), "p1", 0);
+  const app = browserApp(snapshot);
+  try {
+    const event: EngineEvent = { type: "conversion", attackerId: "p1", targetId: "departed", faction: "rock",
+      attackerLabel: "Player 1", targetLabel: "Former player", oldFaction: "scissors",
+      reason: null, hostId: null, eventSeq: 10, atMs: 1000 };
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
+      snapshot, trial: null, startChecking: false, factionHistory: [event] });
+    expect(app.root.querySelector("#faction-history")?.textContent).toContain("You converted Former player to Rock.");
+    expect(app.root.querySelector("#faction-history time")?.getAttribute("datetime")).toBe("1970-01-01T00:00:01.000Z");
+    expect(app.root.querySelector(".conversion-notice")).toBeNull();
+    const historyList = app.root.querySelector("#faction-history ol");
+    const noise: EngineEvent[] = Array.from({ length: 8 }, (_, index) => ({ ...event, type: "lifecycle",
+      faction: null, attackerId: null, targetId: null, eventSeq: 11 + index, reason: "Round running." }));
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 6,
+      snapshot, trial: null, startChecking: false, events: noise, outcome: null });
+    expect(app.root.querySelectorAll("#faction-history li")).toHaveLength(1);
+    expect(app.root.querySelector("#faction-history ol")).toBe(historyList);
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 7,
+      snapshot, trial: null, startChecking: false, factionHistory: [event] });
+    expect(app.root.querySelectorAll("#faction-history li")).toHaveLength(1);
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 8,
+      snapshot, trial: null, startChecking: false, events: [event, { ...event, eventSeq: 20 }], outcome: null });
+    expect(app.root.querySelectorAll("#faction-history li")).toHaveLength(2);
+  } finally { app.cleanup(); }
+});
 
 it("keeps radar and every active conversion in the HUD with secondary information closed", () => {
   const snapshot = { ...snapshotFor(pulse(runningFixture(["rock", "paper", "paper", "scissors"]),

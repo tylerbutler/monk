@@ -8,6 +8,11 @@ async function expectInfluence(duel: Duel) {
   await expect(duel.guest.getByRole("progressbar", {
     name: "Test Rock is influencing you", exact: true,
   })).toBeVisible();
+  await expect(duel.host.locator(".conversion-heading")).toHaveText("You are converting Test Scissors");
+  await expect(duel.guest.locator(".conversion-heading")).toHaveText("You are being converted by Test Rock");
+  for (const page of [duel.host, duel.guest]) {
+    await expect(page.locator(".conversion-countdown")).toHaveText(/[1-5] s left/);
+  }
 }
 
 async function expectConversion(duel: Duel) {
@@ -35,6 +40,20 @@ test("converts two independently located players through the real server", async
   await expect(duel.host.locator(".radar-players")).toContainText("about 10 m E");
   await expectInfluence(duel);
   await expectConversion(duel);
+  for (const page of [duel.host, duel.guest]) {
+    await page.getByRole("button", { name: "Dismiss notification", exact: true }).click();
+    await page.locator("#faction-history-toggle").click();
+    const history = page.locator("#faction-history");
+    await expect(history.locator("li")).toHaveCount(2);
+    await expect(history).toContainText(page === duel.host ? "You converted Test Scissors to Rock." : "Test Rock converted you to Rock.");
+    await expect(history.locator("li").first().locator(".faction-icon")).toHaveAttribute("data-faction", "rock");
+  }
+  await duel.guest.reload();
+  await expect(duel.guest.locator(".own-faction h2")).toHaveText("Rock");
+  await duel.guest.locator("#faction-history-toggle").click();
+  await expect(duel.guest.locator("#faction-history li")).toHaveCount(2);
+  await expect(duel.guest.locator("#faction-history")).toContainText("Test Rock converted you to Rock.");
+  await expect(duel.guest.locator(".conversion-notice")).toHaveCount(0);
 });
 
 for (const interruption of ["range exit", "stop sharing"] as const) {
@@ -59,6 +78,10 @@ for (const interruption of ["range exit", "stop sharing"] as const) {
       await expect(marker).toHaveAttribute("data-current", "false");
     }
     await expectNoInfluence(duel);
+    for (const page of [duel.host, duel.guest]) {
+      await expect(page.locator(".conversion-stopped")).toContainText("Conversion stopped");
+      await expect(page.locator(".conversion-countdown")).toHaveCount(0);
+    }
     await expect(duel.guest.locator(".own-faction h2")).toHaveText("Scissors");
     for (const page of [duel.host, duel.guest]) {
       await expect(page.locator("#radar-details-toggle")).toContainText("(2)");

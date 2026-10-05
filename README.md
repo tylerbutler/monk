@@ -134,9 +134,11 @@ Faction badges use red for Rock, yellow for Paper, and blue for Scissors.
 The fist, open palm, and two-finger icons come from
 [Tabler Icons](https://tabler.io/icons)
 (`hand-grab`, `hand-stop`, and `hand-two-fingers`). The rules, faction display,
-and radar import these SVGs from the `@tabler/icons` dependency.
+radar, player lists, and faction-change messages import these SVGs from the
+`@tabler/icons` dependency. Main controls and expandable sections use decorative
+Tabler icons alongside their text labels.
 The [MIT license](public/icons/LICENSE-tabler.txt) ships with the icons.
-Vite bundles only the three selected icons; the app does not fetch them from a
+Vite bundles only the selected icons; the app does not fetch them from a
 CDN. Update the package through npm rather than edit icon paths. Target and
 threat indicators retain their separate colors and text labels.
 
@@ -201,8 +203,11 @@ the marker remains, both influence roles stop, and a new usable fix starts
 new progress. Stopping sharing or disconnecting stops influence at once.
 An unrelated old marker does not stop a fresh encounter.
 
-**Influencing** identifies a confirmed outgoing attack and its progress.
-Incoming influence identifies the player affecting you. Solid radar arrows
+**You are converting...** and **You are being converted by...** identify each
+active conversion. Each alert shows a progress bar and seconds remaining,
+calculated from the configured conversion time and server-confirmed progress.
+Timers stop when influence stops. **Confirming...** at zero does not declare a
+conversion; only a server conversion event does that. Solid radar arrows
 point to players you influence; dashed arrows point from players influencing
 you. Rings around these players show confirmed conversion progress. The
 player list shows the same named influence and percentage.
@@ -210,6 +215,18 @@ Proximity alone does not confirm influence. The server must accept continuous
 dwell before **You converted...** appears and the player's faction changes.
 An interruption explains why influence stopped; progress does not continue
 through missing observations.
+
+Open **Faction changes** for a timestamped log of conversions and host faction
+changes, newest first. Players see only changes involving them; the host sees
+all changes. The server applies this filter before sending events. The log
+loads again on reconnect without replaying completion alerts, and is separate
+from the short **Match feedback** feed. It lasts until the room expires, within
+24 hours of creation. Times use the device's local time zone. New changes save
+the participants' display names and factions so they remain readable after
+players leave. Older events without saved names use the current roster, or
+**Player** when the name is no longer available.
+Clients request history support when they connect. Tabs opened before this
+update keep receiving the older message format; reload them to use the log.
 
 Pausing freezes round timers and clears influence, but location sharing and
 radar continue. Missing players or factions do not pause or end the round.

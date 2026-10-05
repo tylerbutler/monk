@@ -11,6 +11,7 @@ export type MatchActions = {
   setFaction(playerId: string, faction: Faction): void;
 };
 export type HudState = {
+  interruption?: string | null;
   locationLabel: string | null;
   sharing: boolean;
   shareLocation(): void;
@@ -100,15 +101,19 @@ export function radarLayout(snapshot: PlayerSnapshot) {
   return { scale, markers };
 }
 export function describeEvent(event: EngineEvent, snapshot: PlayerSnapshot): string {
-  const label = (id: string | null) => snapshot.roster.find(p => p.id === id)?.label ?? "Player";
+  const label = (id: string | null) => (id === event.attackerId ? event.attackerLabel : event.targetLabel) ??
+    snapshot.roster.find(p => p.id === id)?.label ?? "Player";
   const name = event.faction ? names[event.faction] : "faction";
   switch (event.type) {
     case "conversion": return `${event.attackerId === snapshot.ownPlayerId ? "You" : label(event.attackerId)} converted ${event.targetId === snapshot.ownPlayerId ? "you" : label(event.targetId)} to ${name}.`;
     case "manual_faction_change": return `Host changed ${label(event.targetId)} from ${event.oldFaction ? names[event.oldFaction] : "a faction"} to ${name}.`;
     case "attack_started": return event.attackerId === snapshot.ownPlayerId ? `You are influencing ${label(event.targetId)}.` :
       `${label(event.attackerId)} is influencing ${event.targetId === snapshot.ownPlayerId ? "you" : label(event.targetId)}.`;
-    case "attack_interrupted": return `${event.attackerId === snapshot.ownPlayerId ? `Influence on ${label(event.targetId)}` :
-      `${label(event.attackerId)}'s influence on ${event.targetId === snapshot.ownPlayerId ? "you" : label(event.targetId)}`} stopped: ${event.reason ?? "Eligibility changed."}`;
+    case "attack_interrupted": {
+      const participants = event.attackerId === snapshot.ownPlayerId ? `you were converting ${label(event.targetId)}` :
+        `${label(event.attackerId)} was converting ${event.targetId === snapshot.ownPlayerId ? "you" : label(event.targetId)}`;
+      return `Conversion stopped: ${participants}. ${event.reason ?? "Eligibility changed."}`;
+    }
     case "lifecycle": return event.reason ?? "Match state changed.";
   }
 }

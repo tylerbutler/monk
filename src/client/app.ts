@@ -4,12 +4,26 @@ import { startCompass } from "./compass";
 import type { CompassState } from "./compass";
 import { addTrialSample, exportTrialSummary, newTrialSummary } from "./trial";
 import { describeEvent, names, symbols, targets } from "./views";
+import { icons } from "./icons";
 import { destroyMatch, renderActivity, renderMatch, setRadarHeading } from "./match-view.svelte";
-import { deviceSchema, gamePreset, sessionCredentialsSchema } from "../shared/protocol";
+import { deviceSchema, gamePreset, isFactionChange, sessionCredentialsSchema } from "../shared/protocol";
 import type { ConnectionStatus, EngineEvent, HostCommand, LocationStatus, MatchConnection, PlayerSnapshot, ServerMessage, SessionCredentials, TrialSample, TrialStatus, TrialSummary } from "../shared/protocol";
 
-function text(parent: HTMLElement, tag: string, value: string, className = ""): HTMLElement {
-  const node = document.createElement(tag); node.textContent = value; node.className = className; parent.append(node); return node;
+function addIcon(parent: HTMLElement, source: string, className = "ui-icon"): HTMLImageElement {
+  const image = document.createElement("img");
+  image.src = source; image.alt = ""; image.className = className; image.setAttribute("aria-hidden", "true");
+  parent.prepend(image); return image;
+}
+function text(parent: HTMLElement, tag: string, value: string, className = "", icon?: string): HTMLElement {
+  const node = document.createElement(tag); node.textContent = value; node.className = className;
+  if (icon) addIcon(node, icon);
+  parent.append(node); return node;
+}
+function eventLine(parent: HTMLElement, event: EngineEvent, snapshot: PlayerSnapshot): HTMLElement {
+  const line = text(parent, "p", describeEvent(event, snapshot));
+  line.dataset.eventSeq = String(event.eventSeq);
+  if (event.faction) addIcon(line, symbols[event.faction], "faction-icon").dataset.faction = event.faction;
+  return line;
 }
 function field(parent: HTMLElement, label: string, name: string, type = "text", value = ""): HTMLInputElement {
   const wrapper = document.createElement("label");
@@ -61,6 +75,7 @@ function renderRules(parent: HTMLElement) {
 export function mountApp(root: HTMLElement): () => void {
   const game = document.createElement("div");
   game.className = "match-view";
+  const history = document.createElement("details"); history.id = "faction-history";
   let credentials: SessionCredentials | null = null, connection: MatchConnection | null = null;
   let snapshot: PlayerSnapshot | null = null, trial: TrialStatus | null = null;
   let snapshotLive = false, snapshotReceivedAt = performance.now();
@@ -70,6 +85,7 @@ export function mountApp(root: HTMLElement): () => void {
   let consent = false, trialConsent = false, clockReady = false, disposed = false;
   let commandStatus = "", feedback: EngineEvent[] = [];
   let conversionNotices: EngineEvent[] = [];
+  let factionHistory: EngineEvent[] = [], historyAvailable = false, historyDirty = true, interruption: string | null = null;
   const pendingCommands = new Map<string, HostCommand>();
   const pendingFeedback = new Set<number>(), acknowledged = new Set<number>();
   let feedbackFrame = false, audio: AudioContext | null = null;
@@ -112,10 +128,11 @@ export function mountApp(root: HTMLElement): () => void {
       applyCompass();
     }
   }
-  function button(parent: HTMLElement, label: string, action: () => void | Promise<void>, name: string, className = "") {
+  function button(parent: HTMLElement, label: string, action: () => void | Promise<void>, name: string, className = "", icon?: string) {
     const node = document.createElement("button");
     node.type = "button"; node.textContent = label; node.dataset.action = name; node.className = className;
     node.id = `action-${name}`;
+    if (icon) addIcon(node, icon);
     node.addEventListener("click", async () => {
       node.disabled = true;
       try { await action(); } catch (failure) { showError(failure instanceof Error ? failure.message : "Request failed. Try again."); }
@@ -127,6 +144,7 @@ export function mountApp(root: HTMLElement): () => void {
     const stop = stopLocation; stopLocation = null;
     if (!stop) return;
     if (snapshot) {
+      if (snapshot.outgoing || snapshot.incoming.length) interruption = "Conversion stopped. Location sharing stopped.";
       const radar = snapshot.radar;
       snapshot = { ...snapshot, outgoing: null, incoming: [], radar: radar ? { ...radar,
         reference: radar.reference?.playerId === snapshot.ownPlayerId ? { ...radar.reference, active: false } : radar.reference,
@@ -193,6 +211,9 @@ export function mountApp(root: HTMLElement): () => void {
       const previousTrial = trial;
       snapshot = message.snapshot; trial = message.trial;
       snapshotReceivedAt = performance.now(); snapshotLive = document.visibilityState === "visible";
+      if (message.type === "snapshot" && message.factionHistory !== undefined) {
+        factionHistory = message.factionHistory.filter(isFactionChange); historyAvailable = true; historyDirty = true;
+      }
       if (snapshot.phase === "ended" || previousTrial && (!trial || previousTrial.referenceM !== trial.referenceM ||
         previousTrial.playerIds.some((id, index) => id !== trial?.playerIds[index]))) {
         cancelPermissionCheck(); trialConsent = false;
@@ -205,6 +226,13 @@ export function mountApp(root: HTMLElement): () => void {
         }
         for (const event of message.events) {
           if (!feedback.some(e => e.eventSeq === event.eventSeq)) feedback = [...feedback, event].slice(-6);
+          if (isFactionChange(event) && !factionHistory.some(e => e.eventSeq === event.eventSeq)) {
+            factionHistory.push(event); historyDirty = true;
+          }
+          if (snapshot.ownPlayerId && (event.attackerId === snapshot.ownPlayerId || event.targetId === snapshot.ownPlayerId)) {
+            if (event.type === "attack_interrupted") interruption = describeEvent(event, snapshot);
+            else if (event.type === "attack_started" || isFactionChange(event)) interruption = null;
+          }
           if (event.type === "conversion" && (event.attackerId === snapshot.ownPlayerId || event.targetId === snapshot.ownPlayerId) &&
             !acknowledged.has(event.eventSeq)) {
             pendingFeedback.add(event.eventSeq);
@@ -225,11 +253,15 @@ export function mountApp(root: HTMLElement): () => void {
     reconcileCollection(); render();
   }
   function connect(next: SessionCredentials) {
-    if (credentials?.matchCode !== next.matchCode) { pendingCommands.clear(); commandStatus = ""; consent = false; }
+    if (credentials?.matchCode !== next.matchCode) {
+      pendingCommands.clear(); commandStatus = ""; consent = false;
+      factionHistory = []; historyAvailable = false; interruption = null;
+    }
     cancelPermissionCheck(); stopCollection(); connection?.close();
     stopLiveUpdates();
     destroyMatch(game);
     credentials = next; snapshot = null; trial = null; trialConsent = false; clockReady = false; error = ""; diagnosticStatus = "";
+    historyAvailable = false; historyDirty = true;
     try { sessionStorage.setItem("monk-session", JSON.stringify(next)); }
     catch { throw new Error("Session storage is unavailable. Allow storage to keep private credentials."); }
     connection = connectMatch(next, {
@@ -301,7 +333,8 @@ export function mountApp(root: HTMLElement): () => void {
     connection?.close(); connection = null; credentials = null; snapshot = null; trial = null;
     latest = null; summary = null; retained.clear(); disclosures.clear(); error = "";
     pendingCommands.clear(); pendingFeedback.clear(); acknowledged.clear(); feedback = [];
-    conversionNotices = []; inviteStatus = "";
+    conversionNotices = []; inviteStatus = ""; factionHistory = []; historyAvailable = false; interruption = null;
+    history.replaceChildren(); history.open = false; historyDirty = true;
     destroyMatch(game);
     sessionStorage.removeItem("monk-session"); render();
   }
@@ -318,11 +351,11 @@ export function mountApp(root: HTMLElement): () => void {
   function trialView(parent: HTMLElement) {
     const section = document.createElement("details"); section.className = "trial"; section.id = "location-trial";
     section.open = !!trial; parent.append(section);
-    text(section, "summary", "Optional location measurement").id = "location-trial-toggle";
+    text(section, "summary", "Optional location measurement", "", icons.location).id = "location-trial-toggle";
     text(section, "p", "Both selected players must agree to measurements. This does not change ordinary sharing or block the game.");
     if (diagnosticStatus) text(section, "p", diagnosticStatus, "radar-note");
     const details = document.createElement("details"); details.id = "trial-devices";
-    details.open = !summary; text(details, "summary", "Device pair and conditions").id = "trial-devices-toggle"; section.append(details);
+    details.open = !summary; text(details, "summary", "Device pair and conditions", "", icons.settings).id = "trial-devices-toggle"; section.append(details);
     const devices = document.createElement("div"); devices.className = "form-grid"; details.append(devices);
     for (const i of [0, 1]) {
       field(devices, `Phone ${i + 1} model`, `device-${i}`, "text");
@@ -437,14 +470,14 @@ export function mountApp(root: HTMLElement): () => void {
       notice.setAttribute("aria-label", "Conversion notification"); root.append(notice);
       const shown = conversionNotices.slice(-2);
       for (const event of [...shown].reverse()) {
-        const line = text(notice, "p", describeEvent(event, snapshot)); line.dataset.eventSeq = String(event.eventSeq);
+        eventLine(notice, event, snapshot);
       }
       button(notice, "Dismiss notification", () => {
         const ids = new Set(shown.map(e => e.eventSeq));
         conversionNotices = conversionNotices.filter(e => !ids.has(e.eventSeq));
         for (const id of ids) pendingFeedback.delete(id);
         render();
-      }, "dismiss-conversion", "secondary");
+      }, "dismiss-conversion", "secondary", icons.close);
     }
     if (error && credentials) { const alert = text(root, "p", error, "error"); alert.setAttribute("role", "alert"); }
     if (!credentials) {
@@ -454,13 +487,14 @@ export function mountApp(root: HTMLElement): () => void {
       text(area, "h2", "Play with friends").id = "play-heading";
       if (validInvite) text(area, "p", `You are invited to room ${invitedCode}.`);
       const name = field(area, "Display name (optional)", "displayName"); name.maxLength = 80; name.autocomplete = "off";
-      button(area, "Create room", async () => { connect(await request("/api/matches", { label: name.value.trim() })); }, "create", validInvite ? "secondary" : "");
+      button(area, "Create room", async () => { connect(await request("/api/matches", { label: name.value.trim() })); }, "create", validInvite ? "secondary" : "", icons.create);
       if (error) { const alert = text(area, "p", error, "error"); alert.setAttribute("role", "alert"); }
       const form = document.createElement("form"); form.className = "join-form"; area.append(form);
       const code = field(form, "Room code", "matchCode", "text", validInvite ? invitedCode : "");
       code.required = true; code.maxLength = 8; code.autocomplete = "off";
       if (validInvite && code.parentElement) code.parentElement.hidden = true;
       const submit = document.createElement("button"); submit.type = "submit"; submit.textContent = "Join room"; form.append(submit);
+      addIcon(submit, icons.join);
       form.addEventListener("submit", async event => {
         event.preventDefault(); submit.disabled = true;
         try {
@@ -475,13 +509,13 @@ export function mountApp(root: HTMLElement): () => void {
       if (!playing) root.append(top);
       const roomTools = document.createElement("details"); roomTools.id = "room-tools";
       const tools = playing ? roomTools : top;
-      if (playing) { top.append(roomTools); text(roomTools, "summary", "Room & options").id = "room-tools-toggle"; }
+      if (playing) { top.append(roomTools); text(roomTools, "summary", "Room & options", "", icons.settings).id = "room-tools-toggle"; }
       text(tools, "h2", `Room ${credentials.matchCode}`);
       if (snapshot?.phase !== "ended") {
         const invite = new URL("/", window.location.origin); invite.searchParams.set("room", credentials.matchCode);
         const invites = document.createElement("details"); invites.id = "room-invite"; invites.open = snapshot?.phase === "lobby";
         invites.dataset.phase = snapshot?.phase ?? "";
-        tools.append(invites); text(invites, "summary", "Invite players").id = "room-invite-toggle";
+        tools.append(invites); text(invites, "summary", "Invite players", "", icons.invite).id = "room-invite-toggle";
         const link = document.createElement("a"); link.href = invite.href; link.textContent = invite.href;
         link.className = "invite-link"; link.dataset.inviteLink = ""; link.target = "_blank"; link.rel = "noopener";
         link.id = "room-invite-link";
@@ -491,7 +525,7 @@ export function mountApp(root: HTMLElement): () => void {
           if (!navigator.clipboard?.writeText) throw new Error("Copy is unavailable. Copy the invite link from its context menu.");
           await navigator.clipboard.writeText(invite.href);
           inviteStatus = "Link copied."; render();
-        }, "copy-invite", "secondary");
+        }, "copy-invite", "secondary", icons.copy);
         if (inviteStatus) text(invites, "p", inviteStatus, "state-line").setAttribute("role", "status");
       }
       if (!snapshot) text(root, "p", "Connecting to the private match. Location is not collected.");
@@ -501,7 +535,7 @@ export function mountApp(root: HTMLElement): () => void {
             if (!credentials) return;
             const player = await request(`/api/matches/${credentials.matchCode}/join`, { hostToken: credentials.hostToken });
             connect({ ...player, hostToken: credentials.hostToken });
-          }, "host-join");
+          }, "host-join", "", icons.join);
         }
         const section = document.createElement("section"); section.className = "gameplay"; root.append(section);
         const known = snapshot.radar?.reference?.playerId === snapshot.ownPlayerId ||
@@ -517,7 +551,7 @@ export function mountApp(root: HTMLElement): () => void {
           end: () => sendCommand({ type: "end" }), configure: sendCommand,
           setFaction: (playerId, faction) => sendCommand({ type: "set_faction", playerId, faction }), leave,
         }, connectionStatus.state === "connected" && snapshotLive, Math.max(0, performance.now() - snapshotReceivedAt), {
-          locationLabel, sharing: consent, compass, toggleCompass,
+          locationLabel, sharing: consent, compass, toggleCompass, interruption,
           shareLocation() { error = ""; consent = true; reconcileCollection(); render(); },
           stopSharing() { consent = false; trialConsent = false; cancelPermissionCheck(); stopCollection(); render(); },
         });
@@ -531,7 +565,7 @@ export function mountApp(root: HTMLElement): () => void {
             audio = new AudioContext();
             try { await audio.resume(); } catch { showError("Sound could not start. Visual feedback stays on."); }
             render();
-          }, "enable-audio", "secondary");
+          }, "enable-audio", "secondary", icons.sound);
         }
         game.querySelector("#location-trial")?.remove();
         if (snapshot.phase === "lobby" && snapshot.canHost) trialView(game.querySelector("#host-diagnostics") ?? game);
@@ -539,16 +573,37 @@ export function mountApp(root: HTMLElement): () => void {
         if (feedback.length) {
           const events = document.createElement("details"); events.id = "match-feedback"; events.className = "feedback";
           events.setAttribute("aria-label", "Match feedback"); tools.append(events);
-          text(events, "summary", "Match feedback").id = "match-feedback-toggle";
+          text(events, "summary", "Match feedback", "", icons.feedback).id = "match-feedback-toggle";
           for (const event of [...feedback].reverse()) {
-            const line = text(events, "p", describeEvent(event, snapshot));
-            line.dataset.eventSeq = String(event.eventSeq);
+            eventLine(events, event, snapshot);
           }
+        }
+        root.append(history);
+        if (historyDirty) {
+          const scrollTop = history.querySelector("ol")?.scrollTop ?? 0;
+          history.replaceChildren();
+          text(history, "summary", `Faction changes (${factionHistory.length})`, "", icons.factions).id = "faction-history-toggle";
+          text(history, "p", snapshot.canHost ? "All faction changes in this room. Times are local to this device." :
+            "Only changes involving you. Times are local to this device.", "radar-note");
+          if (!historyAvailable) text(history, "p", "Full history is unavailable. Reconnect to load saved changes.", "warning");
+          else if (!factionHistory.length) text(history, "p", "No faction changes yet. Conversions and host changes will appear here.", "radar-note");
+          const list = document.createElement("ol"); list.className = "faction-history-list"; history.append(list);
+          const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+          for (const event of [...factionHistory].reverse()) {
+            const item = document.createElement("li"); list.append(item);
+            const date = new Date(event.atMs);
+            text(item, "time", timeFormat.format(date)).setAttribute("datetime", date.toISOString());
+            eventLine(item, event, snapshot);
+            if (event.type === "conversion" && event.oldFaction && event.faction) {
+              text(item, "span", `${names[event.oldFaction]} to ${names[event.faction]}`, "faction-history-transition");
+            }
+          }
+          list.scrollTop = scrollTop; historyDirty = false;
         }
       }
       if (playing) root.append(top);
-      if (connectionStatus.state === "failed") button(root, "Reconnect", () => { if (credentials) connect(credentials); }, "reconnect", "secondary");
-      button(tools, "Leave room", leave, "leave", "secondary");
+      if (connectionStatus.state === "failed") button(root, "Reconnect", () => { if (credentials) connect(credentials); }, "reconnect", "secondary", icons.refresh);
+      button(tools, "Leave room", leave, "leave", "secondary", icons.leave);
       const status = document.createElement("section"); status.className = "status"; status.setAttribute("aria-label", "Device status");
       (connectionStatus.state === "connected" && !location.reason ? tools : root).append(status);
       text(status, "p", `Connection: ${connectionStatus.state}${connectionStatus.state !== "connected" && connectionStatus.reason ? ` - ${connectionStatus.reason}` : ""}`);
@@ -557,7 +612,7 @@ export function mountApp(root: HTMLElement): () => void {
     const safety = document.createElement("footer"); root.append(safety);
     const help = document.createElement("details"); help.id = "safe-play"; help.open = !playing; safety.append(help);
     help.dataset.context = playing ? "game" : "setup";
-    text(help, "summary", "Location and safe play").id = "safe-play-toggle";
+    text(help, "summary", "Location and safe play", "", icons.safety).id = "safe-play-toggle";
     text(help, "p", "Agree on a bounded outdoor area and safe routes. No running or touching is needed. You can leave without a gameplay penalty. Keep this app visible and the screen on.");
     text(help, "p", "Share location uses browser permission. Players and the host see approximate direction and distance, not raw opponent coordinates. Last-known positions stay on radar, but influence stops after 30 seconds without a new position. Sharing stops when this app is hidden or disconnected. Locations stay only in temporary server memory, not match records or exports. Rooms and credentials expire within 24 hours.");
     for (const input of root.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-retain]")) {

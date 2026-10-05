@@ -35,6 +35,7 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
     socket = new WebSocket(url);
     socket.addEventListener("open", () => rawSend({
       version: 1, type: "authenticate", hostToken: credentials.hostToken, playerToken: credentials.playerToken,
+      supportsFactionHistory: true,
     }));
     socket.addEventListener("message", event => {
       if (stopped) return;

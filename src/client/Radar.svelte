@@ -2,6 +2,7 @@
   import type { Snippet } from "svelte";
   import type { PlayerSnapshot } from "../shared/protocol";
   import { gamePreset } from "../shared/protocol";
+  import { icons } from "./icons";
   import { attackFor, combatLabel, isCurrentPosition, names, radarLayout, radarRoles, relationship, symbols, targets, updated } from "./views";
 
   let { snapshot, live, elapsedMs, headingDegrees, children }: {
@@ -107,7 +108,7 @@
   <div class="hud-readout">{@render children()}</div>
   {#if radar}
     <details id="radar-details" class="radar-details">
-      <summary id="radar-details-toggle">Players &amp; radar details ({snapshot.roster.length})</summary>
+      <summary id="radar-details-toggle"><img class="ui-icon" src={icons.players} alt="" aria-hidden="true" />Players &amp; radar details ({snapshot.roster.length})</summary>
       <p class="radar-note" data-radar-orientation-note>{headingDegrees === null ? "North stays at the top." : "Heading-up: the top follows your phone."} Numbers match the player list.</p>
       <p class="radar-note">T: target. !: threat. =: same faction. Faction roles only. Arrows and rings show confirmed influence. Dashed circle: entry radius. Thin lines locate offset markers.</p>
       <p class="radar-note">Influence must stay confirmed until the bar fills. Leaving range or losing location quality stops progress.</p>
@@ -124,7 +125,7 @@
             <li data-player-id={player.id} data-relationship={relation}
               data-influence={!attack ? "none" : snapshot.outgoing?.targetId === player.id ? "outgoing" : "incoming"}>
               <div class="radar-player-heading">
-                <strong>{player.label} - {names[player.faction]}</strong>
+                <strong><img class="faction-icon" data-faction={player.faction} src={symbols[player.faction]} alt="" aria-hidden="true" />{player.label} - {names[player.faction]}</strong>
                 {#if relation !== "player"}<span class="radar-relationship" data-relationship={relation}>{radarRoles[relation].label}</span>{/if}
               </div>
               {#if attack}<p class="radar-combat-status">{combatLabel(snapshot, player)} - {Math.round(attack.progress * 100)}%.</p>{/if}

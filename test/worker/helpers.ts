@@ -52,7 +52,8 @@ export async function openSocket(code: string) {
 }
 export async function connect(credentials: SessionCredentials) {
   const client = await openSocket(credentials.matchCode);
-  client.send({ version: 1, type: "authenticate", hostToken: credentials.hostToken, playerToken: credentials.playerToken });
+  client.send({ version: 1, type: "authenticate", hostToken: credentials.hostToken, playerToken: credentials.playerToken,
+    supportsFactionHistory: true });
   await client.next("authenticated");
   await client.next("snapshot");
   return client;

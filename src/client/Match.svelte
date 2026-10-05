@@ -4,6 +4,7 @@
   import type { PlayerSnapshot, RuleParameters } from "../shared/protocol";
   import type { HudState, MatchActions } from "./views";
   import { activitySnapshot, clock, names, symbols } from "./views";
+  import { icons } from "./icons";
   import Radar from "./Radar.svelte";
 
   let { snapshot, actions, live, elapsedMs, hud, headingDegrees }: {
@@ -12,6 +13,7 @@
   } = $props();
   const activity = $derived(activitySnapshot(snapshot, live, elapsedMs));
   const parameters = $derived(snapshot.parameters ?? gamePreset);
+  const activityStopped = $derived((snapshot.outgoing && !activity.outgoing) || snapshot.incoming.length > activity.incoming.length);
   const phase = $derived(snapshot.phase === "lobby" ? "Waiting room" : snapshot.phase === "paused" ? "Paused" :
     snapshot.phase === "ended" ? "Round ended" : "Round running");
   let advancedOpen = $state(false), validation = $state("");
@@ -44,24 +46,43 @@
   }
 </script>
 
+{#snippet uiIcon(source: string)}
+  <img class="ui-icon" src={source} alt="" aria-hidden="true" />
+{/snippet}
+
+{#snippet countdown(progress: number)}
+  {@const seconds = Math.ceil(Math.round(parameters.dwellMs * (1 - progress)) / 1000)}
+  <strong class="conversion-countdown">{seconds > 0 ? `${seconds} s left` : "Confirming..."}</strong>
+{/snippet}
+
 {#snippet readout()}
   <div data-influence-display class="hud-influence">
     {#if snapshot.phase === "running" && live}
       {#if activity.outgoing}
         {@const target = snapshot.roster.find(p => p.id === activity.outgoing?.targetId)?.label ?? "Player"}
-        <label class="influence" data-direction="outgoing">
-          <span>Influencing {target} <strong>{Math.round(activity.outgoing.progress * 100)}%</strong></span>
+        <div class="influence" data-direction="outgoing">
+          <p class="conversion-heading" role="status">You are converting {target}</p>
+          <span>{@render countdown(activity.outgoing.progress)}<span>{Math.round(activity.outgoing.progress * 100)}%</span></span>
           <progress max="1" value={activity.outgoing.progress} aria-label="Influencing {target}"></progress>
-        </label>
+          <p class="conversion-guidance">Stay in range until confirmed.</p>
+        </div>
       {/if}
       {#each activity.incoming as attack (attack.attackerId)}
         {@const attacker = snapshot.roster.find(p => p.id === attack.attackerId)?.label ?? "Player"}
-        <label class="influence" data-direction="incoming">
-          <span>{attacker} is influencing you <strong>{Math.round(attack.progress * 100)}%</strong></span>
+        <div class="influence" data-direction="incoming">
+          <p class="conversion-heading" role="status">You are being converted by {attacker}</p>
+          <span>{@render countdown(attack.progress)}<span>{Math.round(attack.progress * 100)}%</span></span>
           <progress max="1" value={attack.progress} aria-label="{attacker} is influencing you"></progress>
-        </label>
+          <p class="conversion-guidance">Move out of range to stop conversion.</p>
+        </div>
       {/each}
       {#if !activity.outgoing && !activity.incoming.length}<p class="radar-note influence-idle">No confirmed influence.</p>{/if}
+    {/if}
+    {#if activityStopped}
+      <p class="conversion-stopped" role="status">Conversion stopped. {snapshot.phase !== "running" ? "The round is not running." :
+        !live ? "Reconnect with this app visible to continue." : "Waiting for usable locations."}</p>
+    {:else if hud?.interruption && !activity.outgoing && !activity.incoming.length}
+      <p class="conversion-stopped" role="status">{hud.interruption}</p>
     {/if}
   </div>
   {#if hud && snapshot.phase !== "ended"}
@@ -70,15 +91,15 @@
         <div class="location-controls">
           <p class="location-sharing">{hud.locationLabel}</p>
           {#if hud.sharing}
-            <button type="button" id="action-stop-sharing" data-action="stop-sharing" class="secondary" onclick={hud.stopSharing}>Stop sharing</button>
+            <button type="button" id="action-stop-sharing" data-action="stop-sharing" class="secondary" onclick={hud.stopSharing}>{@render uiIcon(icons.stopLocation)}Stop sharing</button>
           {:else}
-            <button type="button" id="action-round-consent" data-action="round-consent" onclick={hud.shareLocation}>Share location</button>
+            <button type="button" id="action-round-consent" data-action="round-consent" onclick={hud.shareLocation}>{@render uiIcon(icons.location)}Share location</button>
           {/if}
         </div>
       {/if}
       {#if snapshot.radar}
         <div class="radar-controls" role="group" aria-label="Radar orientation">
-          <button type="button" id="action-compass" data-action="compass" class="secondary" aria-pressed={hud.compass.enabled} onclick={hud.toggleCompass}>Use compass</button>
+          <button type="button" id="action-compass" data-action="compass" class="secondary" aria-pressed={hud.compass.enabled} onclick={hud.toggleCompass}>{@render uiIcon(icons.compass)}Use compass</button>
           <p class="radar-note" data-compass-status role="status">{hud.compass.reason ?? (hud.compass.enabled ? "Heading-up is on." : "North-up. Compass is off.")}</p>
         </div>
       {/if}
@@ -110,10 +131,10 @@
 
 {#if snapshot.phase === "lobby" || snapshot.phase === "ended" || !snapshot.radar}
   <details id="player-roster" open={snapshot.phase === "lobby"}>
-    <summary id="player-roster-toggle">Players ({snapshot.roster.length})</summary>
+    <summary id="player-roster-toggle">{@render uiIcon(icons.players)}Players ({snapshot.roster.length})</summary>
     <ul class="roster">
       {#each snapshot.roster as player (player.id)}
-        <li>{player.label} - {player.faction}{player.id === snapshot.ownPlayerId ? " (you)" : ""}</li>
+        <li><img class="faction-icon" data-faction={player.faction} src={symbols[player.faction]} alt="" aria-hidden="true" />{player.label} - {player.faction}{player.id === snapshot.ownPlayerId ? " (you)" : ""}</li>
       {/each}
     </ul>
   </details>
@@ -121,23 +142,23 @@
 {#if snapshot.canHost}
   <section class="host-controls">
     {#if snapshot.phase === "lobby"}
-      <button type="button" id="action-start" data-action="start" disabled={snapshot.roster.length < 2} onclick={actions.start}>Start game</button>
+      <button type="button" id="action-start" data-action="start" disabled={snapshot.roster.length < 2} onclick={actions.start}>{@render uiIcon(icons.play)}Start game</button>
       {#if snapshot.roster.length < 2}<p>Invite another player to start.</p>{/if}
     {:else if snapshot.phase === "paused"}
-      <button type="button" id="action-begin-resume" data-action="begin-resume" onclick={actions.beginResume}>Resume round</button>
+      <button type="button" id="action-begin-resume" data-action="begin-resume" onclick={actions.beginResume}>{@render uiIcon(icons.play)}Resume round</button>
     {/if}
     <details id="host-tools" bind:this={hostTools}>
-      <summary id="host-tools-toggle">Host controls</summary>
-      {#if snapshot.phase === "running"}<button type="button" id="action-pause" data-action="pause" onclick={actions.pause}>Pause round</button>{/if}
+      <summary id="host-tools-toggle">{@render uiIcon(icons.settings)}Host controls</summary>
+      {#if snapshot.phase === "running"}<button type="button" id="action-pause" data-action="pause" onclick={actions.pause}>{@render uiIcon(icons.pause)}Pause round</button>{/if}
       {#if snapshot.phase !== "lobby" && snapshot.phase !== "ended"}
-        <button type="button" id="action-end" data-action="end" class="secondary" onclick={actions.end}>End round</button>
+        <button type="button" id="action-end" data-action="end" class="secondary" onclick={actions.end}>{@render uiIcon(icons.stop)}End round</button>
       {/if}
       {#if snapshot.phase !== "ended"}
         <details id="faction-controls">
-          <summary id="faction-controls-toggle">Change player factions</summary>
+          <summary id="faction-controls-toggle">{@render uiIcon(icons.factions)}Change player factions</summary>
           <p>A live faction change clears both attack roles and gives the player a grace period.</p>
           {#each snapshot.roster as player (player.id)}
-            <label>{player.label}
+            <label><span><img class="faction-icon" data-faction={player.faction} src={symbols[player.faction]} alt="" aria-hidden="true" />{player.label}</span>
               <select id="faction-{player.id}" data-action="set-faction" aria-label="Faction for {player.label}" value={player.faction}
                 onchange={event => {
                   const parsed = factionSchema.safeParse(event.currentTarget.value);
@@ -154,7 +175,7 @@
       {/if}
       {#if snapshot.phase === "lobby"}
         <details id="advanced-settings" bind:open={advancedOpen}>
-          <summary id="advanced-settings-toggle">Advanced settings</summary>
+          <summary id="advanced-settings-toggle">{@render uiIcon(icons.adjustments)}Advanced settings</summary>
           <form class="configuration" onsubmit={configure}>
             <h3>Round settings</h3>
             <p>Settings stay fixed while the round is running or paused.</p>
@@ -167,13 +188,13 @@
                 </label>
               {/each}
             </div>
-            <button type="submit" data-action="configure">Save round settings</button>
+            <button type="submit" data-action="configure">{@render uiIcon(icons.settings)}Save round settings</button>
             {#if validation}<p class="error" role="alert">{validation}</p>{/if}
           </form>
         </details>
       {/if}
       <details id="host-diagnostics">
-        <summary id="host-diagnostics-toggle">Host diagnostics</summary>
+        <summary id="host-diagnostics-toggle">{@render uiIcon(icons.diagnostics)}Host diagnostics</summary>
         {#if snapshot.feedback?.conversions}
           {@const f = snapshot.feedback}
           <h3>Visible conversion feedback</h3>

@@ -33,7 +33,9 @@ it("authenticates in the first frame and never puts credentials in its URL", () 
   const connection = connectMatch(credentials, { onMessage() {}, onStatus() {} });
   const socket = instances[0]; socket.open();
   expect(String(socket.url)).not.toContain(credentials.hostToken);
-  expect(JSON.parse(socket.frames[0])).toMatchObject({ type: "authenticate", hostToken: credentials.hostToken });
+  expect(JSON.parse(socket.frames[0])).toMatchObject({
+    type: "authenticate", hostToken: credentials.hostToken, supportsFactionHistory: true,
+  });
   connection.close();
 });
 it("allows authenticated reporting without a clock check", () => {

@@ -5,7 +5,7 @@ import type { EngineState, EngineTransition } from "./engine";
 import { issueToken, verifyToken } from "./auth";
 import { commitRecord, loadRecord } from "./storage";
 import type { MatchRecord } from "./storage";
-import { actorSchema, gamePreset, locationInactivityMs, parseClientMessage, serverMessageSchema } from "../shared/protocol";
+import { actorSchema, gamePreset, isFactionChange, locationInactivityMs, parseClientMessage, serverMessageSchema } from "../shared/protocol";
 import type { ClockEstimate, ClockProbeSample, CommandOutcome, EngineEvent, FeedbackSummary, Observation, ServerBody, TrialStatus, VerifiedActor } from "../shared/protocol";
 import { estimateClock, normalizeObservation } from "../shared/clock";
 import { gameObservation } from "./locations";
@@ -14,6 +14,7 @@ import type { KnownPosition } from "./locations";
 const attachmentSchema = z.strictObject({
   actor: actorSchema.nullable(), streamId: z.string(), streamSeq: z.number().int().nonnegative(),
   authDeadlineMs: z.number(), expiresAtMs: z.number(),
+  supportsFactionHistory: z.boolean().optional(),
 });
 type Connection = z.infer<typeof attachmentSchema>;
 type ClockSession = { probe: (Omit<ClockProbeSample, "clientReceiveMs"> & { nonce: string }) | null;
@@ -63,6 +64,9 @@ export class MatchAuthority extends DurableObject<Env> {
   }
   private send(socket: WebSocket, body: ServerBody): void {
     const connection = this.attachment(socket);
+    if (body.type === "update" && !connection.supportsFactionHistory) {
+      body = { ...body, events: body.events.map(({ attackerLabel, targetLabel, ...event }) => event) };
+    }
     const streamSeq = connection.streamSeq + 1;
     socket.serializeAttachment({ ...connection, streamSeq });
     if (socket.readyState === WebSocket.OPEN) {
@@ -93,21 +97,35 @@ export class MatchAuthority extends DurableObject<Env> {
     };
   }
   private snapshot(socket: WebSocket): void {
-    const actor = this.attachment(socket).actor;
-    if (actor) this.send(socket, { type: "snapshot", snapshot: this.view(actor), trial: this.trialFor(actor), startChecking: false });
+    const connection = this.attachment(socket), actor = connection.actor;
+    if (actor) {
+      if (!this.record) throw new Error("Match record is unavailable.");
+      this.send(socket, { type: "snapshot", snapshot: this.view(actor), trial: this.trialFor(actor), startChecking: false,
+        ...(connection.supportsFactionHistory ?
+          { factionHistory: this.eventsFor(actor, this.record.events.filter(isFactionChange)) } : {}) });
+    }
+  }
+  private eventsFor(actor: VerifiedActor, events: EngineEvent[]): EngineEvent[] {
+    return events.filter(e => actor.host || e.type === "lifecycle" || actor.playerId !== null &&
+      (e.attackerId === actor.playerId || e.targetId === actor.playerId));
   }
   private broadcast(events: EngineEvent[], outcome: CommandOutcome | null = null, caller?: WebSocket): void {
     for (const socket of this.ctx.getWebSockets()) {
       const actor = this.attachment(socket).actor;
       if (!actor) continue;
-      const privateEvents = events.filter(e => actor.host || e.type === "lifecycle" ||
-        e.attackerId === actor.playerId || e.targetId === actor.playerId);
+      const privateEvents = this.eventsFor(actor, events);
       this.send(socket, { type: "update", snapshot: this.view(actor), events: privateEvents,
         outcome: socket === caller ? outcome : null, trial: this.trialFor(actor), startChecking: false });
     }
   }
   private async accept(next: EngineTransition, outcome: CommandOutcome | null = null, sessions?: MatchRecord["sessions"]): Promise<void> {
     if (!this.record) throw new Error("Match record is unavailable.");
+    const players = this.record.checkpoint.players;
+    next.events = next.events.map(event => isFactionChange(event) ? { ...event,
+      attackerLabel: players.find(player => player.id === event.attackerId)?.label ?? null,
+      targetLabel: players.find(player => player.id === event.targetId)?.label ?? null,
+      oldFaction: event.oldFaction ?? players.find(player => player.id === event.targetId)?.faction ?? null,
+    } : event);
     const feedback = next.events.filter(e => e.type === "conversion" && e.attackerId && e.targetId).map(e => ({
       eventSeq: e.eventSeq, atMs: e.atMs, recipients: [
         { playerId: e.attackerId!, seenAfterMs: null }, { playerId: e.targetId!, seenAfterMs: null },
@@ -284,7 +302,7 @@ export class MatchAuthority extends DurableObject<Env> {
         const authTimer = this.authTimers.get(socket);
         if (authTimer !== undefined) clearTimeout(authTimer);
         this.authTimers.delete(socket);
-        socket.serializeAttachment({ ...connection, actor });
+        socket.serializeAttachment({ ...connection, actor, supportsFactionHistory: message.supportsFactionHistory === true });
         this.send(socket, { type: "authenticated", playerId: actor.playerId, canHost: actor.host, expiresAtMs: this.record.expiresAtMs });
         this.snapshot(socket); return;
       }

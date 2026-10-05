@@ -58,6 +58,9 @@ button:active { background: #0f281a; }
 button.secondary { color: var(--accent); background: transparent; }
 button.secondary:hover { background: #e2e9df; }
 button:disabled { cursor: wait; opacity: .55; }
+.ui-icon { width: 1.15em; height: 1.15em; vertical-align: -.2em; margin-inline-end: .45em; }
+button:not(.secondary) .ui-icon, button[aria-pressed="true"] .ui-icon { filter: invert(1); }
+.faction-icon { width: 1.7rem; height: 1.7rem; padding: .2rem; margin-inline-end: .45rem; vertical-align: -.45rem; border-radius: 50%; background: var(--faction-color); }
 :focus-visible { outline: 3px solid #b64b11; outline-offset: 3px; }
 ::selection { background: #d3e4ba; color: var(--ink); }
 .join-form { margin-top: 1rem; border-top: 1px solid var(--line); padding-top: .5rem; }
@@ -80,10 +83,13 @@ progress { width: 100%; height: .5rem; accent-color: var(--accent); border: none
 progress::-webkit-progress-bar { background: var(--line); }
 progress::-webkit-progress-value { background: var(--accent); }
 progress::-moz-progress-bar { background: var(--accent); }
-.influence { margin: .5rem 0; gap: .3rem; font-size: .95rem; font-variant-numeric: tabular-nums; }
+.influence { display: grid; margin: .5rem 0; padding: .75rem; gap: .4rem; border: 1px solid var(--accent); border-radius: .3rem; background: #e2e9df; color: var(--accent); font-size: .95rem; font-variant-numeric: tabular-nums; }
 .influence > span { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; }
 .influence strong { white-space: nowrap; }
-.influence[data-direction="incoming"] { color: var(--threat); }
+.influence[data-direction="incoming"] { color: var(--threat); border-color: var(--threat); background: #fff1eb; }
+.conversion-heading { margin: 0; font-weight: 750; line-height: 1.35; }
+.conversion-guidance { margin: 0; font-size: .8rem; }
+.conversion-stopped { padding: .65rem .75rem; border: 1px solid var(--line); font-weight: 650; font-size: .9rem; }
 .influence[data-direction="incoming"] progress { accent-color: var(--threat); }
 .influence[data-direction="incoming"] progress::-webkit-progress-value { background: var(--threat); }
 .influence[data-direction="incoming"] progress::-moz-progress-bar { background: var(--threat); }
@@ -148,6 +154,12 @@ progress::-moz-progress-bar { background: var(--accent); }
 .host-controls { border-top: 1px solid var(--line); padding: 0; margin: 0; }
 .feedback { border-top: 2px solid var(--ink); }
 .feedback p:first-of-type { font-weight: 700; }
+#faction-history { margin: 1rem 0 0; border-top: 1px solid var(--line); }
+.faction-history-list { list-style: none; padding: 0; margin: 0; max-height: 24rem; overflow-y: auto; scrollbar-color: var(--muted) #eef1e8; }
+.faction-history-list li { padding: .75rem 0; border-top: 1px solid var(--line); }
+.faction-history-list time { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
+.faction-history-list p { margin: .25rem 0; font-weight: 650; }
+.faction-history-transition { color: var(--muted); font-size: .85rem; }
 .conversion-notice { position: fixed; z-index: 10; left: 50%; transform: translateX(-50%); bottom: max(1rem, env(safe-area-inset-bottom)); width: min(calc(100% - 2rem), 48rem); max-height: calc(100dvh - 2rem); overflow: auto; padding: .75rem 1rem; border: 2px solid var(--ink); background: #f7f8f1; }
 .conversion-notice p { margin: .25rem 0; font-size: 1.1rem; font-weight: 700; }
 .measurements { display: grid; grid-template-columns: 1fr auto; gap: .6rem 1rem; margin: 1.5rem 0; font-variant-numeric: tabular-nums; }
@@ -196,6 +208,7 @@ footer { margin-top: 3rem; padding-top: 1rem; border-top: 2px solid var(--ink); 
 @media (max-width: 480px) {
   main { width: calc(100% - 2rem); padding-top: 1rem; }
   main.in-game { padding-top: max(.75rem, env(safe-area-inset-top)); }
+  .hud-heading { gap: .5rem; }
   .form-grid { grid-template-columns: 1fr; }
   .faction-cycle li { flex-direction: column; align-items: flex-start; gap: .35rem; }
   .edition { font-size: .85rem; }
