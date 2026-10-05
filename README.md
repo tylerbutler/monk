@@ -124,6 +124,12 @@ deployed route configured in `wrangler.jsonc`.
 
 ## Play with friends
 
+The home page opens with **How to play**, before the room controls. It explains
+faction relationships, radar, conversion, and changing sides, followed by setup
+and safe-play notes. **Skip to play** moves to the room controls. Invite links
+show the same rules with the room code filled in. Returning to an active room
+keeps the gameplay view.
+
 Enter an optional display name and select **Create room** or **Join room**.
 Blank names use numbered-player labels. The creator joins as a player.
 Share **Copy invite link** or the eight-character room code. During play,

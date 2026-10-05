@@ -21,6 +21,28 @@ p { max-width: 70ch; margin: .7rem 0; }
 .edition { color: var(--muted); font-size: .95rem; }
 .intro { font-size: 1.1rem; }
 section { margin-top: 2rem; }
+.skip-to-play { display: inline-flex; align-items: center; min-height: 2.75rem; color: var(--accent); font-weight: 650; text-underline-offset: .2em; }
+.skip-to-play:hover { color: var(--ink); }
+.rules { margin-top: 0; }
+.rules h2 { margin-top: 0; font-size: clamp(2rem, 5vw, 2.75rem); letter-spacing: -.03em; }
+.rules-lead { font-size: 1.2rem; font-weight: 650; }
+.faction-cycle { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; list-style: none; padding: 1.1rem 0; margin: 1.5rem 0; border-block: 1px solid var(--line); }
+.faction-cycle li { display: flex; align-items: center; gap: .65rem; color: var(--accent); }
+.faction-cycle li[data-faction="paper"] { color: #805016; }
+.faction-cycle li[data-faction="scissors"] { color: #693864; }
+.faction-cycle svg { width: 1.75rem; height: 1.75rem; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.faction-cycle strong { display: block; font-size: 1.05rem; }
+.faction-cycle span { display: block; font-size: .85rem; color: var(--ink); }
+.rules-steps { padding-left: 1.5rem; margin: 1.5rem 0 2rem; }
+.rules-steps li { padding-left: .5rem; }
+.rules-steps li + li { margin-top: 1.5rem; }
+.rules-steps li::marker { color: var(--accent); font-weight: 700; }
+.rules-steps h3 { margin: 0 0 .35rem; }
+.rules-steps p { margin: 0; }
+.rules-setup { border-top: 1px solid var(--line); padding-top: 1.5rem; }
+.rules-setup h3 { margin-top: 0; }
+#play { border-top: 2px solid var(--ink); padding-top: 1.5rem; scroll-margin-top: 1rem; }
+#play h2 { margin-top: 0; }
 label { display: grid; gap: .35rem; font-weight: 600; margin: .75rem 0; }
 input, select, textarea { width: 100%; min-height: 3rem; font: inherit; color: var(--ink); background: #fff; border: 1px solid #6a7d6e; border-radius: .3rem; padding: .65rem .75rem; caret-color: var(--accent); }
 input[type="checkbox"] { width: 1.4rem; min-height: 1.4rem; accent-color: var(--accent); }
@@ -172,6 +194,7 @@ footer { margin-top: 3rem; padding-top: 1rem; border-top: 2px solid var(--ink); 
   main { width: calc(100% - 2rem); padding-top: 1rem; }
   main.in-game { padding-top: max(.75rem, env(safe-area-inset-top)); }
   .form-grid { grid-template-columns: 1fr; }
+  .faction-cycle li { flex-direction: column; align-items: flex-start; gap: .35rem; }
   .edition { font-size: .85rem; }
   .measurements { grid-template-columns: 1fr; gap: .2rem; }
   .measurements dd { text-align: left; margin-bottom: .7rem; }

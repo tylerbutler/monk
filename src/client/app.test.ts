@@ -21,16 +21,23 @@ afterEach(() => {
   mountedViews.clear();
 });
 
-it("explains location use and offers private creation and joining without collecting", () => {
+it.each(["/", "/?room=ABCDEFGH"])("puts open rules before room setup at %s without collecting location", path => {
   sessionStorage.clear();
+  history.replaceState(null, "", path);
   const root = document.createElement("main");
   document.body.append(root);
   const cleanup = mountApp(root);
-  expect(root.textContent).toContain("Location");
-  expect(root.querySelector('[data-action="create"]')).not.toBeNull();
-  expect(root.querySelector('input[name="matchCode"]')).not.toBeNull();
-  expect(root.textContent).toContain("bounded outdoor area");
-  cleanup(); root.remove();
+  try {
+    const rules = root.querySelector("section");
+    expect(rules?.id).toBe("how-to-play");
+    expect(rules?.closest("details, dialog, [hidden]")).toBeNull();
+    expect(rules?.getAttribute("aria-labelledby")).toBe(rules?.querySelector("h2")?.id);
+    expect(root.querySelector<HTMLAnchorElement>('a[href="#play"]')?.textContent).toBe("Skip to play");
+    expect(root.querySelector("#play")?.contains(root.querySelector('[data-action="create"]'))).toBe(true);
+    expect(root.querySelector('input[name="matchCode"]')).not.toBeNull();
+    expect(root.textContent).toContain("Location");
+    expect(root.textContent).toContain("bounded outdoor area");
+  } finally { cleanup(); root.remove(); history.replaceState(null, "", "/"); }
 });
 
 it("shows game identity and host-only faction controls without testing gates", () => {
@@ -338,6 +345,7 @@ it("keeps radar and every active conversion in the HUD with secondary informatio
     0, [0, 4, -4, 3]).state, "p1", 500), canHost: true };
   const app = browserApp(snapshot);
   try {
+    expect(app.root.querySelector("#how-to-play")).toBeNull();
     const hud = app.root.querySelector(".game-hud");
     expect(hud?.querySelector("[data-radar]")).not.toBeNull();
     expect(hud?.querySelectorAll("progress")).toHaveLength(3);
@@ -374,6 +382,7 @@ it("keeps the HUD and its open player details stable through age and authority u
     expect(document.activeElement).toBe(toggle);
     app.root.querySelector<HTMLButtonElement>('[data-action="leave"]')?.click();
     expect(app.root.querySelector(".game-hud")).toBeNull();
+    expect(app.root.querySelector("section")?.id).toBe("how-to-play");
     vi.advanceTimersByTime(500);
     expect(app.root.querySelector("[data-radar]")).toBeNull();
   } finally { app.cleanup(); vi.useRealTimers(); }

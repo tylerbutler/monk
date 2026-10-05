@@ -3,9 +3,9 @@ import { requestLocationPermission, startLocation } from "./location";
 import { startCompass } from "./compass";
 import type { CompassState } from "./compass";
 import { addTrialSample, exportTrialSummary, newTrialSummary } from "./trial";
-import { describeEvent } from "./views";
+import { describeEvent, names, symbols, targets } from "./views";
 import { destroyMatch, renderActivity, renderMatch, setRadarHeading } from "./match-view.svelte";
-import { deviceSchema, sessionCredentialsSchema } from "../shared/protocol";
+import { deviceSchema, gamePreset, sessionCredentialsSchema } from "../shared/protocol";
 import type { ConnectionStatus, EngineEvent, HostCommand, LocationStatus, MatchConnection, PlayerSnapshot, ServerMessage, SessionCredentials, TrialSample, TrialStatus, TrialSummary } from "../shared/protocol";
 
 function text(parent: HTMLElement, tag: string, value: string, className = ""): HTMLElement {
@@ -18,6 +18,43 @@ function field(parent: HTMLElement, label: string, name: string, type = "text", 
   input.type = type; input.name = name; input.id = name; input.value = value; input.dataset.retain = "";
   if (type === "number") { input.min = "0"; input.step = "any"; input.inputMode = "decimal"; }
   wrapper.append(input); parent.append(wrapper); return input;
+}
+
+function renderRules(parent: HTMLElement) {
+  const section = document.createElement("section");
+  section.id = "how-to-play"; section.className = "rules";
+  section.setAttribute("aria-labelledby", "rules-heading"); parent.append(section);
+  text(section, "h2", "How to play").id = "rules-heading";
+  text(section, "p", "Play together. Change sides.", "rules-lead");
+  text(section, "p", "Monk is outdoor rock-paper-scissors. Find other players on radar and stay near a target to convert them to your faction.");
+
+  const cycle = document.createElement("ul"); cycle.className = "faction-cycle"; section.append(cycle);
+  for (const faction of ["rock", "scissors", "paper"] as const) {
+    const item = document.createElement("li"); item.dataset.faction = faction; cycle.append(item);
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("aria-hidden", "true");
+    const path = document.createElementNS(icon.namespaceURI, "path");
+    path.setAttribute("d", symbols[faction]); icon.append(path); item.append(icon);
+    const label = text(item, "div", "");
+    text(label, "strong", names[faction]);
+    text(label, "span", `converts ${names[targets[faction]]}`);
+  }
+
+  const steps = document.createElement("ol"); steps.className = "rules-steps"; section.append(steps);
+  for (const [heading, description] of [
+    ["Find your target", "Your faction determines who you can convert and who can convert you. Check the radar for targets and threats. Players in your own faction cannot convert you."],
+    ["Stay in range", `Conversion starts automatically when both players share usable locations and the game confirms range. Stay in range for ${gamePreset.dwellMs / 1000} seconds by default. Watch the progress indicator; an interruption resets progress.`],
+    ["Change sides. Keep playing.", `When someone converts you, you join their faction and stay in the game. You get a short grace period before anyone can convert you again. Your targets and threats change with your faction.`],
+  ]) {
+    const item = document.createElement("li"); steps.append(item);
+    text(item, "h3", heading); text(item, "p", description);
+  }
+
+  const setup = document.createElement("div"); setup.className = "rules-setup"; section.append(setup);
+  text(setup, "h3", "Before you start");
+  text(setup, "p", `Create a room or join with an invite link or room code. The host can start with two players. A round lasts ${gamePreset.roundDurationMs / 60000} minutes by default, or until the host ends it. The host can change the settings before play.`);
+  text(setup, "p", "Select Share location when you are ready to take part in conversions. Keep the app visible and the screen on. Radar positions are approximate; a nearby marker alone does not confirm a conversion.");
+  text(setup, "p", "Agree on a bounded outdoor area and safe routes. No running or touching is needed.");
 }
 
 export function mountApp(root: HTMLElement): () => void {
@@ -388,6 +425,10 @@ export function mountApp(root: HTMLElement): () => void {
     root.classList.toggle("in-game", playing);
     const header = document.createElement("header"); header.className = "masthead"; root.append(header);
     text(header, "h1", "Monk");
+    if (!credentials) {
+      const skip = document.createElement("a"); skip.href = "#play"; skip.className = "skip-to-play";
+      skip.textContent = "Skip to play"; header.append(skip);
+    }
     if (playing && credentials) text(header, "span", `Room ${credentials.matchCode}`, "room-code");
     if (snapshot && conversionNotices.length) {
       const notice = document.createElement("aside"); notice.className = "conversion-notice";
@@ -404,14 +445,16 @@ export function mountApp(root: HTMLElement): () => void {
         render();
       }, "dismiss-conversion", "secondary");
     }
-    if (error) { const alert = text(root, "p", error, "error"); alert.setAttribute("role", "alert"); }
+    if (error && credentials) { const alert = text(root, "p", error, "error"); alert.setAttribute("role", "alert"); }
     if (!credentials) {
-      text(root, "h2", "Play together. Change sides.");
-      text(root, "p", "Rock converts Scissors. Paper converts Rock. Scissors converts Paper. Confirmed proximity changes your faction; you stay in the game.", "intro");
-      const area = document.createElement("section"); root.append(area); text(area, "h3", "Play with friends");
+      renderRules(root);
+      const area = document.createElement("section"); area.id = "play"; area.tabIndex = -1;
+      area.setAttribute("aria-labelledby", "play-heading"); root.append(area);
+      text(area, "h2", "Play with friends").id = "play-heading";
       if (validInvite) text(area, "p", `You are invited to room ${invitedCode}.`);
       const name = field(area, "Display name (optional)", "displayName"); name.maxLength = 80; name.autocomplete = "off";
       button(area, "Create room", async () => { connect(await request("/api/matches", { label: name.value.trim() })); }, "create", validInvite ? "secondary" : "");
+      if (error) { const alert = text(area, "p", error, "error"); alert.setAttribute("role", "alert"); }
       const form = document.createElement("form"); form.className = "join-form"; area.append(form);
       const code = field(form, "Room code", "matchCode", "text", validInvite ? invitedCode : "");
       code.required = true; code.maxLength = 8; code.autocomplete = "off";
