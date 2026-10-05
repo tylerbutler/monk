@@ -1,6 +1,7 @@
 import { test as base, expect } from "@playwright/test";
 import type { Page, WebSocket } from "@playwright/test";
 import { parseServerMessage } from "../../src/shared/protocol";
+import { installGeolocation } from "./geolocation";
 
 export type Duel = {
   host: Page;
@@ -17,15 +18,15 @@ export const test = base.extend<{ duel: Duel }>({
     if (!baseURL) throw new Error("The duel fixture requires a local base URL.");
     const origin = new URL(baseURL).origin;
     const hostContext = await browser.newContext({
-      baseURL, viewport: { width: 1280, height: 1000 }, geolocation: geolocation(0),
+      baseURL, viewport: { width: 1280, height: 1000 },
     });
     try {
       const guestContext = await browser.newContext({
-        baseURL, viewport: { width: 1280, height: 1000 }, geolocation: geolocation(60),
+        baseURL, viewport: { width: 1280, height: 1000 },
       });
       try {
-        await hostContext.grantPermissions(["geolocation"], { origin });
-        await guestContext.grantPermissions(["geolocation"], { origin });
+        await installGeolocation(hostContext, geolocation(0));
+        await installGeolocation(guestContext, geolocation(60));
         const host = await hostContext.newPage();
         const guest = await guestContext.newPage();
         let connection: WebSocket | undefined;
@@ -89,7 +90,8 @@ export const test = base.extend<{ duel: Duel }>({
           await expect(guest.locator(".radar-players")).toContainText("about 60 m W");
           await use({
             host, guest,
-            moveGuest: (eastM, accuracyM = 1) => guestContext.setGeolocation(geolocation(eastM, accuracyM)),
+            moveGuest: (eastM, accuracyM = 1) => guest.evaluate(
+              coordinates => window.monkTestGeolocation.setPosition(coordinates), geolocation(eastM, accuracyM)),
           });
         } finally {
           host.off("websocket", observeConnection);
