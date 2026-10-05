@@ -1,4 +1,7 @@
 import { locationInactivityMs } from "../shared/protocol";
+import rockIcon from "@tabler/icons/outline/hand-grab.svg?url";
+import paperIcon from "@tabler/icons/outline/hand-stop.svg?url";
+import scissorsIcon from "@tabler/icons/outline/hand-two-fingers.svg?url";
 import type { CompassState } from "./compass";
 import type { EngineEvent, Faction, HostCommand, PlayerSnapshot } from "../shared/protocol";
 
@@ -23,9 +26,9 @@ export const radarRoles = {
   player: { label: "Player", symbol: "" },
 };
 export const symbols = {
-  rock: "M5 4 16 2 22 10 19 21 7 22 2 13Z",
-  paper: "M5 2H15L21 8V22H5ZM15 2V8H21M9 12H17M9 16H17",
-  scissors: "M8 10 21 2M8 14 21 22M10 12 21 12M8 7a3 3 0 1 0-6 0a3 3 0 1 0 6 0M8 17a3 3 0 1 0-6 0a3 3 0 1 0 6 0",
+  rock: rockIcon,
+  paper: paperIcon,
+  scissors: scissorsIcon,
 };
 export function clock(ms: number): string {
   const seconds = Math.ceil(ms / 1000);

@@ -54,6 +54,25 @@ it("shows game identity and host-only faction controls without testing gates", (
   expect(root.querySelector('[data-map]')).toBeNull();
   expect(root.textContent).not.toMatch(/latitude|longitude/);
 });
+it.each(["rock", "paper", "scissors"] as const)("shares the %s icon and faction badge between rules, HUD and radar", faction => {
+  sessionStorage.clear();
+  const home = document.createElement("main"); document.body.append(home);
+  const cleanup = mountApp(home);
+  const game = document.createElement("section");
+  try {
+    const ruleIcon = home.querySelector(`.faction-cycle [data-faction="${faction}"] svg`);
+    const reference = ruleIcon?.querySelector("image")?.getAttribute("href");
+    expect(reference).toBeTruthy();
+    const references = [...home.querySelectorAll(".faction-cycle image")].map(image => image.getAttribute("href"));
+    expect(new Set(references).size).toBe(3);
+    const state = pulse(runningFixture([faction, faction]), 0, [0, 60]).state;
+    renderMatch(game, snapshotFor(state, "p1", 0), actions);
+    expect(game.querySelector(".own-faction")?.getAttribute("data-faction")).toBe(faction);
+    expect(game.querySelector(".own-faction svg image")?.getAttribute("href")).toBe(reference);
+    expect(game.querySelector('[data-radar-player="p2"]')?.getAttribute("data-faction")).toBe(faction);
+    expect(game.querySelector('[data-radar-player="p2"] svg image')?.getAttribute("href")).toBe(reference);
+  } finally { cleanup(); home.remove(); }
+});
 it("shows a direct resume action with frozen paused settings", () => {
   const root = document.createElement("section");
   const changed = command(runningFixture(["rock", "paper"]), 0, { type: "set_faction", playerId: "p1", faction: "scissors" }).state;

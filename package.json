@@ -16,7 +16,7 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy"
   },
-  "dependencies": { "svelte": "5.57.1", "zod": "4.6.5" },
+  "dependencies": { "@tabler/icons": "3.48.0", "svelte": "5.57.1", "zod": "4.6.5" },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.3.6",
     "@playwright/test": "1.63.0",

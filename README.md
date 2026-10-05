@@ -130,6 +130,16 @@ and safe-play notes. **Skip to play** moves to the room controls. Invite links
 show the same rules with the room code filled in. Returning to an active room
 keeps the gameplay view.
 
+Faction badges use red for Rock, yellow for Paper, and blue for Scissors.
+The fist, open palm, and two-finger icons come from
+[Tabler Icons](https://tabler.io/icons)
+(`hand-grab`, `hand-stop`, and `hand-two-fingers`). The rules, faction display,
+and radar import these SVGs from the `@tabler/icons` dependency.
+The [MIT license](public/icons/LICENSE-tabler.txt) ships with the icons.
+Vite bundles only the three selected icons; the app does not fetch them from a
+CDN. Update the package through npm rather than edit icon paths. Target and
+threat indicators retain their separate colors and text labels.
+
 Enter an optional display name and select **Create room** or **Join room**.
 Blank names use numbered-player labels. The creator joins as a player.
 Share **Copy invite link** or the eight-character room code. During play,

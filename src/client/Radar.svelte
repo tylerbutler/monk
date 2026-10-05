@@ -79,7 +79,7 @@
                     {/if}
                     <circle r="16" class="radar-marker-body" />
                     <svg x="-11" y="-11" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" data-faction-symbol={m.player.faction}>
-                      <path d={symbols[m.player.faction]} fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                      <image href={symbols[m.player.faction]} width="24" height="24" />
                     </svg>
                     <text x="20" y="-14" class="radar-number">{m.index + 1}</text>
                     {#if role.symbol}

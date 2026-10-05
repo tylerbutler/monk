@@ -89,9 +89,9 @@
 <div class="game-hud">
   <header class="hud-heading">
     {#if snapshot.ownFaction}
-      <div class="own-faction">
+      <div class="own-faction" data-faction={snapshot.ownFaction}>
         <svg viewBox="0 0 24 24" aria-hidden="true" data-faction-symbol={snapshot.ownFaction}>
-          <path d={symbols[snapshot.ownFaction]} fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+          <image href={symbols[snapshot.ownFaction]} width="24" height="24" />
         </svg>
         <h2>{names[snapshot.ownFaction]}</h2>
       </div>

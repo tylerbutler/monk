@@ -33,8 +33,9 @@ function renderRules(parent: HTMLElement) {
     const item = document.createElement("li"); item.dataset.faction = faction; cycle.append(item);
     const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("aria-hidden", "true");
-    const path = document.createElementNS(icon.namespaceURI, "path");
-    path.setAttribute("d", symbols[faction]); icon.append(path); item.append(icon);
+    const image = document.createElementNS(icon.namespaceURI, "image");
+    image.setAttribute("href", symbols[faction]); image.setAttribute("width", "24"); image.setAttribute("height", "24");
+    icon.append(image); item.append(icon);
     const label = text(item, "div", "");
     text(label, "strong", names[faction]);
     text(label, "span", `converts ${names[targets[faction]]}`);
