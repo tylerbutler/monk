@@ -150,6 +150,73 @@ it("requires thirty seconds of continuous influence with the game defaults", () 
   ]);
 });
 
+function productionRound() {
+  return command(lobbyFixture(["rock", "scissors"]), 0,
+    { type: "configure", mode: "test", parameters: gamePreset, approved: false, deviceLimitations: "" },
+    { type: "start" }).state;
+}
+
+function productionFix(playerId: string, eastM: number, nowMs: number, accuracyM = 1) {
+  return { ...fix(playerId, eastM, nowMs), expiresAtMs: nowMs + 30000, accuracyM };
+}
+
+it("includes both uncertainty radii in entry range", () => {
+  const state = productionRound();
+  const accepted = advanceEngine(state, { nowMs: 0, actor: null, commands: [],
+    observations: [productionFix("p1", 0, 0), productionFix("p2", 27.9, 0)] });
+  expect(snapshotFor(accepted.state, "p1", 0).outgoing?.targetId).toBe("p2");
+  expect(snapshotFor(accepted.state, "p2", 0).incoming).toHaveLength(1);
+  const rejected = advanceEngine(state, { nowMs: 0, actor: null, commands: [],
+    observations: [productionFix("p1", 0, 0), productionFix("p2", 28.1, 0)] });
+  expect(snapshotFor(rejected.state, "p1", 0).outgoing).toBeNull();
+  expect(snapshotFor(rejected.state, "p2", 0).incoming).toEqual([]);
+});
+
+it("accepts an exact thirty-metre upper bound", () => {
+  const accepted = advanceEngine(productionRound(), { nowMs: 0, actor: null, commands: [],
+    observations: [productionFix("p1", 0, 0, 15), productionFix("p2", 0, 0, 15)] });
+  expect(snapshotFor(accepted.state, "p1", 0).outgoing?.targetId).toBe("p2");
+  expect(snapshotFor(accepted.state, "p2", 0).incoming).toHaveLength(1);
+});
+
+it("uses retention range only for an existing encounter", () => {
+  const fresh = productionRound();
+  const started = advanceEngine(fresh, { nowMs: 0, actor: null, commands: [],
+    observations: [productionFix("p1", 0, 0), productionFix("p2", 10, 0)] });
+  expect(snapshotFor(started.state, "p1", 0).outgoing?.targetId).toBe("p2");
+  const retained = advanceEngine(started.state, { nowMs: 1000, actor: null, commands: [],
+    observations: [productionFix("p1", 0, 1000), productionFix("p2", 37.9, 1000)] });
+  expect(snapshotFor(retained.state, "p1", 1000).outgoing?.targetId).toBe("p2");
+  expect(snapshotFor(retained.state, "p2", 1000).incoming).toHaveLength(1);
+  const rejected = advanceEngine(retained.state, { nowMs: 1500, actor: null, commands: [],
+    observations: [productionFix("p1", 0, 1500), productionFix("p2", 38.1, 1500)] });
+  expect(snapshotFor(rejected.state, "p1", 1500).outgoing).toBeNull();
+  expect(snapshotFor(rejected.state, "p2", 1500).incoming).toEqual([]);
+  expect(rejected.events).toContainEqual(expect.objectContaining({
+    type: "attack_interrupted", reason: "Outside confirmed range.",
+  }));
+  const outsideEntry = advanceEngine(fresh, { nowMs: 0, actor: null, commands: [],
+    observations: [productionFix("p1", 0, 0), productionFix("p2", 37.9, 0)] });
+  expect(snapshotFor(outsideEntry.state, "p1", 0).outgoing).toBeNull();
+  expect(snapshotFor(outsideEntry.state, "p2", 0).incoming).toEqual([]);
+});
+
+it.each([
+  [1, 15, true], [1, 15.01, false], [15, 1, true], [15.01, 1, false],
+] as const)("checks the per-player uncertainty limit independently of distance: %s, %s",
+  (accuracyA, accuracyB, eligible) => {
+    const next = advanceEngine(productionRound(), { nowMs: 0, actor: null, commands: [],
+      observations: [productionFix("p1", 0, 0, accuracyA), productionFix("p2", 0, 0, accuracyB)] });
+    if (eligible) {
+      expect(snapshotFor(next.state, "p1", 0).outgoing?.targetId).toBe("p2");
+      expect(snapshotFor(next.state, "p2", 0).incoming).toHaveLength(1);
+    } else {
+      expect(snapshotFor(next.state, "p1", 0).outgoing).toBeNull();
+      expect(snapshotFor(next.state, "p2", 0).incoming).toEqual([]);
+    }
+  },
+);
+
 it("rejects stale fixes at expiry and excessive uncertainty", () => {
   const state = pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state;
   const expired = advanceEngine(state, { nowMs: 1500, actor: null, commands: [], observations: [] });

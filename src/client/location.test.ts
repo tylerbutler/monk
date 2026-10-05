@@ -21,10 +21,58 @@ beforeEach(() => {
   } });
 });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
-function position(timestamp: number): GeolocationPosition {
+function position(timestamp: number, coordinates?: Partial<GeolocationCoordinates>): GeolocationPosition {
   return { timestamp, coords: { latitude: 0, longitude: 0, accuracy: 1,
-    altitude: null, altitudeAccuracy: null, heading: null, speed: null, toJSON: () => ({}) }, toJSON: () => ({}) };
+    altitude: null, altitudeAccuracy: null, heading: null, speed: null, toJSON: () => ({}), ...coordinates }, toJSON: () => ({}) };
 }
+it.each([
+  { latitude: NaN }, { latitude: 91 }, { longitude: 181 },
+  { accuracy: 0 }, { accuracy: -1 }, { accuracy: Infinity },
+])("rejects invalid coordinates without consuming a sequence number: %j", coordinates => {
+  const fixes: PositionReport[] = [], states: LocationStatus[] = [];
+  const stop = startLocation(f => fixes.push(f), s => states.push(s));
+  try {
+    onWatch(position(10000, coordinates));
+    expect(fixes).toEqual([]);
+    expect(states.at(-1)).toMatchObject({
+      collecting: true, reason: "Location values are invalid. Wait for a new fix.",
+    });
+    onWatch(position(10000));
+    expect(fixes).toMatchObject([{ seq: 1 }]);
+    expect(fixes).toHaveLength(1);
+    expect(states.at(-1)?.reason).toBeNull();
+  } finally { stop(); }
+});
+it.each(["NaN", "-1", String(Number.MAX_SAFE_INTEGER)])(
+  "stops before starting a watch when the stored sequence is invalid: %s", stored => {
+    sessionStorage.setItem("monk-position-seq", stored);
+    const fixes: PositionReport[] = [], states: LocationStatus[] = [];
+    const stop = startLocation(f => fixes.push(f), s => states.push(s));
+    try {
+      expect(navigator.geolocation.watchPosition).not.toHaveBeenCalled();
+      expect(fixes).toEqual([]);
+      expect(states.at(-1)).toMatchObject({
+        collecting: false,
+        reason: "Session storage is unavailable or invalid. Clear this session before reporting location.",
+      });
+    } finally { stop(); }
+  },
+);
+it("does not report a fix when persisting its sequence fails", () => {
+  const fixes: PositionReport[] = [], states: LocationStatus[] = [];
+  const stop = startLocation(f => fixes.push(f), s => states.push(s));
+  try {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("Storage blocked", "SecurityError"); });
+    onWatch(position(10000));
+    expect(fixes).toEqual([]);
+    expect(clearWatch).toHaveBeenCalledWith(1);
+    expect(states.at(-1)).toMatchObject({
+      collecting: false, reason: "Session storage is unavailable. Allow storage before reporting location.",
+    });
+    onWatch(position(11000));
+    expect(fixes).toEqual([]);
+  } finally { stop(); }
+});
 it("preserves capture timestamps and rejects repeated cached fixes", () => {
   const fixes: PositionReport[] = [], states: LocationStatus[] = [];
   const stop = startLocation(f => fixes.push(f), s => states.push(s));
