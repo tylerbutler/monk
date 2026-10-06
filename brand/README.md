@@ -104,8 +104,8 @@ unchanged.
 ## App use
 
 The app imports the supplied wordmark, paired symbol, and local font. Its
-homepage puts room entry before the rules. The installed-app icons use the
-avatar's arches, and the small browser icon uses the one-color symbol.
+homepage puts room entry before the rules. The installed-app icons and
+browser favicon use the avatar's red/blue arches on yellow.
 During running and paused play, the main game panel uses the player's own
 faction color with ink text; a host without a faction has a neutral panel.
 Player distances stay visible beside the radar on desktop and above it on

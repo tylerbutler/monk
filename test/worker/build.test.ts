@@ -32,6 +32,17 @@ it("serves the Monk game page identity", async () => {
   expect(html).toContain("<title>Monk</title>");
   expect(html).not.toContain("outdoor playtest");
 });
+it("serves the avatar artwork as the game favicon", async () => {
+  const html = await (await SELF.fetch("https://monk.test/")).text();
+  const path = html.match(/<link\b[^>]*rel="icon"[^>]*href="([^"]+)"/)?.[1];
+  if (!path) throw new Error("The game favicon is missing");
+  const response = await SELF.fetch(new URL(path, "https://monk.test"));
+  expect(response.status).toBe(200);
+  expect(response.headers.get("content-type")).toContain("image/svg+xml");
+  const svg = await response.text();
+  expect(svg).toContain('viewBox="0 0 512 512"');
+  for (const color of ["#eb6256", "#f2cf45", "#69b5f5"]) expect(svg).toContain(color);
+});
 it("redirects the brand kit to its directory URL and preserves query parameters", async () => {
   const response = await SELF.fetch("https://monk.test/brand?source=invite", { redirect: "manual" });
   expect(response.status).toBe(307);
