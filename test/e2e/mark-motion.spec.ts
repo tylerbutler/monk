@@ -29,16 +29,43 @@ async function paint(page: Page) {
       <svg x="70" y="50" width="140" height="120" viewBox="0 0 140 120">${source}</svg></svg>`);
     const colors = { yellow: 0, red: 0, blue: 0 };
     let different = 0;
+    let belowBaseline = 0;
     for (let index = 0; index < rendered.length; index += 4) {
       const [r, g, b] = rendered.slice(index, index + 3);
       if (r === 242 && g === 207 && b === 69) colors.yellow++;
       if (r === 235 && g === 98 && b === 86) colors.red++;
       if (r === 105 && g === 181 && b === 245) colors.blue++;
+      if (index >= 560 * 340 * 4 && (r < 250 || g < 250 || b < 250)) belowBaseline++;
       if ([0, 1, 2].some(channel => Math.abs(rendered[index + channel] - reference[index + channel]) > 24)) different++;
     }
-    return { ...colors, different };
+    return { ...colors, different, belowBaseline };
   });
 }
+
+test("keeps every painted frame above the mark baseline", async ({ page }) => {
+  await page.goto("/brand/motion.html");
+  await expect(page.getByLabel("Animation progress")).toBeEnabled();
+  for (let frame = 0; frame < 120; frame++) {
+    await seek(page, frame);
+    expect((await paint(page)).belowBaseline, `paint below baseline at frame ${frame}`).toBe(0);
+  }
+});
+
+test("draws each color at constant speed with equal time per arch", async ({ page }) => {
+  await page.goto("/brand/motion.html");
+  await expect(page.getByLabel("Animation progress")).toBeEnabled();
+  const archLength = 156 + Math.PI * 28;
+  for (const [start, color] of [[0, "242,207,69"], [12, "235,98,86"], [54, "105,181,245"]] as const) {
+    for (const elapsed of [7, 14, 21, 28, 35, 42]) {
+      await seek(page, start + elapsed);
+      const length = await page.locator(`#animation path[stroke="rgb(${color})"]`).evaluate(element => {
+        if (!(element instanceof SVGPathElement)) throw new Error("Expected a paint path");
+        return element.getTotalLength();
+      });
+      expect(length, `${color} after ${elapsed} frames`).toBeCloseTo(archLength * elapsed / 42, 0);
+    }
+  }
+});
 
 test("paints yellow, red, then blue and holds the original mark", async ({ page }) => {
   await page.goto("/brand/motion.html");

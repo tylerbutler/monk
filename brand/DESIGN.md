@@ -133,11 +133,13 @@ to the identity palette.
 
 The separate [motion preview](motion.html) draws the paired mark as paint
 left by an implied bouncing ball. No ball is visible. Yellow leads, red
-follows through the first arch, and blue finishes the second. The trail
-slows near each apex and accelerates toward the baseline. The finished
-paint stays still; the mark does not stretch, rotate, or rebound.
+follows through the first arch, and blue finishes the second. Every color
+draws at a constant speed, taking 0.7 seconds per arch, with no easing at
+the apex or baseline. The center turn stays flat at the baseline; no
+yellow curve extends below it. The finished paint stays still; the mark
+does not stretch, rotate, or rebound.
 
-The vector Lottie has about 1.6 seconds of motion and a short final hold
+The vector Lottie has 1.6 seconds of motion and a 0.4-second final hold
 within a 2-second, 60-fps sequence. Playback is once, not a loop. The final
 state preserves the red-left/blue-right symbol. Reduced motion shows the
 static SVG, as does a loading failure. Replay, half speed, and a timeline

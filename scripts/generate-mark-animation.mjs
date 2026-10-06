@@ -20,8 +20,11 @@ const both = {
   o: [...left.o, ...right.o.slice(1)],
 };
 const fixed = value => ({ a: 0, k: value });
+const archFrames = 42;
+const colorDelay = 12;
+const finishFrame = colorDelay + archFrames * 2;
 
-function paint(name, index, color, path, beats, end = 120) {
+function paint(name, index, color, path, start, duration, end = 120) {
   return {
     ty: 4, nm: name, ind: index, ddd: 0, sr: 1,
     ip: 0, op: end, st: 0, ao: 0, bm: 0,
@@ -33,18 +36,21 @@ function paint(name, index, color, path, beats, end = 120) {
       { ty: "sh", nm: "Arch centerline", ks: fixed(path) },
       {
         ty: "st", nm: name, c: fixed([...color.map(channel => channel / 255), 1]),
-        o: fixed(100), w: fixed(28), lc: 1, lj: 2,
+        // A bevel keeps the center turnaround flat at the baseline.
+        o: fixed(100), w: fixed(28), lc: 1, lj: 3,
       },
       {
         ty: "tm", nm: "Painted bounce", s: fixed(0), o: fixed(0), m: 1,
         e: {
           a: 1,
-          k: beats.map(([t, value], index) => ({
-            t, s: [value],
-            // Slow toward each apex; accelerate toward each landing.
-            o: { x: [index % 2 === 0 ? .17 : .67], y: [index % 2 === 0 ? .67 : 0] },
-            i: { x: [index % 2 === 0 ? .33 : .83], y: [index % 2 === 0 ? 1 : .33] },
-          })),
+          k: [
+            {
+              t: start, s: [0],
+              o: { x: [1 / 3], y: [1 / 3] },
+              i: { x: [2 / 3], y: [2 / 3] },
+            },
+            { t: start + duration, s: [100] },
+          ],
         },
       },
     ],
@@ -55,15 +61,15 @@ const animation = {
   v: "5.13.0", fr: 60, ip: 0, op: 120, w: 280, h: 220, ddd: 0,
   nm: "Monk - Painted bounce", assets: [],
   layers: [
-    paint("Scissors blue", 1, [105, 181, 245], right, [[48, 0], [70, 50], [92, 100]]),
-    paint("Rock red", 2, [235, 98, 86], left, [[10, 0], [30, 50], [50, 100]]),
-    paint("Paper yellow", 3, [242, 207, 69], both, [[0, 0], [18, 25], [36, 50], [54, 75], [72, 100]], 94),
+    paint("Scissors blue", 1, [105, 181, 245], right, colorDelay + archFrames, archFrames),
+    paint("Rock red", 2, [235, 98, 86], left, colorDelay, archFrames),
+    paint("Paper yellow", 3, [242, 207, 69], both, 0, archFrames * 2, finishFrame),
   ],
   markers: [
-    { tm: 0, cm: "Yellow leads", dr: 10 },
-    { tm: 10, cm: "Red follows", dr: 38 },
-    { tm: 48, cm: "Blue completes", dr: 46 },
-    { tm: 94, cm: "Finished mark", dr: 26 },
+    { tm: 0, cm: "Yellow leads", dr: colorDelay },
+    { tm: colorDelay, cm: "Red follows", dr: archFrames },
+    { tm: colorDelay + archFrames, cm: "Blue completes", dr: archFrames },
+    { tm: finishFrame, cm: "Finished mark", dr: 120 - finishFrame },
   ],
 };
 
