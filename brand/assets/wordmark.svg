@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 522 160" role="img" aria-labelledby="title">
+  <title id="title">Monk</title>
+  <g fill="#171719">
+    <path d="M0 160V82a42 42 0 0 1 84 0v78H56V82a14 14 0 0 0-28 0v78Z"/>
+    <path d="M56 160V82a42 42 0 0 1 84 0v78h-28V82a14 14 0 0 0-28 0v78Z"/>
+    <path fill-rule="evenodd" d="M270 100a52 60 0 1 1-104 0 52 60 0 1 1 104 0Zm-28 0a24 32 0 1 0-48 0 24 32 0 1 0 48 0Z"/>
+    <path d="M292 160V82a42 42 0 0 1 84 0v78h-28V82a14 14 0 0 0-28 0v78Z"/>
+    <path d="M408 0h28v91l48-51h36l-54 58 56 62h-37l-49-55v55h-28Z"/>
+  </g>
+</svg>

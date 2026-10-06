@@ -110,6 +110,15 @@ unverified by this suite. Follow the
 [two-iPhone trial checklist](docs/playtests/two-iphone-trial.md) for device checks.
 The physical trial remains **pending**.
 
+### Marketing identity
+
+The [Side by Side identity kit](brand/README.md) contains the Monk wordmark,
+symbols, colors, typography, and sample graphics. Open `brand/index.html`
+in a browser or visit `/brand/` on the website to view it. `/brand` redirects
+to `/brand/`. The Vite build copies the public kit and its downloads into
+`dist/brand/`; internal design-tool records stay in the repository.
+The kit is separate from the gameplay interface.
+
 ## Local use
 
 ```sh

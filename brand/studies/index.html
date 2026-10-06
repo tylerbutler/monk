@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Monk - Faction marketing studies</title>
+    <style>
+      @font-face {
+        font-family: "Hanken Grotesk";
+        src: url("../assets/HankenGrotesk.ttf") format("truetype");
+        font-weight: 100 900;
+        font-display: swap;
+      }
+      :root { font-family: "Hanken Grotesk", sans-serif; color: #171719; background: #fff; line-height: 1.5; font-synthesis: none; }
+      * { box-sizing: border-box; }
+      body { max-width: 1520px; margin: auto; padding: clamp(20px, 4vw, 64px); }
+      h1 { margin: 0 0 12px; font-size: clamp(2rem, 4vw, 3.5rem); line-height: 1.05; letter-spacing: -.035em; }
+      header p { max-width: 65ch; margin: 0 0 36px; }
+      a { color: inherit; text-underline-offset: .25em; }
+      a:hover { text-decoration-thickness: 2px; }
+      :focus-visible { outline: 3px solid #171719; outline-offset: 4px; }
+      ::selection { color: white; background: #171719; }
+      .studies { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; align-items: start; }
+      figure { margin: 0; min-width: 0; }
+      .study { position: relative; aspect-ratio: 1; container-type: inline-size; overflow: hidden; }
+      .rock { background: #eb6256; }
+      .paper { background: #f2cf45; }
+      .scissors { background: #69b5f5; }
+      .wordmark { position: absolute; top: 7%; left: 7%; width: 26%; min-width: 104px; height: auto; }
+      .hand { position: absolute; top: 24%; left: 28%; width: 44%; height: 44%; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+      .name { position: absolute; bottom: 15%; left: 7%; margin: 0; font-size: min(9cqw, 6rem); font-weight: 750; line-height: 1; letter-spacing: -.035em; }
+      .tagline { position: absolute; bottom: 7%; left: 7%; margin: 0; font-size: 3cqw; line-height: 1.3; }
+      figcaption { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0 12px; margin-top: 8px; font-size: .875rem; font-variant-numeric: tabular-nums; }
+      figcaption a { display: inline-flex; align-items: center; min-height: 44px; }
+      footer { display: flex; flex-wrap: wrap; gap: 12px 28px; border-top: 1px solid #d9d9d9; padding-top: 24px; margin-top: 36px; font-size: .875rem; }
+      footer p { margin: 0; }
+      @media (max-width: 800px) {
+        .studies { grid-template-columns: 1fr; gap: 28px; }
+        .study { max-width: 560px; margin-inline: auto; }
+        figcaption { max-width: 560px; margin-inline: auto; }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Comparison studies only. Exact game faction colors and Tabler hand icons.
+         Preserve the Monk wordmark and repeat the composition across factions. -->
+    <header>
+      <p><a href="../">Back to the brand kit</a></p>
+      <h1>Three sides of Monk.</h1>
+      <p>One color, one hand, one side of the game. Three marketing studies using the existing faction colors and icons.</p>
+    </header>
+    <main class="studies" aria-label="Faction marketing comparisons">
+      <figure>
+        <article class="study rock" id="rock" aria-label="Rock marketing study">
+          <img class="wordmark" src="../assets/wordmark.svg" width="522" height="160" alt="Monk">
+          <svg class="hand" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8 11v-3.5a1.5 1.5 0 0 1 3 0v2.5"/>
+            <path d="M11 9.5v-3a1.5 1.5 0 0 1 3 0v3.5"/>
+            <path d="M14 7.5a1.5 1.5 0 0 1 3 0v2.5"/>
+            <path d="M17 9.5a1.5 1.5 0 0 1 3 0v4.5a6 6 0 0 1 -6 6h-2h.208a6 6 0 0 1 -5.012 -2.7l-.196 -.3c-.312 -.479 -1.407 -2.388 -3.286 -5.728a1.5 1.5 0 0 1 .536 -2.022a1.867 1.867 0 0 1 2.28 .28l1.47 1.47"/>
+          </svg>
+          <h2 class="name">Rock.</h2>
+          <p class="tagline">Change sides. Keep playing.</p>
+        </article>
+        <figcaption><span>Rock / #EB6256</span><a href="rock.png" download>Download study</a></figcaption>
+      </figure>
+      <figure>
+        <article class="study paper" id="paper" aria-label="Paper marketing study">
+          <img class="wordmark" src="../assets/wordmark.svg" width="522" height="160" alt="Monk">
+          <svg class="hand" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8 13v-7.5a1.5 1.5 0 0 1 3 0v6.5"/>
+            <path d="M11 5.5v-2a1.5 1.5 0 1 1 3 0v8.5"/>
+            <path d="M14 5.5a1.5 1.5 0 0 1 3 0v6.5"/>
+            <path d="M17 7.5a1.5 1.5 0 0 1 3 0v8.5a6 6 0 0 1 -6 6h-2h.208a6 6 0 0 1 -5.012 -2.7a69.74 69.74 0 0 1 -.196 -.3c-.312 -.479 -1.407 -2.388 -3.286 -5.728a1.5 1.5 0 0 1 .536 -2.022a1.867 1.867 0 0 1 2.28 .28l1.47 1.47"/>
+          </svg>
+          <h2 class="name">Paper.</h2>
+          <p class="tagline">Change sides. Keep playing.</p>
+        </article>
+        <figcaption><span>Paper / #F2CF45</span><a href="paper.png" download>Download study</a></figcaption>
+      </figure>
+      <figure>
+        <article class="study scissors" id="scissors" aria-label="Scissors marketing study">
+          <img class="wordmark" src="../assets/wordmark.svg" width="522" height="160" alt="Monk">
+          <svg class="hand" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8 13v-8.5a1.5 1.5 0 0 1 3 0v7.5"/>
+            <path d="M17 11.5a1.5 1.5 0 0 1 3 0v4.5a6 6 0 0 1 -6 6h-2h.208a6 6 0 0 1 -5.012 -2.7a69.74 69.74 0 0 1 -.196 -.3c-.312 -.479 -1.407 -2.388 -3.286 -5.728a1.5 1.5 0 0 1 .536 -2.022a1.867 1.867 0 0 1 2.28 .28l1.47 1.47"/>
+            <path d="M14 10.5a1.5 1.5 0 0 1 3 0v1.5"/>
+            <path d="M11 5.5v-2a1.5 1.5 0 1 1 3 0v8.5"/>
+          </svg>
+          <h2 class="name">Scissors.</h2>
+          <p class="tagline">Change sides. Keep playing.</p>
+        </article>
+        <figcaption><span>Scissors / #69B5F5</span><a href="scissors.png" download>Download study</a></figcaption>
+      </figure>
+    </main>
+    <footer>
+      <p>Comparison studies / 1080 x 1080</p>
+      <p><a href="comparison.png" download>Download side-by-side preview</a></p>
+      <p>Hand icons: Tabler / <a href="LICENSE-tabler.txt">MIT license</a></p>
+      <p>Type: Hanken Grotesk / <a href="../assets/OFL-HankenGrotesk.txt">OFL license</a></p>
+    </footer>
+  </body>
+</html>

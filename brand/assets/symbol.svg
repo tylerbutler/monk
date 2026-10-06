@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 120" role="img" aria-labelledby="title">
+  <title id="title">Monk paired-arch symbol</title>
+  <g fill="#171719">
+    <path d="M0 120V42a42 42 0 0 1 84 0v78H56V42a14 14 0 0 0-28 0v78Z"/>
+    <path d="M56 120V42a42 42 0 0 1 84 0v78h-28V42a14 14 0 0 0-28 0v78Z"/>
+  </g>
+</svg>

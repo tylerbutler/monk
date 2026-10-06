@@ -8,7 +8,7 @@
   "workers_dev": false,
   "preview_urls": false,
   "routes": [{ "pattern": "monk-test.tylerbutler.com", "custom_domain": true }],
-  "build": { "command": "bash scripts/cloudflare-build.sh", "watch_dir": ["src", "rules/src", "public", "scripts", "index.html", "vite.config.ts"] },
+  "build": { "command": "bash scripts/cloudflare-build.sh", "watch_dir": ["src", "rules/src", "public", "brand", "scripts", "index.html", "vite.config.ts"] },
   "assets": { "directory": "./dist", "binding": "ASSETS", "run_worker_first": true },
   "durable_objects": {
     "bindings": [{ "name": "MATCHES", "class_name": "MatchAuthority" }]

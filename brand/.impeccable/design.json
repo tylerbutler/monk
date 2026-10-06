@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-06T03:03:51.677Z",
+  "title": "Design System: Monk - Side by Side",
+  "extensions": {
+    "colorMeta": {
+      "ink": { "role": "neutral", "displayName": "Ink" },
+      "white": { "role": "neutral", "displayName": "White" },
+      "faction-rock": { "role": "primary", "displayName": "Rock red" },
+      "faction-paper": { "role": "primary", "displayName": "Paper yellow" },
+      "faction-scissors": { "role": "primary", "displayName": "Scissors blue" },
+      "secondary": { "role": "neutral", "displayName": "Secondary kit text" },
+      "line": { "role": "neutral", "displayName": "Kit border and divider" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Kit lead heading; sample headlines share weight, leading, and tracking, not its fluid size." },
+      "headline": { "displayName": "Headline", "purpose": "Kit section headings; specimen shares weight, leading, and tracking at its own size." },
+      "title": { "displayName": "Title", "purpose": "Subsection headings; swatch names also use this size." },
+      "body": { "displayName": "Body", "purpose": "Regular instructions at the inherited browser base size." },
+      "label": { "displayName": "Label", "purpose": "Kit navigation and usage notes." },
+      "caption": { "displayName": "Caption", "purpose": "Asset captions, with preview-specific mobile adjustments." },
+      "metadata": { "displayName": "Metadata", "purpose": "License, definition labels, and swatch explanations." }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "swap-fill",
+        "value": "fill 320ms cubic-bezier(.16, 1, .3, 1)",
+        "purpose": "Only the two paths in the kit's Swap sides preview; not an app motion token."
+      },
+      {
+        "name": "swap-reduced-motion",
+        "value": "none",
+        "purpose": "Under prefers-reduced-motion: reduce, remove the swap-path transition only; the color exchange remains functional."
+      }
+    ],
+    "breakpoints": [
+      { "name": "kit-max-width", "value": "700px" },
+      { "name": "kit-hero-border-min-width", "value": "1600px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Kit download action",
+      "kind": "button",
+      "description": "The shipped anchor action from index.html, with styles.css states. Its radius and hover shade are local to this preview control.",
+      "html": "<a class=\"ds-action\" href=\"#marks\">Get the marks <svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"M5 19 19 5M5 5h14v14\"/></svg></a>",
+      "css": ".ds-action { display: inline-flex; gap: 2rem; min-height: 48px; align-items: center; justify-content: space-between; padding: .8rem 1.1rem; color: var(--white, #ffffff); background: var(--ink, #171719); border-radius: .3rem; text-decoration: none; font-family: \"Hanken Grotesk\", sans-serif; font-size: 1rem; line-height: 1.5; font-weight: 650; -webkit-tap-highlight-color: #f2cf4566; } .ds-action svg { display: block; max-width: 100%; height: auto; } .ds-action:hover { background: #303033; } .ds-action:focus-visible { outline: 3px solid var(--ink, #171719); outline-offset: 5px; }"
+    },
+    {
+      "name": "Kit navigation",
+      "kind": "nav",
+      "description": "Identity-kit section links, not an app navigation pattern. Targets retain a 44px minimum height. The surrounding masthead, not rendered in this snippet, preserves the 104px wordmark with flex-shrink: 0 on its link; its gap changes from 2rem to .75rem (12px at the default 16px root size) at widths of 700px or less.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Identity kit\"><a href=\"#marks\">Marks</a><a href=\"#system\">System</a><a href=\"#applications\">Use it</a></nav>",
+      "css": ".ds-nav { display: flex; gap: clamp(1rem, 3vw, 2.5rem); color: var(--ink, #171719); font-family: \"Hanken Grotesk\", sans-serif; } .ds-nav a { display: inline-flex; align-items: center; min-height: 44px; font-size: .95rem; font-weight: 400; line-height: 1.5; color: inherit; text-decoration: none; text-underline-offset: .25em; text-decoration-thickness: 1px; -webkit-tap-highlight-color: #f2cf4566; } .ds-nav a:hover { text-decoration: underline; text-decoration-thickness: 2px; } .ds-nav a:focus-visible { outline: 3px solid currentColor; outline-offset: 5px; }"
+    },
+    {
+      "name": "Swap sides",
+      "kind": "input",
+      "description": "Native checkbox and original 140 x 120 paired-arch paths from index.html. Both paths remain present; Rock red and Scissors blue fills exchange. The 700px query belongs to the kit preview.",
+      "html": "<div class=\"ds-swap\"><input id=\"ds-swap-sides\" type=\"checkbox\" aria-describedby=\"ds-swap-description\"><label for=\"ds-swap-sides\">Swap sides</label><svg viewBox=\"0 0 140 120\" role=\"img\" aria-label=\"Two matching arches form the Monk m\"><path class=\"ds-arch-first\" d=\"M0 120V42a42 42 0 0 1 84 0v78H56V42a14 14 0 0 0-28 0v78Z\"/><path class=\"ds-arch-second\" d=\"M56 120V42a42 42 0 0 1 84 0v78h-28V42a14 14 0 0 0-28 0v78Z\"/></svg></div><p class=\"ds-swap-description\" id=\"ds-swap-description\">Same shape. Different sides.</p>",
+      "css": ".ds-swap { display: grid; grid-template-columns: auto auto; justify-content: center; align-items: center; gap: 0 .7rem; color: var(--ink, #171719); font-family: \"Hanken Grotesk\", sans-serif; font-size: 1rem; line-height: 1.5; } .ds-swap svg { display: block; max-width: 100%; height: auto; grid-column: 1 / -1; grid-row: 1; width: min(100%, 340px); margin-bottom: 3rem; overflow: visible; } .ds-swap input { justify-self: end; width: 1.15rem; height: 1.15rem; margin: 0; accent-color: var(--ink, #171719); cursor: pointer; } .ds-swap label { display: flex; align-items: center; min-height: 44px; cursor: pointer; } .ds-swap input, .ds-swap label { -webkit-tap-highlight-color: #f2cf4566; } .ds-swap input:focus-visible { outline: 3px solid currentColor; outline-offset: 5px; } .ds-arch-first { fill: var(--faction-rock, #eb6256); } .ds-arch-second { fill: var(--faction-scissors, #69b5f5); } .ds-swap path { transition: fill 320ms cubic-bezier(.16, 1, .3, 1); } .ds-swap input:checked ~ svg .ds-arch-first { fill: var(--faction-scissors, #69b5f5); } .ds-swap input:checked ~ svg .ds-arch-second { fill: var(--faction-rock, #eb6256); } .ds-swap-description { color: var(--ink, #171719); font-family: \"Hanken Grotesk\", sans-serif; font-size: .9rem; line-height: 1.5; text-align: center; margin: 1.25rem 0 0; } @media (max-width: 700px) { .ds-swap svg { width: 180px; margin-bottom: 1.5rem; } } @media (prefers-reduced-motion: reduce) { .ds-swap path { transition: none; } }"
+    },
+    {
+      "name": "One-color symbol sheet",
+      "kind": "custom",
+      "description": "A real asset presentation sheet, not a generic card. Paths copied from assets/symbol.svg; the pale stage is preview-only.",
+      "html": "<figure class=\"ds-symbol-sheet\"><div class=\"ds-symbol-stage\"><svg width=\"140\" height=\"120\" viewBox=\"0 0 140 120\" role=\"img\" aria-label=\"One-color Monk symbol\"><g fill=\"var(--ink, #171719)\"><path d=\"M0 120V42a42 42 0 0 1 84 0v78H56V42a14 14 0 0 0-28 0v78Z\"/><path d=\"M56 120V42a42 42 0 0 1 84 0v78h-28V42a14 14 0 0 0-28 0v78Z\"/></g></svg></div><figcaption>One color <a href=\"assets/symbol.svg\" download>SVG</a></figcaption></figure>",
+      "css": ".ds-symbol-sheet { margin: 0; color: var(--ink, #171719); font-family: \"Hanken Grotesk\", sans-serif; line-height: 1.5; } .ds-symbol-stage { min-height: 210px; display: flex; align-items: center; justify-content: center; background: #f5f5f5; } .ds-symbol-stage svg { display: block; max-width: 100%; height: auto; } .ds-symbol-sheet figcaption { display: flex; align-items: center; justify-content: space-between; gap: 1rem; font-size: .875rem; border-bottom: 1px solid var(--line, #d9d9d9); } .ds-symbol-sheet a { color: inherit; display: inline-flex; align-items: center; min-height: 44px; text-underline-offset: .25em; text-decoration-thickness: 1px; -webkit-tap-highlight-color: #f2cf4566; } .ds-symbol-sheet a:hover { text-decoration-thickness: 2px; } .ds-symbol-sheet a:focus-visible { outline: 3px solid currentColor; outline-offset: 5px; } @media (max-width: 700px) { .ds-symbol-stage { min-height: 130px; } .ds-symbol-stage svg { width: 60px; } .ds-symbol-sheet figcaption { display: block; padding-top: .6rem; font-size: .8rem; } .ds-symbol-sheet figcaption > a { display: block; } }"
+    },
+    {
+      "name": "Palette swatches",
+      "kind": "custom",
+      "description": "The primary and support-neutral swatch rows from index.html. Three equal faction swatches stack in one column at 700px or less; the separate ink/white row stays two columns. There are no synthesized color ramps.",
+      "html": "<div class=\"ds-palette\"><div class=\"ds-swatch ds-rock\"><strong>Rock</strong><span>#EB6256</span><small>Red</small></div><div class=\"ds-swatch ds-paper\"><strong>Paper</strong><span>#F2CF45</span><small>Yellow</small></div><div class=\"ds-swatch ds-scissors\"><strong>Scissors</strong><span>#69B5F5</span><small>Blue</small></div></div><div class=\"ds-neutral-palette\"><div class=\"ds-swatch ds-ink\"><strong>Ink</strong><span>#171719</span><small>Type and marks</small></div><div class=\"ds-swatch ds-white\"><strong>White</strong><span>#FFFFFF</span><small>Space and reversed marks</small></div></div>",
+      "css": ".ds-palette, .ds-neutral-palette { display: grid; border: 1px solid var(--line, #d9d9d9); color: var(--ink, #171719); font-family: \"Hanken Grotesk\", sans-serif; font-size: 1rem; line-height: 1.5; } .ds-palette { grid-template-columns: repeat(3, minmax(0, 1fr)); } .ds-neutral-palette { grid-template-columns: 1fr 1fr; border-top: 0; } .ds-neutral-palette .ds-swatch { min-height: 120px; } .ds-swatch { padding: 1.5rem; min-height: 210px; display: flex; flex-direction: column; align-items: start; font-variant-numeric: tabular-nums; } .ds-swatch strong { font-size: 1.5rem; font-weight: 700; } .ds-swatch span { margin-top: auto; } .ds-swatch small { font-size: .85rem; margin-top: .25rem; } .ds-rock { background: var(--faction-rock, #eb6256); } .ds-paper { background: var(--faction-paper, #f2cf45); } .ds-scissors { background: var(--faction-scissors, #69b5f5); } .ds-ink { color: var(--white, #ffffff); background: var(--ink, #171719); } .ds-white { background: var(--white, #ffffff); } @media (max-width: 700px) { .ds-palette { grid-template-columns: 1fr; } .ds-swatch { padding: 1rem; min-height: 175px; } }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Side by Side",
+    "overview": "Two equal arches, drawn from reversible team bibs, make a custom lowercase Monk wordmark. Colors exchange while both forms remain. The identity is minimalist but distinct: flat fields, open space, and short, friendly lines. The lead line is \"Change sides. Keep playing.\"\n\nThis record covers the built identity kit in `brand/`, not a landing-page template or an app restyling. It records the approved palette-only revision of the code-led Side by Side direction; there was no approved image comp. Geometry, typography, and composition structure remain intact. The prior palette's review disposition does not certify this revision; no external review verdict for this revision is recorded here. The repository's `PRODUCT.md` remains product truth; root `DESIGN.md` remains the game/system concept document.",
+    "keyCharacteristics": [
+      "Custom path lettering and two matching arches.",
+      "Three exact faction colors shared with gameplay, supported by ink and white.",
+      "Hanken Grotesk supporting copy in sentence case.",
+      "Flat, spacious compositions with a short line and a large mark."
+    ],
+    "rules": [
+      {
+        "name": "The Shared Factions Rule",
+        "body": "Brand and gameplay share the same three colors. Red stays Rock, yellow stays Paper, and blue stays Scissors. Identify factions with names and hand icons as well as color; the app's faction assignments remain unchanged.",
+        "section": "colors"
+      },
+      {
+        "name": "The Dominant Field Rule",
+        "body": "Use one dominant faction-color field per marketing composition, with the other two colors as accents.",
+        "section": "colors"
+      },
+      {
+        "name": "The Readable Pairings Rule",
+        "body": "Use ink text on white and all three faction colors. White text belongs only on ink, not on red, yellow, or blue.",
+        "section": "colors"
+      },
+      {
+        "name": "The Lettering Is Artwork Rule",
+        "body": "Hanken Grotesk supports the identity; it is not the wordmark. Use the supplied SVG paths instead of typing or redrawing \"monk\".",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat Fields Rule",
+        "body": "Keep identity applications flat. Separate fields with color, space, or thin borders; do not add effects to the marks.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Same Shape Rule",
+        "body": "Exchange the paired arches' colors without moving, removing, or changing either form or the combined silhouette.",
+        "section": "shapes"
+      },
+      {
+        "name": "The Stem Space Rule",
+        "body": "Leave at least one stem-width of clear space around a mark: 28 source units, scaled with the artwork. Use the wordmark at least 104px wide and the symbol at least 24px wide; below 48px, use the one-color symbol.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "**Do** use the supplied wordmark first and the symbol when space is tight.",
+      "**Do** preserve one stem-width of clear space and the stated minimum sizes.",
+      "**Do** keep both arches present when their colors exchange.",
+      "**Do** keep faction meanings fixed and identify factions with names and hand icons as well as color.",
+      "**Do** use one dominant faction-color field per marketing composition, with the other two as accents.",
+      "**Do** use sentence case and short, friendly invitations, led by \"Change sides. Keep playing.\"",
+      "**Do** keep the font license and raster provenance with the distributed assets."
+    ],
+    "donts": [
+      "**Don't** stretch, rotate, outline, redraw, or add effects to the marks.",
+      "**Don't** typeset the wordmark in Hanken Grotesk or another font.",
+      "**Don't** use a paired-color symbol below 48px wide.",
+      "**Don't** use white text on faction-color fields; use ink text on all three colors.",
+      "**Don't** reassign faction colors or restyle the app from this kit.",
+      "**Don't** present sample graphics as app screenshots or claim trademark clearance."
+    ]
+  }
+}
