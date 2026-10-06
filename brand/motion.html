@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#ffffff">
+    <title>Monk - Painted bounce</title>
+    <link rel="icon" href="./assets/avatar.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="./styles.css">
+    <style>
+      body.motion-preview { max-width: 1100px; margin: auto; padding: 0 clamp(1.25rem, 5vw, 4rem) 2rem; }
+      header { display: flex; align-items: center; justify-content: space-between; gap: 2rem; padding-block: 1.5rem 2.5rem; }
+      header img { width: 104px; min-width: 104px; }
+      header a { display: inline-flex; align-items: center; min-height: 44px; }
+      .motion-preview h1 { font-size: clamp(2.5rem, 5vw, 4rem); margin-bottom: .75rem; }
+      .intro { max-width: 65ch; margin-bottom: 2rem; }
+      .stage { display: grid; place-items: center; border-block: 1px solid var(--line); }
+      .artboard { position: relative; width: min(100%, 560px); aspect-ratio: 280 / 220; }
+      .artboard > div, .artboard > svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+      [hidden] { display: none !important; }
+      .controls { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem 1.5rem; padding-top: 1.5rem; }
+      button, input { font: inherit; accent-color: var(--ink); }
+      button { min-height: 44px; padding: .65rem 1.5rem; border: 1px solid var(--ink); border-radius: .3rem; color: var(--white); background: var(--ink); cursor: pointer; }
+      button:hover:not(:disabled) { background: #303033; }
+      button:disabled { opacity: .45; cursor: not-allowed; }
+      .slow { display: inline-flex; align-items: center; gap: .6rem; min-height: 44px; cursor: pointer; }
+      .slow input { width: 1.15rem; height: 1.15rem; margin: 0; }
+      .download { display: inline-flex; align-items: center; min-height: 44px; margin-left: auto; font-weight: 650; }
+      .timeline { display: flex; align-items: center; gap: 1rem; margin-block: 1rem .5rem; }
+      .timeline input { flex: 1; min-width: 0; min-height: 44px; margin: 0; cursor: pointer; }
+      .timeline #time { min-width: 4.5ch; font-variant-numeric: tabular-nums; }
+      #status { color: var(--secondary); margin-bottom: 0; min-height: 1.5em; font-size: .95rem; }
+      footer { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; margin-top: 2.5rem; color: var(--secondary); font-size: .875rem; }
+      footer p { margin: 0; }
+      @media (max-width: 480px) {
+        header { padding-bottom: 1.5rem; gap: 1rem; }
+        .controls { gap: .5rem 1rem; }
+        .download { margin-left: 0; }
+        footer { margin-top: 1.5rem; }
+      }
+    </style>
+  </head>
+  <body class="motion-preview">
+    <header>
+      <img src="./assets/wordmark.svg" width="104" height="32" alt="Monk">
+      <a href="./">Back to the brand kit</a>
+    </header>
+    <main>
+      <h1>Paint the bounce.</h1>
+      <p class="intro">Yellow leads. Red follows. Blue brings it home.<br>A bouncing trail, without the ball.</p>
+      <div class="stage" role="img" aria-label="Monk arches painted in yellow, then red and blue">
+        <div class="artboard">
+          <div id="animation" aria-hidden="true" hidden></div>
+          <svg id="still" viewBox="0 0 280 220" aria-hidden="true">
+            <image href="./assets/symbol-paired.svg" x="70" y="50" width="140" height="120"/>
+          </svg>
+        </div>
+      </div>
+      <div class="controls">
+        <button id="replay" type="button" disabled>Replay</button>
+        <label class="slow"><input id="slow" type="checkbox" disabled>Slow motion</label>
+        <a class="download" href="./assets/monk-entrance.json" download>Download Lottie</a>
+      </div>
+      <div class="timeline">
+        <input id="progress" type="range" min="0" max="119" step="1" value="119" aria-label="Animation progress" disabled>
+        <span id="time" aria-hidden="true">2.00 s</span>
+      </div>
+      <p id="status" role="status">Static preview. Enable JavaScript to play the animation.</p>
+    </main>
+    <footer>
+      <p>1.6-second entrance + a short hold.</p>
+      <p>Vector Lottie / 60 fps / transparent background</p>
+    </footer>
+    <script type="module" src="./motion.ts"></script>
+  </body>
+</html>

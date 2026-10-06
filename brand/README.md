@@ -26,6 +26,8 @@ game.
 | `assets/wordmark-reversed.svg` | White wordmark on ink |
 | `assets/symbol.svg` | One-color symbol, including small sizes |
 | `assets/symbol-paired.svg` | Rock red and Scissors blue symbol on white or Paper yellow, 48 px or wider |
+| `assets/monk-entrance.json` | Transparent Lottie entrance: a yellow paint trail resolves into red/blue arches |
+| `motion.html` | Standalone animation preview with replay, slow motion, and a timeline |
 | `assets/avatar.svg` | Red/blue arches on yellow; safe within a circular crop |
 | `samples/avatar-512.png` | 512 x 512 avatar |
 | `samples/social-1200x630.png` | Yellow wide social graphic with ink type and red/blue mark |
@@ -43,6 +45,28 @@ game.
 SVG marks use paths rather than text. They do not require a font to render.
 The two equal arches share a stem. Their colors can change, but both forms
 stay in place.
+
+## Motion study
+
+After `npm run build`, open `/brand/motion.html` on the local or deployed
+website. Unlike the static identity kit, the motion preview needs the web
+build and a server. The app does not load the Lottie player or animation.
+
+An implied ball paints two bounces from left to right; no ball is drawn.
+Yellow leads, red paints the first arch, and blue completes the second.
+The paint stays in place. The entrance takes about 1.6 seconds, followed
+by a short hold, for 2 seconds total at 60 fps. The final frame matches the
+paired symbol, with red on the left and blue on the right.
+
+The downloadable JSON is vector-only, with a transparent 280 x 220 canvas.
+It uses strokes and trim paths, with no images, fonts, expressions, or effects.
+Play it once (`loop: false`) and hold its last frame. Show the static paired
+symbol when reduced motion is requested. The preview also keeps the static
+symbol visible if JavaScript or the animation cannot load.
+
+Edit `scripts/generate-mark-animation.mjs` to adjust the timing, then run
+`npm run build:mark` to regenerate `assets/monk-entrance.json`. The normal
+build also runs this step. Keep the final geometry and faction colors fixed.
 
 ## Basic use
 

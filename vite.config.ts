@@ -1,8 +1,14 @@
 import { cpSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      "lottie-web": fileURLToPath(new URL("./node_modules/lottie-web/build/player/lottie_light.js", import.meta.url)),
+    },
+  },
   plugins: [
     svelte(),
     {
@@ -16,5 +22,10 @@ export default defineConfig({
       },
     },
   ],
-  build: { target: "es2022" },
+  build: {
+    target: "es2022",
+    rolldownOptions: {
+      input: { app: "index.html", motion: "brand/motion.html" },
+    },
+  },
 });

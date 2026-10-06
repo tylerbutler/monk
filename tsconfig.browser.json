@@ -1,6 +1,6 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "lib": ["ES2023", "DOM", "DOM.Iterable"], "types": ["vite/client"] },
-  "include": ["src/client/**/*.ts", "src/client/**/*.svelte", "src/shared/**/*.ts"],
+  "include": ["src/client/**/*.ts", "src/client/**/*.svelte", "src/shared/**/*.ts", "brand/**/*.ts"],
   "exclude": ["**/*.test.ts"]
 }

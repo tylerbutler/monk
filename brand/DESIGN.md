@@ -129,6 +129,20 @@ The light symbol-preview stage (`#f5f5f5`), action-hover shade (`#303033`),
 and tap highlight (`#f2cf4566`) are local preview treatments, not additions
 to the identity palette.
 
+### Painted-bounce motion study
+
+The separate [motion preview](motion.html) draws the paired mark as paint
+left by an implied bouncing ball. No ball is visible. Yellow leads, red
+follows through the first arch, and blue finishes the second. The trail
+slows near each apex and accelerates toward the baseline. The finished
+paint stays still; the mark does not stretch, rotate, or rebound.
+
+The vector Lottie has about 1.6 seconds of motion and a short final hold
+within a 2-second, 60-fps sequence. Playback is once, not a loop. The final
+state preserves the red-left/blue-right symbol. Reduced motion shows the
+static SVG, as does a loading failure. Replay, half speed, and a timeline
+are preview controls only; the game remains unchanged.
+
 ## Typography
 
 **Display and Body Font:** Hanken Grotesk, with sans-serif fallback.
