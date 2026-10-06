@@ -44,9 +44,10 @@ export const test = base.extend<{ duel: Duel }>({
           await guest.getByLabel("Display name (optional)", { exact: true }).fill("Test Scissors");
           await guest.getByRole("button", { name: "Join room", exact: true }).click();
           for (const page of [host, guest]) {
-            await expect(page.locator("#player-roster li")).toHaveCount(2);
-            await expect(page.locator("#player-roster")).toContainText("Test Rock");
-            await expect(page.locator("#player-roster")).toContainText("Test Scissors");
+            await expect(page.locator(".radar-players li")).toHaveCount(2);
+            await expect(page.locator(".radar-players")).toContainText("Test Rock");
+            await expect(page.locator(".radar-players")).toContainText("Test Scissors");
+            await expect(page.locator("#player-roster-toggle")).toHaveCount(0);
             expect(await page.evaluate(() => document.visibilityState)).toBe("visible");
           }
 
@@ -78,7 +79,7 @@ export const test = base.extend<{ duel: Duel }>({
           await host.getByLabel("Faction for Test Scissors", { exact: true }).selectOption("scissors");
           await expect(host.locator(".own-faction h2")).toHaveText("Rock");
           await expect(guest.locator(".own-faction h2")).toHaveText("Scissors");
-          await host.getByRole("button", { name: "Start game", exact: true }).click();
+          await host.locator("#room-invite").getByRole("button", { name: "Start game", exact: true }).click();
           for (const page of [host, guest]) {
             await expect(page.getByText("Round running", { exact: true })).toBeVisible();
             await expect(page.getByRole("button", { name: "Share location", exact: true })).toBeVisible();

@@ -13,12 +13,6 @@ function arch(offset) {
 
 const left = arch(0);
 const right = arch(56);
-const both = {
-  c: false,
-  v: [...left.v, ...right.v.slice(1)],
-  i: [...left.i, ...right.i.slice(1)],
-  o: [...left.o, ...right.o.slice(1)],
-};
 const fixed = value => ({ a: 0, k: value });
 const archFrames = 42;
 const colorDelay = 12;
@@ -62,8 +56,9 @@ const animation = {
   nm: "Monk - Painted bounce", assets: [],
   layers: [
     paint("Scissors blue", 1, [105, 181, 245], right, colorDelay + archFrames, archFrames),
-    paint("Rock red", 2, [235, 98, 86], left, colorDelay, archFrames),
-    paint("Paper yellow", 3, [242, 207, 69], both, 0, archFrames * 2, finishFrame),
+    paint("Paper yellow second bounce", 2, [242, 207, 69], right, archFrames, archFrames, finishFrame),
+    paint("Rock red", 3, [235, 98, 86], left, colorDelay, archFrames),
+    paint("Paper yellow first bounce", 4, [242, 207, 69], left, 0, archFrames, finishFrame),
   ],
   markers: [
     { tm: 0, cm: "Yellow leads", dr: colorDelay },

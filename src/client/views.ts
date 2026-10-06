@@ -6,7 +6,7 @@ import type { CompassState } from "./compass";
 import type { EngineEvent, Faction, HostCommand, PlayerSnapshot } from "../shared/protocol";
 
 export type MatchActions = {
-  start(): void; pause(): void; beginResume(): void; cancelResume(): void; end(): void; leave(): void;
+  pause(): void; beginResume(): void; cancelResume(): void; end(): void; leave(): void;
   configure(command: Extract<HostCommand, { type: "configure" }>): void;
   setFaction(playerId: string, faction: Faction): void;
 };

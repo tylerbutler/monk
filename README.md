@@ -161,7 +161,9 @@ open **Room & options**, then **Invite players**. Invitations
 remain available during play; new players can join running and paused rounds.
 New players get a grace period. Rooms hold at most 100 players.
 
-The host selects **Start game** with at least two joined players.
+The host selects **Start game**, next to **Copy invite link**, with at least
+two joined players. The player list stays visible without a separate
+**Players** dropdown. After the round ends, a plain list shows the roster.
 Starting and **Resume round** do not request permission or wait for GPS.
 A player without location does not block another player's encounter.
 The round ends when its timer expires or the host selects **End round**.

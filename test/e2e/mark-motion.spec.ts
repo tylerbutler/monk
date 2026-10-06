@@ -38,7 +38,10 @@ async function paint(page: Page) {
       if (index >= 560 * 340 * 4 && (r < 250 || g < 250 || b < 250)) belowBaseline++;
       if ([0, 1, 2].some(channel => Math.abs(rendered[index + channel] - reference[index + channel]) > 24)) different++;
     }
-    return { ...colors, different, belowBaseline };
+    // Sample the center of the shared stem at artboard coordinates (140, 140).
+    const stemPixel = (280 * 560 + 280) * 4;
+    const sharedStem = Array.from(rendered.slice(stemPixel, stemPixel + 4));
+    return { ...colors, different, belowBaseline, sharedStem };
   });
 }
 
@@ -55,15 +58,30 @@ test("draws each color at constant speed with equal time per arch", async ({ pag
   await page.goto("/brand/motion.html");
   await expect(page.getByLabel("Animation progress")).toBeEnabled();
   const archLength = 156 + Math.PI * 28;
-  for (const [start, color] of [[0, "242,207,69"], [12, "235,98,86"], [54, "105,181,245"]] as const) {
+  for (const [start, color, completed] of [
+    [0, "242,207,69", 0], [42, "242,207,69", 1],
+    [12, "235,98,86", 0], [54, "105,181,245", 0],
+  ] as const) {
     for (const elapsed of [7, 14, 21, 28, 35, 42]) {
       await seek(page, start + elapsed);
-      const length = await page.locator(`#animation path[stroke="rgb(${color})"]`).evaluate(element => {
-        if (!(element instanceof SVGPathElement)) throw new Error("Expected a paint path");
-        return element.getTotalLength();
+      const length = await page.locator(`#animation path[stroke="rgb(${color})"]`).evaluateAll(elements => {
+        return elements.reduce((total, element) => {
+          if (!(element instanceof SVGPathElement)) throw new Error("Expected a paint path");
+          return total + element.getTotalLength();
+        }, 0);
       });
-      expect(length, `${color} after ${elapsed} frames`).toBeCloseTo(archLength * elapsed / 42, 0);
+      expect(length, `${color} from frame ${start} after ${elapsed} frames`)
+        .toBeCloseTo(archLength * (completed + elapsed / 42), 0);
     }
+  }
+});
+
+test("shows the second yellow upswing over red before blue covers it", async ({ page }) => {
+  await page.goto("/brand/motion.html");
+  await expect(page.getByLabel("Animation progress")).toBeEnabled();
+  for (const [frame, color] of [[50, [242, 207, 69, 255]], [60, [105, 181, 245, 255]]] as const) {
+    await seek(page, frame);
+    expect((await paint(page)).sharedStem, `shared stem at frame ${frame}`).toEqual(color);
   }
 });
 

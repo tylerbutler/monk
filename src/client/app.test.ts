@@ -9,7 +9,7 @@ import { command, lobbyFixture, pulse, runningFixture } from "../../test/fixture
 import type { EngineEvent, ServerMessage, TrialSample, TrialStatus } from "../shared/protocol";
 
 const actions: MatchActions = {
-  start: vi.fn(), pause: vi.fn(), beginResume: vi.fn(), cancelResume: vi.fn(), end: vi.fn(),
+  pause: vi.fn(), beginResume: vi.fn(), cancelResume: vi.fn(), end: vi.fn(),
   configure: vi.fn(), setFaction: vi.fn(), leave: vi.fn(),
 };
 const mountedViews = new Set<HTMLElement>();
@@ -122,8 +122,8 @@ it.each(["rock", "paper", "scissors"] as const)("shares the %s icon and faction 
     expect(playerBadge?.getAttribute("data-faction")).toBe(faction);
     expect(playerBadge?.getAttribute("src")).toBe(reference);
     renderMatch(game, snapshotFor(lobbyFixture([faction, faction]), "p1", 0), actions);
-    expect(game.querySelectorAll(".roster .faction-icon")).toHaveLength(2);
-    expect(game.querySelector(".roster .faction-icon")?.getAttribute("src")).toBe(reference);
+    expect(game.querySelectorAll(".radar-players .faction-icon")).toHaveLength(2);
+    expect(game.querySelector(".radar-players .faction-icon")?.getAttribute("src")).toBe(reference);
   } finally { cleanup(); home.remove(); }
 });
 it("labels radar ranges and keeps player distances outside diagnostics", () => {
@@ -208,8 +208,20 @@ it("shows faction and waiting radar without calibration warnings in the lobby", 
   expect(root.querySelector(".warning")).toBeNull();
   expect(root.querySelector(".calibration")).toBeNull();
   expect(root.querySelector(".player-radar")).not.toBeNull();
-  expect(root.querySelector(".roster")?.textContent).toContain("Player 1 - rock (you)");
-  expect(root.querySelector('[data-action="start"]')?.textContent).toBe("Start game");
+  expect(root.querySelector(".radar-players")?.textContent).toContain("Player 1");
+  expect(root.querySelector(".radar-players")?.textContent).toContain("Player 2");
+  expect(root.querySelector("#player-roster")).toBeNull();
+});
+it("keeps the ended roster visible without a dropdown when the player table is unavailable", () => {
+  const root = document.createElement("section");
+  const state = command(runningFixture(["rock", "paper"]), 1000, { type: "end" }).state;
+  renderMatch(root, snapshotFor(state, "p1", 1000), actions);
+  const roster = root.querySelector("#player-roster");
+  expect(roster?.tagName).toBe("SECTION");
+  expect(roster?.querySelector(".roster")?.textContent).toContain("Player 1 - rock (you)");
+  expect(roster?.querySelector(".roster")?.textContent).toContain("Player 2 - paper");
+  expect(roster?.closest("details")).toBeNull();
+  expect(root.querySelector("#player-roster-toggle")).toBeNull();
 });
 it("names confirmed influence and links it to radar markers", () => {
   const root = document.createElement("section");
@@ -903,6 +915,29 @@ it("shows a public-code-only invite link and keeps configuration out of the main
   } finally { app.cleanup(); }
 });
 
+it.each([
+  { count: 1, canHost: true, enabled: false },
+  { count: 2, canHost: true, enabled: true },
+  { count: 2, canHost: false, enabled: false },
+])("keeps lobby start beside invite copy for $count players with host access $canHost", ({ count, canHost, enabled }) => {
+  const app = browserApp({ ...snapshotFor(lobbyFixture(count === 1 ? ["rock"] : ["rock", "paper"]), "p1", 0), canHost });
+  try {
+    const start = app.root.querySelector<HTMLButtonElement>('[data-action="start"]');
+    if (!canHost) {
+      expect(start).toBeNull();
+      return;
+    }
+    const copy = app.root.querySelector('[data-action="copy-invite"]');
+    expect(copy).not.toBeNull();
+    expect(copy?.nextElementSibling).toBe(start);
+    expect(start?.closest("details")?.id).toBe("room-invite");
+    expect(app.root.querySelector<HTMLDetailsElement>("#room-invite")?.open).toBe(true);
+    expect(start?.disabled).toBe(!enabled);
+    expect(app.root.querySelectorAll('[data-action="start"]')).toHaveLength(1);
+    if (!enabled) expect(app.root.querySelector("#room-invite")?.textContent).toContain("Invite another player");
+  } finally { app.cleanup(); }
+});
+
 it("opens an invite with its room code filled in and ready to join", () => {
   sessionStorage.clear();
   history.replaceState(null, "", "/?room=ABCDEFGH");
@@ -1283,17 +1318,17 @@ it.each(["test", "normal"] as const)("shows saved %s range settings without lega
   expect(root.querySelector<HTMLInputElement>("#entryRadiusM")?.value).toBe("12");
   expect(root.querySelector("#deviceLimitations")).toBeNull();
   expect(root.querySelector("#playArea")).toBeNull();
-  expect(root.querySelector<HTMLButtonElement>('[data-action="start"]')?.disabled).toBe(false);
   expect(root.querySelector('[data-action="approve"]')).toBeNull();
 });
 
 it("uses game defaults for legacy unconfigured snapshots without blocking start", () => {
   const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"], "normal"), "p1", 0), canHost: true,
     parameters: null, approved: false, deviceLimitations: "" };
-  const root = document.createElement("section");
-  renderMatch(root, snapshot, actions);
-  expect(root.querySelector<HTMLInputElement>("#entryRadiusM")?.value).toBe("30");
-  expect(root.querySelector<HTMLButtonElement>('[data-action="start"]')?.disabled).toBe(false);
+  const app = browserApp(snapshot);
+  try {
+    expect(app.root.querySelector<HTMLInputElement>("#entryRadiusM")?.value).toBe("30");
+    expect(app.root.querySelector<HTMLButtonElement>('[data-action="start"]')?.disabled).toBe(false);
+  } finally { app.cleanup(); }
 });
 
 it("offers the host's player join before the setup form", () => {

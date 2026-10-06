@@ -129,22 +129,19 @@
   {/if}
 </div>
 
-{#if snapshot.phase === "lobby" || snapshot.phase === "ended" || !snapshot.radar}
-  <details id="player-roster" open={snapshot.phase === "lobby"}>
-    <summary id="player-roster-toggle">{@render uiIcon(icons.players)}Players ({snapshot.roster.length})</summary>
+{#if !snapshot.radar}
+  <section id="player-roster" aria-labelledby="player-roster-heading">
+    <h3 id="player-roster-heading">{@render uiIcon(icons.players)}Players ({snapshot.roster.length})</h3>
     <ul class="roster">
       {#each snapshot.roster as player (player.id)}
         <li><img class="faction-icon" data-faction={player.faction} src={symbols[player.faction]} alt="" aria-hidden="true" />{player.label} - {player.faction}{player.id === snapshot.ownPlayerId ? " (you)" : ""}</li>
       {/each}
     </ul>
-  </details>
+  </section>
 {/if}
 {#if snapshot.canHost}
   <section class="host-controls">
-    {#if snapshot.phase === "lobby"}
-      <button type="button" id="action-start" data-action="start" disabled={snapshot.roster.length < 2} onclick={actions.start}>{@render uiIcon(icons.play)}Start game</button>
-      {#if snapshot.roster.length < 2}<p>Invite another player to start.</p>{/if}
-    {:else if snapshot.phase === "paused"}
+    {#if snapshot.phase === "paused"}
       <button type="button" id="action-begin-resume" data-action="begin-resume" onclick={actions.beginResume}>{@render uiIcon(icons.play)}Resume round</button>
     {/if}
     <details id="host-tools" bind:this={hostTools}>

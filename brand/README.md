@@ -54,6 +54,8 @@ build and a server. The app does not load the Lottie player or animation.
 
 An implied ball paints two bounces from left to right; no ball is drawn.
 Yellow leads, red paints the first arch, and blue completes the second.
+On the second upswing, yellow paints over red at the shared stem before
+blue covers it. Red covers the first yellow arch.
 The paint stays in place, with a flat turn at the center baseline and no
 paint extending below it. Every color draws at a constant speed, taking
 0.7 seconds per arch. Yellow has a 0.2-second lead. The entrance takes

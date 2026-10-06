@@ -570,6 +570,11 @@ export function mountApp(root: HTMLElement): () => void {
           await navigator.clipboard.writeText(invite.href);
           inviteStatus = "Link copied."; render();
         }, "copy-invite", "secondary", icons.copy);
+        if (snapshot?.canHost && snapshot.phase === "lobby") {
+          const start = button(invites, "Start game", () => sendCommand({ type: "start" }), "start", "", icons.play);
+          start.disabled = snapshot.roster.length < 2;
+          if (start.disabled) text(invites, "p", "Invite another player to start.");
+        }
         if (inviteStatus) text(invites, "p", inviteStatus, "state-line").setAttribute("role", "status");
       }
       if (!snapshot) text(root, "p", "Connecting to the private match. Location is not collected.");
@@ -590,7 +595,7 @@ export function mountApp(root: HTMLElement): () => void {
             "Sharing will resume when connected and visible." : "Location sharing is off" : null;
         section.append(game);
         renderMatch(game, snapshot, {
-          start: () => sendCommand({ type: "start" }), pause: () => sendCommand({ type: "pause" }),
+          pause: () => sendCommand({ type: "pause" }),
           beginResume: () => sendCommand({ type: "begin_resume" }), cancelResume: () => sendCommand({ type: "cancel_resume" }),
           end: () => sendCommand({ type: "end" }), configure: sendCommand,
           setFaction: (playerId, faction) => sendCommand({ type: "set_faction", playerId, faction }), leave,

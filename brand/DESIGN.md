@@ -133,7 +133,9 @@ to the identity palette.
 
 The separate [motion preview](motion.html) draws the paired mark as paint
 left by an implied bouncing ball. No ball is visible. Yellow leads, red
-follows through the first arch, and blue finishes the second. Every color
+follows through the first arch, and blue finishes the second. The second
+yellow upswing paints over red at the shared stem, then blue covers it.
+The first yellow arch stays beneath red. Every color
 draws at a constant speed, taking 0.7 seconds per arch, with no easing at
 the apex or baseline. The center turn stays flat at the baseline; no
 yellow curve extends below it. The finished paint stays still; the mark
@@ -294,7 +296,11 @@ and upright distance labels. Named hand icons and target/threat indicators
 retain their game meanings.
 Radar ring labels and the caption show half-range and full-range distances.
 
-Player names, roles, and approximate distances stay visible. Desktop pairs
+Player names, roles, and approximate distances stay visible, without a
+duplicate Players dropdown in the waiting room. When the distance list is
+unavailable, a plain roster stays visible. Start game sits next to Copy
+invite link for the lobby host and requires at least two joined players.
+Desktop pairs
 the list and controls with the radar; at 640px or less they precede the radar.
 Short landscape screens retain two columns. Stale positions are labeled,
 and GPS details remain in disclosures. App styling lives in
