@@ -134,9 +134,8 @@ to the identity palette.
 The separate [motion preview](motion.html) draws the paired mark as paint
 left by an implied bouncing ball. No ball is visible. Yellow paints both
 arches, then red follows through the first and blue finishes the second.
-Each color starts 0.1 seconds before the previous color finishes. The second
-yellow arch stays above red at the shared stem until blue covers it.
-The first yellow arch stays beneath red. Every color
+Each color starts 0.1 seconds before the previous color finishes. Both yellow
+arches stay beneath red and blue. Blue covers red at the shared stem. Every color
 draws at a constant speed, taking 0.7 seconds per arch, with no easing at
 the apex or baseline. The center turn stays flat at the baseline; no
 yellow curve extends below it. The finished paint stays still; the mark

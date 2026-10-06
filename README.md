@@ -124,7 +124,7 @@ symbol. Gameplay rules and faction assignments are unchanged.
 Open `/brand/motion.html` to preview or download the Lottie animation.
 Yellow leads across both arches, then red paints the first and blue paints
 the second. Each color starts 0.1 seconds before the previous color finishes.
-The second yellow arch stays above red until blue covers it. Each arch takes
+The yellow paint stays beneath red and blue. Each arch takes
 0.7 seconds; the full sequence takes 3 seconds, including a 0.4-second final
 hold. The preview plays once and shows the static mark for reduced motion
 or a loading failure. The gameplay app does not load the animation.

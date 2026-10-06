@@ -76,10 +76,12 @@ test("draws each color at constant speed with equal time per arch", async ({ pag
   }
 });
 
-test("shows the second yellow upswing over red before blue covers it", async ({ page }) => {
+test("keeps red over yellow until blue covers the shared stem", async ({ page }) => {
   await page.goto("/brand/motion.html");
   await expect(page.getByLabel("Animation progress")).toBeEnabled();
-  for (const [frame, color] of [[118, [242, 207, 69, 255]], [122, [105, 181, 245, 255]]] as const) {
+  for (const [frame, color] of [
+    [110, [242, 207, 69, 255]], [118, [235, 98, 86, 255]], [122, [105, 181, 245, 255]],
+  ] as const) {
     await seek(page, frame);
     expect((await paint(page)).sharedStem, `shared stem at frame ${frame}`).toEqual(color);
   }

@@ -59,8 +59,8 @@ const animation = {
   nm: "Monk - Painted bounce", assets: [],
   layers: [
     paint("Scissors blue", 1, [105, 181, 245], right, blueStart, archFrames),
-    paint("Paper yellow second bounce", 2, [242, 207, 69], right, archFrames, archFrames, finishFrame),
-    paint("Rock red", 3, [235, 98, 86], left, redStart, archFrames),
+    paint("Rock red", 2, [235, 98, 86], left, redStart, archFrames),
+    paint("Paper yellow second bounce", 3, [242, 207, 69], right, archFrames, archFrames, finishFrame),
     paint("Paper yellow first bounce", 4, [242, 207, 69], left, 0, archFrames, finishFrame),
   ],
   markers: [
