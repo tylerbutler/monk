@@ -68,14 +68,19 @@ Monk wordmark. Colors exchange while both forms remain. The identity is
 minimalist but distinct: flat fields, open space, and short, friendly lines.
 The lead line is "Change sides. Keep playing."
 
-This record covers the built identity kit in `brand/`, not a landing-page
-template or an app restyling. It records the approved palette-only revision
+This record covers the built identity kit in `brand/` and its approved app
+application below. It records the approved palette-only revision
 of the code-led Side by Side direction; there was no approved image comp.
 Geometry, typography, and composition structure remain intact. The prior
 palette's review disposition does not certify this revision; no external
 review verdict for this revision is recorded here. The repository's
 `PRODUCT.md` remains product truth; root `DESIGN.md` remains the game/system
 concept document.
+
+The bounded app extension received a finish disposition of **ship, no material
+fixes**, based on seven required captures and sampled source. This confirms
+the inherited identity's app application, not a new visual world or a full
+marketing-kit re-review; it does not extend the prior palette review.
 
 **Key Characteristics:**
 - Custom path lettering and two matching arches.
@@ -150,6 +155,13 @@ introductions and type/voice copy narrow to 47ch. Headings use balanced
 wrapping. Sentence case, bold short headlines, and regular instructions
 carry the voice; there is no separate mono or icon font.
 
+The frontmatter hierarchy above describes the kit, not the app's fixed-rem
+sizes. The app uses body text (1rem, line-height 1.55), section headings
+(1.6rem), and subheadings (1.15rem). Entry lead type is 3rem, reducing to
+2rem at 640px or less. Running/paused faction headings and clocks use 2rem,
+reducing to 1.75rem at 480px or less. Player distance numerals stay 1.8rem
+with 1.1 leading; distances and clocks use tabular numerals.
+
 **The Lettering Is Artwork Rule.** Hanken Grotesk supports the identity; it is not the wordmark. Use the supplied SVG paths instead of typing or redrawing "monk".
 
 ## Layout
@@ -181,6 +193,19 @@ Marketing samples preserve their wide (1200 / 630) and square (1 / 1)
 aspect ratios. Container-relative headline sizes (7.4cqw wide, 8.4cqw square)
 and percentage positioning keep their composition proportional; these are
 two shipped sample layouts, not a universal spacing scale.
+
+The app instead centers a 48rem shell within `100% - 2.5rem`; at 480px or
+less its width is `100% - 2rem`. Homepage width is capped at 72rem within
+`100% - 2rem`; valid-invite entry is capped at 36rem. Desktop radar/list
+columns are `minmax(0, 20rem) minmax(0, 1fr)` with a 1.5rem gap.
+The player list has an 18rem maximum height with vertical scrolling. At 640px or less,
+entry stacks and gameplay orders players, readout/controls, radar, then
+details; radar width becomes `min(100%, 17.5rem, 36svh)`.
+The later landscape exception at `max-height: 500px` restores equal
+two-column radar/list layout with a 1rem gap and radar width
+`min(100%, 52svh)`, overriding the list-first layout even below 640px.
+Running/paused HUD padding is 1rem, reducing to .75rem at 640px or less;
+the game shell also respects safe-area insets.
 
 ## Elevation & Depth
 
@@ -233,6 +258,33 @@ Asset sheets pair large artwork with a caption and a download link. Wordmark
 sheets have roomy padding and a dark reversed variant; symbol stages have
 a local pale background (`#f5f5f5`). They are presentation sheets, not an
 app card family.
+
+### App application
+
+The app reuses the original wordmark, paired symbol, local Hanken Grotesk
+font, ink/white controls, and exact faction colors. Entry leads with room
+actions and a compact yellow introduction; valid invitations prioritize
+joining. Short rules follow entry, with full rules in a closed disclosure.
+Malformed room-code submissions retain inputs, mark the field invalid,
+associate the error text, and return focus to the code field. App keyboard
+focus uses a 3px ink outline with a 3px offset, separate from kit focus.
+Location sharing remains off until explicitly chosen, with a visible
+sharing state and Stop sharing action; gameplay and privacy are unchanged.
+
+During running and paused play, a larger color field follows the player's
+own faction. Text stays ink on every faction field; an observer without a
+faction uses a neutral field. The radar has an ink face, light range rings,
+and upright distance labels. Named hand icons and target/threat indicators
+retain their game meanings.
+Radar ring labels and the caption show half-range and full-range distances.
+
+Player names, roles, and approximate distances stay visible. Desktop pairs
+the list and controls with the radar; at 640px or less they precede the radar.
+Short landscape screens retain two columns. Stale positions are labeled,
+and GPS details remain in disclosures. App styling lives in
+`src/client/styles.css`, separate from the kit preview's layout rules;
+entry and state evidence is in `src/client/app.ts`, `Match.svelte`, and
+`Radar.svelte` in the same directory.
 
 ### Download action and navigation
 
@@ -294,5 +346,5 @@ original artwork is not a trademark-clearance claim.
 - **Don't** typeset the wordmark in Hanken Grotesk or another font.
 - **Don't** use a paired-color symbol below 48px wide.
 - **Don't** use white text on faction-color fields; use ink text on all three colors.
-- **Don't** reassign faction colors or restyle the app from this kit.
+- **Don't** reassign faction colors or change gameplay through visual updates.
 - **Don't** present sample graphics as app screenshots or claim trademark clearance.

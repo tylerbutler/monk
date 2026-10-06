@@ -10,6 +10,7 @@
   } = $props();
   const radar = $derived(snapshot.radar);
   const reference = $derived(radar?.reference);
+  const referenceCurrent = $derived(live && !!reference && isCurrentPosition(reference, elapsedMs));
   const layout = $derived(radarLayout(snapshot));
   const heading = $derived(headingDegrees ?? 0);
   const maxAccuracy = $derived(snapshot.parameters?.maxAccuracyM ?? gamePreset.maxAccuracyM);
@@ -23,6 +24,47 @@
 </script>
 
 <div class="radar-layout" data-match-activity>
+  {#if radar}
+    <section class="player-overview" aria-label="Player distances">
+      <h3>Player distances</h3>
+      <p class="distance-reference">{reference ? `Approximate distances from ${referenceName}.` : "Location needed for distances."}</p>
+      <ol class="radar-players">
+        {#each radar.players as p (p.playerId)}
+          {@const player = snapshot.roster.find(player => player.id === p.playerId)}
+          {#if player}
+            {@const relation = relationship(snapshot, player.faction, player.id)}
+            {@const attack = attackFor(snapshot, player.id)}
+            {@const current = referenceCurrent && isCurrentPosition(p.position, elapsedMs)}
+            <li data-player-id={player.id} data-relationship={relation} data-current={String(current)}
+              data-influence={!attack ? "none" : snapshot.outgoing?.targetId === player.id ? "outgoing" : "incoming"}>
+              <div class="player-summary">
+                <div class="radar-player-heading">
+                  <strong><img class="faction-icon" data-faction={player.faction} src={symbols[player.faction]} alt="" aria-hidden="true" />{player.label}</strong>
+                  <span class="player-faction">{names[player.faction]}</span>
+                  {#if relation !== "player"}<span class="radar-relationship" data-relationship={relation}>{radarRoles[relation].label}</span>{/if}
+                </div>
+                {#if p.position}
+                  <p class="player-distance">
+                    <span class="distance-qualifier">{p.position.distanceM === 0 ? "Within about " : "about "}</span><strong>{p.position.distanceM === 0 ? 5 : p.position.distanceM} m</strong>{p.position.distanceM === 0 ? "." : ` ${directions[p.position.bearingDegrees / 45]}`}
+                  </p>
+                {:else}<p class="player-distance unavailable">Waiting for location.</p>{/if}
+              </div>
+              {#if attack}<p class="radar-combat-status">{combatLabel(snapshot, player)} - {Math.round(attack.progress * 100)}%.</p>{/if}
+              {#if p.position}
+                {#if !current}<p class="radar-location-state">Last-known position.</p>{/if}
+                {#if p.position.accuracyM > maxAccuracy || (reference && reference.accuracyM > maxAccuracy)}<p class="radar-location-state">Location is approximate.</p>{/if}
+                <details class="player-location-details">
+                  <summary>Location details</summary>
+                  <p class="radar-note">GPS uncertainty {p.position.accuracyM} m. {updated(p.position.ageMs, elapsedMs)}.</p>
+                </details>
+              {/if}
+            </li>
+          {/if}
+        {/each}
+      </ol>
+      {#if !radar.players.length}<p class="radar-note">No other players to show yet.</p>{/if}
+    </section>
+  {/if}
   <section class="player-radar" aria-label="Player radar" data-radar-display>
     {#if snapshot.ownFaction}
       <div class="radar-guide" aria-label="Faction guide">
@@ -39,9 +81,11 @@
       <figure>
         <svg viewBox="0 0 320 320" aria-hidden="true" data-radar>
           <circle cx="160" cy="160" r="136" class="radar-face" />
+          {#each [60, 120] as radius}
+            <circle cx="160" cy="160" r={radius} class="radar-ring" />
+            <text x="166" y={160 - radius - 5} class="radar-range-label">{layout.scale * radius / 120} m</text>
+          {/each}
           <g data-radar-world transform="rotate({-heading} 160 160)">
-            <circle cx="160" cy="160" r="60" class="radar-ring" />
-            <circle cx="160" cy="160" r="120" class="radar-ring" />
             <path d="M160 40V280M40 160H280" class="radar-axis" />
             {#if snapshot.parameters}
               <circle cx="160" cy="160" r={120 * snapshot.parameters.entryRadiusM / layout.scale} class="radar-entry" />
@@ -70,7 +114,7 @@
                 {@const role = radarRoles[relation]}
                 <g transform="translate({m.markerX} {m.markerY})" data-radar-player={m.player.id}
                   data-relationship={relation} data-influence={m.influence} data-faction={m.player.faction}
-                  data-current={String(live && isCurrentPosition(m.position, elapsedMs))} class="radar-marker">
+                  data-current={String(referenceCurrent && isCurrentPosition(m.position, elapsedMs))} class="radar-marker">
                   <title>{m.index + 1}. {m.player.label} - {names[m.player.faction]} - {role.label}{m.attack ? `. ${combatLabel(snapshot, m.player)} - ${Math.round(m.attack.progress * 100)}%.` : ""}</title>
                   <g data-radar-upright transform="rotate({heading} 0 0)">
                     {#if m.attack}
@@ -94,10 +138,10 @@
               {/each}
             </g>
           </g>
-          <circle cx="160" cy="160" r="7" class="radar-center" data-current={String(live && isCurrentPosition(reference, elapsedMs))} />
+          <circle cx="160" cy="160" r="7" class="radar-center" data-current={String(referenceCurrent)} />
           <text x="160" y="186" text-anchor="middle" class="radar-compass">{reference.playerId === snapshot.ownPlayerId ? "You" : "Reference"}</text>
         </svg>
-        <figcaption class="radar-note">Outer ring: {layout.scale} m{reference.playerId !== snapshot.ownPlayerId ? `. Reference: ${referenceName}` : ""}</figcaption>
+        <figcaption class="radar-note">Rings: {layout.scale / 2} m / {layout.scale} m{reference.playerId !== snapshot.ownPlayerId ? `. Reference: ${referenceName}` : ""}</figcaption>
       </figure>
       {#if !isCurrentPosition(reference, elapsedMs)}<p class="radar-location-state">Last-known position.</p>{/if}
       {#if reference.accuracyM > maxAccuracy}<p class="warning radar-note">Location is approximate.</p>{/if}
@@ -108,7 +152,7 @@
   <div class="hud-readout">{@render children()}</div>
   {#if radar}
     <details id="radar-details" class="radar-details">
-      <summary id="radar-details-toggle"><img class="ui-icon" src={icons.players} alt="" aria-hidden="true" />Players &amp; radar details ({snapshot.roster.length})</summary>
+      <summary id="radar-details-toggle"><img class="ui-icon" src={icons.players} alt="" aria-hidden="true" />Radar details ({snapshot.roster.length})</summary>
       <p class="radar-note" data-radar-orientation-note>{headingDegrees === null ? "North stays at the top." : "Heading-up: the top follows your phone."} Numbers match the player list.</p>
       <p class="radar-note">T: target. !: threat. =: same faction. Faction roles only. Arrows and rings show confirmed influence. Dashed circle: entry radius. Thin lines locate offset markers.</p>
       <p class="radar-note">Influence must stay confirmed until the bar fills. Leaving range or losing location quality stops progress.</p>
@@ -116,29 +160,6 @@
         <p class="state-line">Reference: {referenceName}</p>
         <p class="radar-note">GPS uncertainty {reference.accuracyM} m. {updated(reference.ageMs, elapsedMs)}.</p>
       {/if}
-      <ol class="radar-players">
-        {#each radar.players as p (p.playerId)}
-          {@const player = snapshot.roster.find(player => player.id === p.playerId)}
-          {#if player}
-            {@const relation = relationship(snapshot, player.faction, player.id)}
-            {@const attack = attackFor(snapshot, player.id)}
-            <li data-player-id={player.id} data-relationship={relation}
-              data-influence={!attack ? "none" : snapshot.outgoing?.targetId === player.id ? "outgoing" : "incoming"}>
-              <div class="radar-player-heading">
-                <strong><img class="faction-icon" data-faction={player.faction} src={symbols[player.faction]} alt="" aria-hidden="true" />{player.label} - {names[player.faction]}</strong>
-                {#if relation !== "player"}<span class="radar-relationship" data-relationship={relation}>{radarRoles[relation].label}</span>{/if}
-              </div>
-              {#if attack}<p class="radar-combat-status">{combatLabel(snapshot, player)} - {Math.round(attack.progress * 100)}%.</p>{/if}
-              {#if p.position}
-                <p>{p.position.distanceM === 0 ? "Within about 5 m." : `about ${p.position.distanceM} m ${directions[p.position.bearingDegrees / 45]}`}</p>
-                <p class="radar-note">GPS uncertainty {p.position.accuracyM} m. {updated(p.position.ageMs, elapsedMs)}.</p>
-                {#if p.position.accuracyM > maxAccuracy}<p class="radar-note">Location is approximate.</p>{/if}
-                {#if !live || !isCurrentPosition(p.position, elapsedMs)}<p class="radar-location-state">Last-known position.</p>{/if}
-              {:else}<p class="radar-note">Waiting for location.</p>{/if}
-            </li>
-          {/if}
-        {/each}
-      </ol>
     </details>
   {/if}
 </div>

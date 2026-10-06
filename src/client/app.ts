@@ -5,6 +5,8 @@ import type { CompassState } from "./compass";
 import { addTrialSample, exportTrialSummary, newTrialSummary } from "./trial";
 import { describeEvent, names, symbols, targets } from "./views";
 import { icons } from "./icons";
+import wordmark from "../../brand/assets/wordmark.svg?url";
+import pairedMark from "../../brand/assets/symbol-paired.svg?url";
 import { destroyMatch, renderActivity, renderMatch, setRadarHeading } from "./match-view.svelte";
 import { deviceSchema, gamePreset, isFactionChange, sessionCredentialsSchema } from "../shared/protocol";
 import type { ConnectionStatus, EngineEvent, HostCommand, LocationStatus, MatchConnection, PlayerSnapshot, ServerMessage, SessionCredentials, TrialSample, TrialStatus, TrialSummary } from "../shared/protocol";
@@ -39,8 +41,6 @@ function renderRules(parent: HTMLElement) {
   section.id = "how-to-play"; section.className = "rules";
   section.setAttribute("aria-labelledby", "rules-heading"); parent.append(section);
   text(section, "h2", "How to play").id = "rules-heading";
-  text(section, "p", "Play together. Change sides.", "rules-lead");
-  text(section, "p", "Monk is outdoor rock-paper-scissors. Find other players on radar and stay near a target to convert them to your faction.");
 
   const cycle = document.createElement("ul"); cycle.className = "faction-cycle"; section.append(cycle);
   for (const faction of ["rock", "scissors", "paper"] as const) {
@@ -57,19 +57,21 @@ function renderRules(parent: HTMLElement) {
 
   const steps = document.createElement("ol"); steps.className = "rules-steps"; section.append(steps);
   for (const [heading, description] of [
-    ["Find your target", "Your faction determines who you can convert and who can convert you. Check the radar for targets and threats. Players in your own faction cannot convert you."],
-    ["Stay in range", `Conversion starts automatically when both players share usable locations and the game confirms range. Stay in range for ${gamePreset.dwellMs / 1000} seconds by default. Watch the progress indicator; an interruption resets progress.`],
-    ["Change sides. Keep playing.", `When someone converts you, you join their faction and stay in the game. You get a short grace period before anyone can convert you again. Your targets and threats change with your faction.`],
+    ["Find your target", "Your faction decides who you can convert. Check the player list and radar for targets and threats."],
+    ["Stay in range", "Stay near your target while the progress bar fills. Wait for the conversion to be confirmed."],
+    ["Change sides. Keep playing.", "When someone converts you, join their faction and stay in the game. Your targets change too."],
   ]) {
     const item = document.createElement("li"); steps.append(item);
     text(item, "h3", heading); text(item, "p", description);
   }
 
-  const setup = document.createElement("div"); setup.className = "rules-setup"; section.append(setup);
+  const setup = document.createElement("details"); setup.id = "rules-details"; setup.className = "rules-setup"; section.append(setup);
+  text(setup, "summary", "Full rules and round settings");
+  text(setup, "p", `Conversion starts automatically when both players share usable locations and the game confirms range. Stay in range for ${gamePreset.dwellMs / 1000} seconds by default. An interruption resets progress. Players in your own faction cannot convert you.`);
+  text(setup, "p", "After conversion, a short grace period prevents anyone from converting you again. Your targets and threats change with your faction.");
   text(setup, "h3", "Before you start");
   text(setup, "p", `Create a room or join with an invite link or room code. The host can start with two players. A round lasts ${gamePreset.roundDurationMs / 60000} minutes by default, or until the host ends it. The host can change the settings before play.`);
   text(setup, "p", "Select Share location when you are ready to take part in conversions. Keep the app visible and the screen on. Radar positions are approximate; a nearby marker alone does not confirm a conversion.");
-  text(setup, "p", "Agree on a bounded outdoor area and safe routes. No running or touching is needed.");
 }
 
 export function mountApp(root: HTMLElement): () => void {
@@ -94,6 +96,7 @@ export function mountApp(root: HTMLElement): () => void {
   let compass: CompassState = { enabled: false, headingDegrees: null, reason: null };
   let stopCompass: (() => void) | null = null, compassFramePending = false;
   let error = "";
+  let errorField = "";
   let inviteStatus = "";
   let diagnosticStatus = "";
   const rawInvite = new URLSearchParams(window.location.search).get("room");
@@ -103,7 +106,14 @@ export function mountApp(root: HTMLElement): () => void {
   const retained = new Map<string, { value: string; checked: boolean }>();
   const disclosures = new Map<string, boolean>();
 
-  function showError(reason: string) { error = reason; render(); }
+  function showError(reason: string, fieldId = "") {
+    error = reason; errorField = fieldId; render();
+    if (fieldId) {
+      const field = root.querySelector<HTMLElement>(`#${fieldId}`);
+      field?.focus({ preventScroll: true });
+      field?.scrollIntoView?.({ block: "center" });
+    } else if (!credentials) root.querySelector(".error")?.scrollIntoView?.({ block: "nearest" });
+  }
   function stopLiveUpdates() {
     snapshotLive = false;
   }
@@ -128,15 +138,18 @@ export function mountApp(root: HTMLElement): () => void {
       applyCompass();
     }
   }
-  function button(parent: HTMLElement, label: string, action: () => void | Promise<void>, name: string, className = "", icon?: string) {
+  function button(parent: HTMLElement, label: string, action: () => void | Promise<void>, name: string, className = "", icon?: string, busyLabel?: string) {
     const node = document.createElement("button");
-    node.type = "button"; node.textContent = label; node.dataset.action = name; node.className = className;
+    const caption = document.createTextNode(label);
+    node.type = "button"; node.append(caption); node.dataset.action = name; node.className = className;
     node.id = `action-${name}`;
     if (icon) addIcon(node, icon);
     node.addEventListener("click", async () => {
       node.disabled = true;
+      node.setAttribute("aria-busy", "true");
+      if (busyLabel) caption.data = busyLabel;
       try { await action(); } catch (failure) { showError(failure instanceof Error ? failure.message : "Request failed. Try again."); }
-      finally { node.disabled = false; }
+      finally { node.disabled = false; node.removeAttribute("aria-busy"); caption.data = label; }
     });
     parent.append(node); return node;
   }
@@ -457,8 +470,11 @@ export function mountApp(root: HTMLElement): () => void {
     }
     root.replaceChildren();
     root.classList.toggle("in-game", playing);
+    root.classList.toggle("homepage", !credentials);
     const header = document.createElement("header"); header.className = "masthead"; root.append(header);
-    text(header, "h1", "Monk");
+    const title = text(header, "h1", "");
+    const logo = document.createElement("img");
+    logo.src = wordmark; logo.alt = "Monk"; logo.width = 104; logo.height = 32; title.append(logo);
     if (!credentials) {
       const skip = document.createElement("a"); skip.href = "#play"; skip.className = "skip-to-play";
       skip.textContent = "Skip to play"; header.append(skip);
@@ -481,29 +497,57 @@ export function mountApp(root: HTMLElement): () => void {
     }
     if (error && credentials) { const alert = text(root, "p", error, "error"); alert.setAttribute("role", "alert"); }
     if (!credentials) {
-      renderRules(root);
+      const entry = document.createElement("div"); entry.className = "entry-layout"; entry.dataset.invited = String(validInvite); root.append(entry);
+      if (!validInvite) {
+        const intro = document.createElement("div"); intro.className = "entry-intro"; entry.append(intro);
+        const lead = text(intro, "h2", "Change sides.");
+        lead.append(document.createElement("br"), document.createTextNode("Keep playing."));
+        text(intro, "p", "An outdoor Rock, Paper, Scissors game for friends.");
+        const mark = document.createElement("img");
+        mark.src = pairedMark; mark.alt = ""; mark.width = 140; mark.height = 120; intro.append(mark);
+      }
       const area = document.createElement("section"); area.id = "play"; area.tabIndex = -1;
-      area.setAttribute("aria-labelledby", "play-heading"); root.append(area);
-      text(area, "h2", "Play with friends").id = "play-heading";
+      area.setAttribute("aria-labelledby", "play-heading"); entry.append(area);
+      text(area, "h2", validInvite ? "Join your friends." : "Play with friends").id = "play-heading";
       if (validInvite) text(area, "p", `You are invited to room ${invitedCode}.`);
       const name = field(area, "Display name (optional)", "displayName"); name.maxLength = 80; name.autocomplete = "off";
-      button(area, "Create room", async () => { connect(await request("/api/matches", { label: name.value.trim() })); }, "create", validInvite ? "secondary" : "", icons.create);
-      if (error) { const alert = text(area, "p", error, "error"); alert.setAttribute("role", "alert"); }
+      const create = () => button(area, "Create room", async () => {
+        connect(await request("/api/matches", { label: name.value.trim() }));
+      }, "create", validInvite ? "secondary" : "", icons.create, "Creating room...");
+      if (!validInvite) create();
+      if (error && errorField !== "matchCode") { const alert = text(area, "p", error, "error"); alert.setAttribute("role", "alert"); }
       const form = document.createElement("form"); form.className = "join-form"; area.append(form);
       const code = field(form, "Room code", "matchCode", "text", validInvite ? invitedCode : "");
       code.required = true; code.maxLength = 8; code.autocomplete = "off";
+      code.autocapitalize = "characters"; code.spellcheck = false;
       if (validInvite && code.parentElement) code.parentElement.hidden = true;
-      const submit = document.createElement("button"); submit.type = "submit"; submit.textContent = "Join room"; form.append(submit);
+      if (!validInvite) {
+        text(form, "p", "Enter the eight-character code from your host.", "input-help").id = "room-code-hint";
+        code.setAttribute("aria-describedby", "room-code-hint");
+      }
+      if (error && errorField === "matchCode") {
+        const alert = text(form, "p", error, "error"); alert.id = "room-code-error"; alert.setAttribute("role", "alert");
+        code.setAttribute("aria-invalid", "true");
+        code.setAttribute("aria-describedby", "room-code-hint room-code-error");
+      }
+      const submit = document.createElement("button"); submit.type = "submit"; submit.id = "action-join"; form.append(submit);
+      const caption = document.createTextNode("Join room"); submit.append(caption);
       addIcon(submit, icons.join);
       form.addEventListener("submit", async event => {
-        event.preventDefault(); submit.disabled = true;
+        event.preventDefault();
+        const matchCode = code.value.trim().toUpperCase();
+        if (!/^[A-Z2-9]{8}$/.test(matchCode)) {
+          showError("Enter the eight-character room code.", "matchCode"); return;
+        }
+        submit.disabled = true; submit.setAttribute("aria-busy", "true"); caption.data = "Joining room...";
         try {
-          const matchCode = code.value.trim().toUpperCase();
-          if (!/^[A-Z2-9]{8}$/.test(matchCode)) throw new Error("Enter the eight-character room code.");
           connect(await request(`/api/matches/${matchCode}/join`, { label: name.value.trim() }));
         } catch (failure) { showError(failure instanceof Error ? failure.message : "Join failed. Try again."); }
-        finally { submit.disabled = false; }
+        finally { submit.disabled = false; submit.removeAttribute("aria-busy"); caption.data = "Join room"; }
       });
+      if (validInvite) create();
+      text(area, "p", "Location sharing stays off until you choose Share location. Agree on a safe outdoor play area.", "entry-safety");
+      renderRules(root);
     } else {
       const top = document.createElement("div"); top.className = "match-heading";
       if (!playing) root.append(top);
@@ -610,7 +654,7 @@ export function mountApp(root: HTMLElement): () => void {
       if (location.reason && location.reason !== error) text(status, "p", location.reason, "warning");
     }
     const safety = document.createElement("footer"); root.append(safety);
-    const help = document.createElement("details"); help.id = "safe-play"; help.open = !playing; safety.append(help);
+    const help = document.createElement("details"); help.id = "safe-play"; help.open = !!credentials && !playing; safety.append(help);
     help.dataset.context = playing ? "game" : "setup";
     text(help, "summary", "Location and safe play", "", icons.safety).id = "safe-play-toggle";
     text(help, "p", "Agree on a bounded outdoor area and safe routes. No running or touching is needed. You can leave without a gameplay penalty. Keep this app visible and the screen on.");

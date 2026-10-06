@@ -42,6 +42,12 @@ test("loads legible faction icons and keeps badge colors consistent through fact
     const own = duel.host.locator(".own-faction");
     const marker = duel.guest.locator('[data-radar-player][data-relationship]');
     await expect(own).toHaveAttribute("data-faction", faction);
+    await expect(duel.host.locator(".game-hud")).toHaveAttribute("data-faction", faction);
+    await expect(duel.host.locator(".game-hud")).toHaveCSS("background-color", background);
+    await expect(duel.host.locator(".radar-range-label")).toHaveCount(2);
+    await expect(duel.host.locator(".player-distance").first()).toBeVisible();
+    const foreground = await duel.host.locator(".player-distance").first().evaluate(element => getComputedStyle(element).color);
+    expect((luminance(background) + .05) / (luminance(foreground) + .05)).toBeGreaterThanOrEqual(4.5);
     await expect.poll(() => own.locator("h2").evaluate(element =>
       element.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(element).lineHeight))).toBe(1);
     await expect(marker).toHaveAttribute("data-faction", faction);
@@ -52,5 +58,8 @@ test("loads legible faction icons and keeps badge colors consistent through fact
     const badge = duel.guest.locator('.radar-players .faction-icon');
     await expect(badge).toHaveAttribute("data-faction", faction);
     await expect(badge).toHaveAttribute("src", source);
+    await duel.host.evaluate(() => window.scrollTo(0, 0));
+    await expect(duel.host.locator(".player-distance").first()).toBeInViewport({ ratio: 1 });
+    expect(await duel.host.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   }
 });

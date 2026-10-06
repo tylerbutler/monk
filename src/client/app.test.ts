@@ -21,23 +21,50 @@ afterEach(() => {
   mountedViews.clear();
 });
 
-it.each(["/", "/?room=ABCDEFGH"])("puts open rules before room setup at %s without collecting location", path => {
+it.each(["/", "/?room=ABCDEFGH"])("puts room setup before optional detailed rules at %s", path => {
   sessionStorage.clear();
   history.replaceState(null, "", path);
   const root = document.createElement("main");
   document.body.append(root);
   const cleanup = mountApp(root);
   try {
-    const rules = root.querySelector("section");
-    expect(rules?.id).toBe("how-to-play");
+    const rules = root.querySelector("#how-to-play");
+    const play = root.querySelector("#play");
+    if (!rules || !play) throw new Error("Missing entry sections");
+    expect(play.compareDocumentPosition(rules) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(rules?.closest("details, dialog, [hidden]")).toBeNull();
     expect(rules?.getAttribute("aria-labelledby")).toBe(rules?.querySelector("h2")?.id);
+    expect(root.querySelector<HTMLDetailsElement>("#rules-details")?.open).toBe(false);
+    expect(root.querySelector<HTMLDetailsElement>("#safe-play")?.open).toBe(false);
+    expect(root.querySelector(".masthead h1 img")?.getAttribute("alt")).toBe("Monk");
     expect(root.querySelector<HTMLAnchorElement>('a[href="#play"]')?.textContent).toBe("Skip to play");
     expect(root.querySelector("#play")?.contains(root.querySelector('[data-action="create"]'))).toBe(true);
     expect(root.querySelector('input[name="matchCode"]')).not.toBeNull();
     expect(root.textContent).toContain("Location");
     expect(root.textContent).toContain("bounded outdoor area");
   } finally { cleanup(); root.remove(); history.replaceState(null, "", "/"); }
+});
+
+it("keeps invalid room-code recovery at the field and preserves the entered name", () => {
+  sessionStorage.clear();
+  const root = document.createElement("main"); document.body.append(root);
+  const cleanup = mountApp(root);
+  try {
+    const code = root.querySelector<HTMLInputElement>("#matchCode");
+    const name = root.querySelector<HTMLInputElement>("#displayName");
+    const form = root.querySelector("form");
+    const submit = form?.querySelector("button");
+    if (!code || !name || !form || !submit) throw new Error("Missing room form");
+    name.value = "Sam"; code.value = "BAD"; submit.focus();
+    form.dispatchEvent(new Event("submit", { cancelable: true }));
+    const restored = root.querySelector<HTMLInputElement>("#matchCode");
+    expect(document.activeElement).toBe(restored);
+    expect(restored?.getAttribute("aria-invalid")).toBe("true");
+    expect(restored?.getAttribute("aria-describedby")).toContain("room-code-error");
+    expect(root.querySelector("#room-code-error")?.textContent).toContain("eight-character");
+    expect(restored?.value).toBe("BAD");
+    expect(root.querySelector<HTMLInputElement>("#displayName")?.value).toBe("Sam");
+  } finally { cleanup(); root.remove(); }
 });
 
 it("adds decorative icons without replacing entry action labels", () => {
@@ -86,6 +113,7 @@ it.each(["rock", "paper", "scissors"] as const)("shares the %s icon and faction 
     expect(new Set(references).size).toBe(3);
     const state = pulse(runningFixture([faction, faction]), 0, [0, 60]).state;
     renderMatch(game, snapshotFor(state, "p1", 0), actions);
+    expect(game.querySelector(".game-hud")?.getAttribute("data-faction")).toBe(faction);
     expect(game.querySelector(".own-faction")?.getAttribute("data-faction")).toBe(faction);
     expect(game.querySelector(".own-faction svg image")?.getAttribute("href")).toBe(reference);
     expect(game.querySelector('[data-radar-player="p2"]')?.getAttribute("data-faction")).toBe(faction);
@@ -97,6 +125,48 @@ it.each(["rock", "paper", "scissors"] as const)("shares the %s icon and faction 
     expect(game.querySelectorAll(".roster .faction-icon")).toHaveLength(2);
     expect(game.querySelector(".roster .faction-icon")?.getAttribute("src")).toBe(reference);
   } finally { cleanup(); home.remove(); }
+});
+it("labels radar ranges and keeps player distances outside diagnostics", () => {
+  const root = document.createElement("section");
+  const state = pulse(runningFixture(["rock", "scissors"]), 0, [0, 60]).state;
+  const snapshot = snapshotFor(state, "p1", 0);
+  renderMatch(root, snapshot, actions);
+  expect([...root.querySelectorAll(".radar-range-label")].map(node => node.textContent)).toEqual(["37.5 m", "75 m"]);
+  const players = root.querySelector(".radar-players");
+  expect(players?.closest("details")).toBeNull();
+  expect(players?.querySelector(".player-distance")?.textContent).toContain("about 60 m E");
+  renderMatch(root, snapshot, actions, false);
+  expect(root.querySelector(".radar-players [data-current='false']")).not.toBeNull();
+  expect(root.querySelector(".radar-players")?.textContent).toContain("Last-known position.");
+});
+it("marks distances and markers as last-known when their reference is stale", () => {
+  const root = document.createElement("section");
+  const state = pulse(runningFixture(["rock", "scissors"]), 0, [0, 60]).state;
+  const snapshot = snapshotFor(state, "p1", 0);
+  if (!snapshot.radar?.reference) throw new Error("Missing radar reference");
+  renderMatch(root, {
+    ...snapshot,
+    radar: { ...snapshot.radar, reference: { ...snapshot.radar.reference, active: false } },
+  }, actions);
+  expect(root.querySelector('[data-player-id="p2"]')?.getAttribute("data-current")).toBe("false");
+  expect(root.querySelector('[data-radar-player="p2"]')?.getAttribute("data-current")).toBe("false");
+  expect(root.querySelector(".radar-players")?.textContent).toContain("Last-known position.");
+});
+it("keeps zero-distance estimates, missing positions and peer references explicit", () => {
+  const root = document.createElement("section");
+  const state = pulse(runningFixture(["rock", "scissors"]), 0, [0, 0]).state;
+  const snapshot = snapshotFor(state, "p1", 0);
+  if (!snapshot.radar?.reference) throw new Error("Missing radar reference");
+  renderMatch(root, { ...snapshot, ownPlayerId: null, ownFaction: null }, actions);
+  expect(root.querySelector(".game-hud")?.hasAttribute("data-faction")).toBe(false);
+  expect(root.querySelector(".distance-reference")?.textContent).toBe("Approximate distances from Player 1.");
+  expect(root.querySelector(".player-distance")?.textContent).toContain("Within about 5 m.");
+  renderMatch(root, {
+    ...snapshot,
+    radar: { ...snapshot.radar, reference: null, players: [{ playerId: "p2", reason: null, position: null }] },
+  }, actions);
+  expect(root.querySelector(".player-distance")?.textContent).toBe("Waiting for location.");
+  expect(root.querySelector(".distance-reference")?.textContent).toBe("Location needed for distances.");
 });
 it("shows a direct resume action with frozen paused settings", () => {
   const root = document.createElement("section");
@@ -489,7 +559,8 @@ it("keeps radar and every active conversion in the HUD with secondary informatio
     expect(hud?.querySelector('[data-action="compass"]')?.closest("details")).toBeNull();
     const details = app.root.querySelector<HTMLDetailsElement>("#radar-details");
     expect(details?.open).toBe(false);
-    expect(details?.querySelectorAll(".radar-players li")).toHaveLength(3);
+    expect(hud?.querySelectorAll(".radar-players li")).toHaveLength(3);
+    expect(hud?.querySelector(".radar-players")?.closest("details")).toBeNull();
     expect(app.root.querySelector<HTMLDetailsElement>("#host-tools")?.open).toBe(false);
     expect(app.root.querySelector<HTMLDetailsElement>("#room-tools")?.open).toBe(false);
     expect(hud?.querySelector(".roster")).toBeNull();
@@ -518,7 +589,7 @@ it("keeps the HUD and its open player details stable through age and authority u
     expect(document.activeElement).toBe(toggle);
     app.root.querySelector<HTMLButtonElement>('[data-action="leave"]')?.click();
     expect(app.root.querySelector(".game-hud")).toBeNull();
-    expect(app.root.querySelector("section")?.id).toBe("how-to-play");
+    expect(app.root.querySelector("section")?.id).toBe("play");
     vi.advanceTimersByTime(500);
     expect(app.root.querySelector("[data-radar]")).toBeNull();
   } finally { app.cleanup(); vi.useRealTimers(); }

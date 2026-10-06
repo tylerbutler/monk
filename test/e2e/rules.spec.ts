@@ -5,14 +5,17 @@ for (const viewport of [
   { width: 390, height: 844 },
   { width: 320, height: 568 },
 ]) {
-  test(`rules lead the home page and offer a keyboard shortcut to play at ${viewport.width}px`, async ({ page }) => {
+  test(`room entry leads the page and keeps rules available at ${viewport.width}px`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await page.goto("/");
     const rules = page.getByRole("region", { name: "How to play", exact: true });
     const heading = rules.getByRole("heading", { name: "How to play", exact: true });
-    await expect(heading).toBeInViewport();
-    await expect(rules).toBeVisible();
-    expect(await page.locator("main > section").first().getAttribute("id")).toBe("how-to-play");
+    await expect(page.getByRole("button", { name: "Create room", exact: true })).toBeInViewport({ ratio: 1 });
+    expect(await page.locator("#play").evaluate(element => {
+      const rules = document.getElementById("how-to-play");
+      return !!rules && !!(element.compareDocumentPosition(rules) & Node.DOCUMENT_POSITION_FOLLOWING);
+    })).toBe(true);
+    await expect(page.locator("#rules-details")).not.toHaveAttribute("open");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
     await page.keyboard.press("Tab");
@@ -23,11 +26,14 @@ for (const viewport of [
     await expect(page.getByLabel("Display name (optional)", { exact: true })).toBeFocused();
 
     await page.goto("/?room=ABCDEFGH");
-    await expect(heading).toBeInViewport();
+    await expect(page.getByRole("button", { name: "Join room", exact: true })).toBeInViewport({ ratio: 1 });
     await expect(page.getByLabel("Room code", { exact: true })).toHaveValue("ABCDEFGH");
+    await expect(page.getByLabel("Room code", { exact: true })).toBeHidden();
     await expect(page.getByRole("button", { name: "Join room", exact: true })).toBeEnabled();
     await page.reload();
-    await expect(heading).toBeInViewport();
+    await expect(page.getByRole("button", { name: "Join room", exact: true })).toBeInViewport({ ratio: 1 });
+    await heading.scrollIntoViewIfNeeded();
+    await expect(rules).toBeVisible();
   });
 
   test(`room errors stay visible after skipping the rules at ${viewport.width}px`, async ({ page }) => {
@@ -43,6 +49,10 @@ for (const viewport of [
     await expect(error).toContainText("eight-character room code");
     await expect(error).toBeInViewport({ ratio: 1 });
     await expect(page.getByLabel("Room code", { exact: true })).toHaveValue("BAD");
+    await expect(page.getByLabel("Room code", { exact: true })).toBeFocused();
+    await expect(page.getByLabel("Room code", { exact: true })).toHaveAttribute("aria-invalid", "true");
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("button", { name: "Join room", exact: true })).toBeFocused();
 
     await page.getByRole("button", { name: "Create room", exact: true }).click();
     await expect(error).toContainText("Room service is unavailable");

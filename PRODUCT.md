@@ -50,7 +50,8 @@ is limited to two iPhones; its results are still pending.
 - The primary marketing audience is friends seeking a casual outdoor game.
 - The first deliverable is an identity kit: logo, wordmark, typography,
   colors, voice, and sample applications.
-- This identity work does not change gameplay or the existing app interface.
+- The app uses the Side by Side identity across entry, lobby, gameplay, and
+  installed-app assets. Game rules and location-sharing behavior stay unchanged.
 - The app currently identifies Rock in red, Paper in yellow, and Scissors
   in blue, with named Tabler hand icons. These remain unchanged in the app.
 - The selected identity is Side by Side: a custom lowercase wordmark with
@@ -62,13 +63,17 @@ is limited to two iPhones; its results are still pending.
   as well as color. Marketing compositions use one dominant color field,
   with the other two colors as accents. Use ink text on all three colors
   or white, and white text only on ink.
-- This is a palette-only revision: paired-arch geometry, Hanken Grotesk,
-  ink/white wordmarks, and the one-color small symbol remain unchanged.
+- The app extension preserves paired-arch geometry, Hanken Grotesk,
+  ink/white wordmarks, and the one-color small symbol.
+- Running and paused gameplay use a larger own-faction color field. Player
+  distances stay visible, with approximate values, stale-position warnings,
+  and labeled radar ranges. Technical location details remain optional.
+- Room entry precedes the short rules; invitations prioritize joining.
+  Invalid room codes retain input and return focus to the code field.
 - The marketing identity kit is separate from the app, under `brand/`.
-- The website build includes the public identity kit at `/brand/`, without
-  changing the gameplay interface. Internal design-tool records stay private
-  to the repository. Comparison studies remain separate and are not included
-  in the public build.
+- The website build includes the public identity kit at `/brand/` and the
+  linked faction workups at `/brand/studies/`. Internal design-tool records
+  stay private to the repository.
 
 ## Evidence on Hand
 

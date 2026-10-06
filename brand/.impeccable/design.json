@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-06T03:03:51.677Z",
+  "generatedAt": "2026-10-06T04:07:37.256Z",
   "title": "Design System: Monk - Side by Side",
   "extensions": {
     "colorMeta": {
@@ -16,7 +16,7 @@
       "display": { "displayName": "Display", "purpose": "Kit lead heading; sample headlines share weight, leading, and tracking, not its fluid size." },
       "headline": { "displayName": "Headline", "purpose": "Kit section headings; specimen shares weight, leading, and tracking at its own size." },
       "title": { "displayName": "Title", "purpose": "Subsection headings; swatch names also use this size." },
-      "body": { "displayName": "Body", "purpose": "Regular instructions at the inherited browser base size." },
+      "body": { "displayName": "Body", "purpose": "Kit regular instructions at the inherited browser base size; app fixed-rem sizes are scoped separately in DESIGN.md." },
       "label": { "displayName": "Label", "purpose": "Kit navigation and usage notes." },
       "caption": { "displayName": "Caption", "purpose": "Asset captions, with preview-specific mobile adjustments." },
       "metadata": { "displayName": "Metadata", "purpose": "License, definition labels, and swatch explanations." }
@@ -36,7 +36,10 @@
     ],
     "breakpoints": [
       { "name": "kit-max-width", "value": "700px" },
-      { "name": "kit-hero-border-min-width", "value": "1600px" }
+      { "name": "kit-hero-border-min-width", "value": "1600px" },
+      { "name": "app-list-first-max-width", "value": "640px" },
+      { "name": "app-compact-heading-max-width", "value": "480px" },
+      { "name": "app-two-column-landscape-override", "value": "(orientation: landscape) and (max-height: 500px)" }
     ]
   },
   "components": [
@@ -78,7 +81,7 @@
   ],
   "narrative": {
     "northStar": "Side by Side",
-    "overview": "Two equal arches, drawn from reversible team bibs, make a custom lowercase Monk wordmark. Colors exchange while both forms remain. The identity is minimalist but distinct: flat fields, open space, and short, friendly lines. The lead line is \"Change sides. Keep playing.\"\n\nThis record covers the built identity kit in `brand/`, not a landing-page template or an app restyling. It records the approved palette-only revision of the code-led Side by Side direction; there was no approved image comp. Geometry, typography, and composition structure remain intact. The prior palette's review disposition does not certify this revision; no external review verdict for this revision is recorded here. The repository's `PRODUCT.md` remains product truth; root `DESIGN.md` remains the game/system concept document.",
+    "overview": "Two equal arches, drawn from reversible team bibs, make a custom lowercase Monk wordmark. Colors exchange while both forms remain. The identity is minimalist but distinct: flat fields, open space, and short, friendly lines. The lead line is \"Change sides. Keep playing.\"\n\nThis record covers the built identity kit in `brand/` and its approved app application below. It records the approved palette-only revision of the code-led Side by Side direction; there was no approved image comp. Geometry, typography, and composition structure remain intact. The prior palette's review disposition does not certify this revision; no external review verdict for this revision is recorded here. The repository's `PRODUCT.md` remains product truth; root `DESIGN.md` remains the game/system concept document.\n\nThe bounded app extension received a finish disposition of **ship, no material fixes**, based on seven required captures and sampled source. This confirms the inherited identity's app application, not a new visual world or a full marketing-kit re-review; it does not extend the prior palette review.",
     "keyCharacteristics": [
       "Custom path lettering and two matching arches.",
       "Three exact faction colors shared with gameplay, supported by ink and white.",
@@ -136,7 +139,7 @@
       "**Don't** typeset the wordmark in Hanken Grotesk or another font.",
       "**Don't** use a paired-color symbol below 48px wide.",
       "**Don't** use white text on faction-color fields; use ink text on all three colors.",
-      "**Don't** reassign faction colors or restyle the app from this kit.",
+      "**Don't** reassign faction colors or change gameplay through visual updates.",
       "**Don't** present sample graphics as app screenshots or claim trademark clearance."
     ]
   }

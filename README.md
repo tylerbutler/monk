@@ -117,7 +117,9 @@ symbols, colors, typography, and sample graphics. Open `brand/index.html`
 in a browser or visit `/brand/` on the website to view it. `/brand` redirects
 to `/brand/`. The Vite build copies the public kit and its downloads into
 `dist/brand/`; internal design-tool records stay in the repository.
-The kit is separate from the gameplay interface.
+The app uses the same wordmark, local Hanken Grotesk font, and faction palette.
+Its browser and installed-app icons use the supplied symbol. Gameplay rules
+and faction assignments are unchanged.
 
 ## Local use
 
@@ -133,11 +135,12 @@ deployed route configured in `wrangler.jsonc`.
 
 ## Play with friends
 
-The home page opens with **How to play**, before the room controls. It explains
-faction relationships, radar, conversion, and changing sides, followed by setup
-and safe-play notes. **Skip to play** moves to the room controls. Invite links
-show the same rules with the room code filled in. Returning to an active room
-keeps the gameplay view.
+The home page puts room controls first. **Skip to play** moves directly to them.
+Invite links put **Join room** first, with the room code filled in. The short
+**How to play** guide follows the controls; full rules and safe-play notes
+remain available in closed disclosures. Invalid room codes keep focus at the
+field and retain the entered name and code. Returning to an active room keeps
+the gameplay view.
 
 Faction badges use red for Rock, yellow for Paper, and blue for Scissors.
 The fist, open palm, and two-finger icons come from
@@ -175,19 +178,24 @@ leaving, ending, or a browser location failure stops local collection.
 The app ignores late callbacks after collection stops. A phone clock change
 does not stop ordinary reporting.
 
-The gameplay HUD groups your faction, round timer, radar, and conversion
-progress. Location sharing and compass controls stay below the radar on phones.
-The desktop view places progress and controls beside the radar.
+The gameplay HUD uses your faction color as its background, with ink text.
+Your faction and round timer lead. Player distances stay visible without
+opening a disclosure. On phones, distances, conversion progress, and location
+and compass controls precede the radar. Desktop places these beside the radar.
 
 **Player radar** shows north-up directions, distance rounded to 5 m, and
 numbered faction markers. **T** marks a target faction, **!** marks a threat
 faction, and **=** marks your own faction. The compact guide names your target
-and threat. Open **Players & radar details** for names, distances, GPS uncertainty,
-update ages, and the full legend. Roles do not confirm an attack. Your last-known position
-is the reference.
+and threat. The two range rings show their actual distances in metres and keep
+their labels upright with the compass. The player list emphasizes approximate
+distance and bearing; its stable numbers match the radar markers.
+Open a player's **Location details** for GPS uncertainty and update age, or
+**Radar details** for the reference and full legend. Roles do not confirm an
+attack. Your last-known position is the reference.
 Without your position, the radar identifies a known peer reference by name.
 An absent position shows a waiting state. Old and approximate positions
-remain visible; the app updates their age labels even while offline.
+remain visible; last-known distances are marked when either position is stale.
+The app updates age labels even while offline.
 
 Select **Use compass** for optional **Heading-up** radar. On browsers that
 request sensor permission, respond to the prompt after selecting the button.

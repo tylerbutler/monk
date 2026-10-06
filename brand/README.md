@@ -1,8 +1,8 @@
 # Monk: Side by Side
 
 Open `index.html` in a browser to view the identity kit. It works from disk,
-uses a local font, and does not need a server. This kit does not change the
-app's interface, icons, or gameplay.
+uses a local font, and does not need a server. The app also uses this identity;
+its game rules and named faction hand icons stay unchanged.
 
 The website also serves the kit at `/brand/`; `/brand` redirects there.
 The regular website build copies this page, stylesheet, guides, assets,
@@ -71,6 +71,17 @@ Brand and gameplay now share colors. Red stays Rock, yellow stays Paper,
 and blue stays Scissors; identify factions with names and hand icons as
 well as color. The app's faction assignments and named hand icons remain
 unchanged.
+
+## App use
+
+The app imports the supplied wordmark, paired symbol, and local font. Its
+homepage puts room entry before the rules. The installed-app icons use the
+avatar's arches, and the small browser icon uses the one-color symbol.
+During running and paused play, the main game panel uses the player's own
+faction color with ink text; a host without a faction has a neutral panel.
+Player distances stay visible beside the radar on desktop and above it on
+phones. Range labels, approximate values, and last-known warnings remain
+explicit. These changes affect presentation, not game rules or location privacy.
 
 ## Voice
 

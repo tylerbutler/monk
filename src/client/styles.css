@@ -1,13 +1,22 @@
+@font-face {
+  font-family: "Hanken Grotesk";
+  src: url("../../brand/assets/HankenGrotesk.ttf") format("truetype");
+  font-weight: 100 900;
+  font-display: swap;
+}
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #17241d;
-  background: #f7f8f1;
+  font-family: "Hanken Grotesk", sans-serif;
+  color: #171719;
+  background: #fff;
+  color-scheme: light;
   font-synthesis: none;
   line-height: 1.55;
-  --ink: #17241d;
-  --muted: #45564b;
-  --line: #bdc9bd;
-  --accent: #254e37;
+  --ink: #171719;
+  --muted: #535353;
+  --line: #d9d9d9;
+  --accent: #171719;
+  --surface: #fff;
+  --surface-subtle: #f5f5f5;
   --threat: #85221b;
   --faction-rock: #eb6256;
   --faction-paper: #f2cf45;
@@ -20,6 +29,8 @@
 body { margin: 0; overflow-wrap: anywhere; }
 main { width: min(100% - 2.5rem, 48rem); margin: auto; padding: 1.5rem 0 3rem; }
 .masthead { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; border-bottom: 2px solid var(--ink); padding-bottom: .7rem; margin-bottom: 2rem; }
+.masthead h1 { flex: 0 0 auto; line-height: 1; }
+.masthead h1 img { display: block; width: 104px; height: 32px; }
 h1 { font-size: 2rem; letter-spacing: -.04em; margin: 0; }
 h2 { font-size: 1.6rem; line-height: 1.25; margin: 1.8rem 0 .8rem; text-wrap: balance; }
 h3 { font-size: 1.15rem; margin: 1.4rem 0 .6rem; }
@@ -30,7 +41,7 @@ section { margin-top: 2rem; }
 .skip-to-play { display: inline-flex; align-items: center; min-height: 2.75rem; color: var(--accent); font-weight: 650; text-underline-offset: .2em; }
 .skip-to-play:hover { color: var(--ink); }
 .rules { margin-top: 0; }
-.rules h2 { margin-top: 0; font-size: clamp(2rem, 5vw, 2.75rem); letter-spacing: -.03em; }
+.rules h2 { margin-top: 0; font-size: 2rem; letter-spacing: -.03em; }
 .rules-lead { font-size: 1.2rem; font-weight: 650; }
 .faction-cycle { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; list-style: none; padding: 1.1rem 0; margin: 1.5rem 0; border-block: 1px solid var(--line); }
 .faction-cycle li { display: flex; align-items: center; gap: .65rem; }
@@ -48,22 +59,39 @@ section { margin-top: 2rem; }
 .rules-setup h3 { margin-top: 0; }
 #play { border-top: 2px solid var(--ink); padding-top: 1.5rem; scroll-margin-top: 1rem; }
 #play h2 { margin-top: 0; }
+main.homepage { width: min(calc(100% - 2rem), 72rem); }
+.homepage .masthead { margin-bottom: 1rem; }
+.entry-layout { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); }
+.entry-intro { padding: 2rem; background: var(--faction-paper); }
+.entry-intro h2 { margin: 0 0 1rem; font-size: 3rem; line-height: 1.05; letter-spacing: -.035em; }
+.entry-intro p { max-width: 30ch; font-size: 1.15rem; }
+.entry-intro img { display: block; margin-top: 2rem; }
+.entry-layout #play { margin: 0; padding: 1.5rem 2rem; border: 0; }
+.entry-layout[data-invited="true"] { display: block; max-width: 36rem; margin-inline: auto; background: var(--faction-paper); }
+.entry-layout[data-invited="true"] .join-form { margin: 0; padding: 0; border: 0; }
+.input-help, .entry-safety { font-size: .85rem; line-height: 1.45; }
+.input-help { margin: -.25rem 0 .5rem; }
+.entry-safety { margin-top: 1rem; }
+.homepage .rules { max-width: 48rem; margin: 2.5rem auto 0; }
+.homepage footer { max-width: 48rem; margin-inline: auto; }
 label { display: grid; gap: .35rem; font-weight: 600; margin: .75rem 0; }
-input, select, textarea { width: 100%; min-height: 3rem; font: inherit; color: var(--ink); background: #fff; border: 1px solid #6a7d6e; border-radius: .3rem; padding: .65rem .75rem; caret-color: var(--accent); }
+input, select, textarea { width: 100%; min-height: 3rem; font: inherit; color: var(--ink); background: #fff; border: 1px solid #757575; border-radius: .3rem; padding: .65rem .75rem; caret-color: var(--accent); }
+input[aria-invalid="true"] { border-color: var(--threat); }
 input[type="checkbox"] { width: 1.4rem; min-height: 1.4rem; accent-color: var(--accent); }
 input::placeholder { color: var(--muted); }
 button { min-height: 3rem; font: inherit; font-weight: 650; padding: .7rem 1rem; border: 1px solid var(--accent); border-radius: .3rem; background: var(--accent); color: #fff; cursor: pointer; margin: .5rem .5rem .5rem 0; transition: background-color 160ms ease-out; }
-button:hover { background: #163523; }
-button:active { background: #0f281a; }
+button:hover { background: #303033; }
+button:active { background: #000; }
 button.secondary { color: var(--accent); background: transparent; }
-button.secondary:hover { background: #e2e9df; }
+button.secondary:hover { background: var(--surface-subtle); }
 button:disabled { cursor: wait; opacity: .55; }
 .ui-icon { width: 1.15em; height: 1.15em; vertical-align: -.2em; margin-inline-end: .45em; }
 button:not(.secondary) .ui-icon, button[aria-pressed="true"] .ui-icon { filter: invert(1); }
 .faction-icon { width: 1.7rem; height: 1.7rem; padding: .2rem; margin-inline-end: .45rem; vertical-align: -.45rem; border-radius: 50%; background: var(--faction-color); }
-:focus-visible { outline: 3px solid #b64b11; outline-offset: 3px; }
-::selection { background: #d3e4ba; color: var(--ink); }
+:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+::selection { background: var(--ink); color: #fff; }
 .join-form { margin-top: 1rem; border-top: 1px solid var(--line); padding-top: .5rem; }
+.join-form label[hidden] { display: none; }
 .invite-link { display: block; color: var(--accent); overflow-wrap: anywhere; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1rem; }
 .trial { border-top: 1px solid var(--line); }
@@ -83,7 +111,7 @@ progress { width: 100%; height: .5rem; accent-color: var(--accent); border: none
 progress::-webkit-progress-bar { background: var(--line); }
 progress::-webkit-progress-value { background: var(--accent); }
 progress::-moz-progress-bar { background: var(--accent); }
-.influence { display: grid; margin: .5rem 0; padding: .75rem; gap: .4rem; border: 1px solid var(--accent); border-radius: .3rem; background: #e2e9df; color: var(--accent); font-size: .95rem; font-variant-numeric: tabular-nums; }
+.influence { display: grid; margin: .5rem 0; padding: .75rem; gap: .4rem; border: 1px solid var(--accent); border-radius: .3rem; background: var(--surface); color: var(--accent); font-size: .95rem; font-variant-numeric: tabular-nums; }
 .influence > span { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; }
 .influence strong { white-space: nowrap; }
 .influence[data-direction="incoming"] { color: var(--threat); border-color: var(--threat); background: #fff1eb; }
@@ -94,14 +122,14 @@ progress::-moz-progress-bar { background: var(--accent); }
 .influence[data-direction="incoming"] progress::-webkit-progress-value { background: var(--threat); }
 .influence[data-direction="incoming"] progress::-moz-progress-bar { background: var(--threat); }
 .influence-idle { margin: .5rem 0; }
-.player-radar { margin: 0; min-width: 0; }
-.hud-readout { min-width: 0; align-self: center; }
+.player-radar { grid-area: radar; margin: 0; min-width: 0; }
+.hud-readout { grid-area: readout; min-width: 0; align-self: start; }
 .hud-controls { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin-top: .75rem; }
 .location-controls, .radar-controls { display: flex; flex-direction: column; gap: .35rem; min-width: 0; margin: 0; }
 .hud-controls button { width: 100%; margin: 0; min-height: 2.75rem; padding: .5rem; }
 .hud-controls p { font-size: .8rem; margin: 0; min-height: 2.8em; order: -1; line-height: 1.4; }
 .radar-controls button[aria-pressed="true"] { background: var(--accent); color: #fff; }
-.radar-controls button[aria-pressed="true"]:hover { background: #163523; }
+.radar-controls button[aria-pressed="true"]:hover { background: #303033; }
 .radar-controls p { margin: 0; }
 .radar-note { color: var(--muted); font-size: .95rem; }
 .radar-guide { display: flex; justify-content: center; flex-wrap: wrap; gap: .25rem 1rem; margin: .25rem 0 .5rem; }
@@ -110,19 +138,20 @@ progress::-moz-progress-bar { background: var(--accent); }
 .radar-role, .radar-role-badge, .radar-relationship { color: var(--muted); }
 [data-relationship="target"].radar-role, [data-relationship="target"].radar-role-badge, [data-relationship="target"].radar-relationship { color: var(--accent); }
 [data-relationship="threat"].radar-role, [data-relationship="threat"].radar-role-badge, [data-relationship="threat"].radar-relationship { color: var(--threat); }
-.radar-role > circle { fill: #f7f8f1; stroke: currentColor; stroke-width: 1.5; }
+.radar-role > circle { fill: var(--surface); stroke: currentColor; stroke-width: 1.5; }
 .radar-role > text { fill: currentColor; font-size: 12px; font-weight: 750; }
-.radar-layout { display: grid; grid-template-columns: minmax(0, 20rem) minmax(0, 1fr); gap: 0 2rem; align-items: start; }
+.radar-layout { display: grid; grid-template-columns: minmax(0, 20rem) minmax(0, 1fr); grid-template-areas: "radar players" "radar readout" "details details"; gap: 0 1.5rem; align-items: start; }
 .radar-layout figure { margin: 0; text-align: center; }
 .radar-layout figure > svg { display: block; width: 100%; max-width: 20rem; height: auto; color: var(--ink); margin-inline: auto; }
 .radar-layout figcaption { font-size: .8rem; }
-.radar-empty { padding: 3rem 1rem; text-align: center; color: var(--muted); background: #eef1e8; }
-.radar-details { grid-column: 1 / -1; margin: 1rem 0 0; border-top: 1px solid var(--line); }
+.radar-empty { padding: 3rem 1rem; text-align: center; color: var(--muted); background: var(--surface-subtle); }
+.radar-details { grid-area: details; margin: 1rem 0 0; border-top: 1px solid var(--line); }
 .radar-face, .radar-link-base { display: none; }
 .radar-ring, .radar-axis { fill: none; stroke: var(--line); stroke-width: 1; }
-.radar-entry { fill: #254e3709; stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
+.radar-entry { fill: #17171909; stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
+.radar-range-label { fill: var(--ink); stroke: var(--surface); stroke-width: 3; paint-order: stroke; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .radar-compass { fill: var(--muted); font-size: 13px; font-weight: 700; }
-.radar-center { fill: var(--ink); stroke: #f7f8f1; stroke-width: 2; }
+.radar-center { fill: var(--ink); stroke: var(--surface); stroke-width: 2; }
 .radar-marker { color: var(--ink); }
 .radar-marker-body { fill: var(--faction-color); stroke: currentColor; stroke-width: 1.5; }
 .radar-marker[data-current="false"] .radar-marker-body { stroke-dasharray: 3 3; }
@@ -130,7 +159,7 @@ progress::-moz-progress-bar { background: var(--accent); }
 .radar-progress-track { stroke: var(--line); }
 .radar-progress { stroke: var(--accent); }
 .radar-progress.incoming { stroke: var(--threat); }
-.radar-center[data-current="false"] { fill: #f7f8f1; stroke: var(--ink); stroke-dasharray: 2 2; }
+.radar-center[data-current="false"] { fill: var(--surface); stroke: var(--ink); stroke-dasharray: 2 2; }
 .location-sharing { font-weight: 650; }
 .host-controls > details { margin: 0; }
 .radar-link { stroke: var(--accent); stroke-width: 3; }
@@ -139,28 +168,41 @@ progress::-moz-progress-bar { background: var(--accent); }
 .radar-arrow.incoming { fill: var(--threat); }
 .radar-leader { stroke: var(--muted); stroke-width: 1; }
 .radar-estimate { fill: var(--muted); }
-.radar-number { fill: var(--ink); stroke: #f7f8f1; stroke-width: 4; paint-order: stroke; font-size: 14px; font-weight: 750; }
-.radar-players { padding-left: 1.5rem; margin: 0; }
+.radar-number { fill: var(--ink); stroke: var(--surface); stroke-width: 4; paint-order: stroke; font-size: 14px; font-weight: 750; }
+.player-overview { grid-area: players; margin: 0; min-width: 0; }
+.player-overview h3 { margin: 0; font-size: 1.15rem; }
+.distance-reference { margin: .25rem 0 .5rem; font-size: .8rem; }
+.radar-players { padding-left: 1.5rem; margin: 0; max-height: 18rem; overflow-y: auto; scrollbar-color: var(--ink) transparent; }
 .radar-players li { padding: .7rem 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .radar-players p { margin: .25rem 0; }
 .radar-player-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .5rem; }
+.player-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: .5rem; }
+.radar-player-heading strong { flex-basis: 100%; }
+.player-faction { font-size: .85rem; }
+.radar-players .player-distance { margin: 0; text-align: right; white-space: nowrap; font-size: .85rem; font-variant-numeric: tabular-nums; }
+.player-distance strong { font-size: 1.8rem; line-height: 1.1; letter-spacing: -.025em; }
+.distance-qualifier { display: block; font-size: .75rem; }
+.radar-players .player-distance.unavailable { max-width: 9ch; white-space: normal; }
+.player-location-details { margin: 0; }
+.player-location-details summary { font-size: .8rem; font-weight: 500; }
+.radar-players li[data-current="false"] .player-distance strong { text-decoration: underline dashed; text-underline-offset: .18em; }
 .radar-relationship { font-size: .85rem; font-weight: 650; padding: .1rem .4rem; border: 1px solid currentColor; border-radius: .2rem; }
 .radar-combat-status { color: var(--accent); font-weight: 750; font-variant-numeric: tabular-nums; }
 .radar-players li[data-influence="incoming"] .radar-combat-status { color: var(--threat); }
 .radar-players li[data-influence="incoming"] { background: #fff1eb; }
-.radar-players li[data-influence="outgoing"] { background: #e2e9df; }
+.radar-players li[data-influence="outgoing"] { background: var(--surface); }
 .radar-players li[data-influence]:not([data-influence="none"]) { padding-inline: .5rem; }
 .radar-location-state { color: var(--muted); font-size: .85rem; font-weight: 650; }
 .host-controls { border-top: 1px solid var(--line); padding: 0; margin: 0; }
 .feedback { border-top: 2px solid var(--ink); }
 .feedback p:first-of-type { font-weight: 700; }
 #faction-history { margin: 1rem 0 0; border-top: 1px solid var(--line); }
-.faction-history-list { list-style: none; padding: 0; margin: 0; max-height: 24rem; overflow-y: auto; scrollbar-color: var(--muted) #eef1e8; }
+.faction-history-list { list-style: none; padding: 0; margin: 0; max-height: 24rem; overflow-y: auto; scrollbar-color: var(--muted) var(--surface-subtle); }
 .faction-history-list li { padding: .75rem 0; border-top: 1px solid var(--line); }
 .faction-history-list time { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
 .faction-history-list p { margin: .25rem 0; font-weight: 650; }
 .faction-history-transition { color: var(--muted); font-size: .85rem; }
-.conversion-notice { position: fixed; z-index: 10; left: 50%; transform: translateX(-50%); bottom: max(1rem, env(safe-area-inset-bottom)); width: min(calc(100% - 2rem), 48rem); max-height: calc(100dvh - 2rem); overflow: auto; padding: .75rem 1rem; border: 2px solid var(--ink); background: #f7f8f1; }
+.conversion-notice { position: fixed; z-index: 10; left: 50%; transform: translateX(-50%); bottom: max(1rem, env(safe-area-inset-bottom)); width: min(calc(100% - 2rem), 48rem); max-height: calc(100dvh - 2rem); overflow: auto; padding: .75rem 1rem; border: 2px solid var(--ink); background: var(--surface); }
 .conversion-notice p { margin: .25rem 0; font-size: 1.1rem; font-weight: 700; }
 .measurements { display: grid; grid-template-columns: 1fr auto; gap: .6rem 1rem; margin: 1.5rem 0; font-variant-numeric: tabular-nums; }
 .measurements dt { color: var(--muted); }
@@ -176,6 +218,10 @@ footer { margin-top: 3rem; padding-top: 1rem; border-top: 2px solid var(--ink); 
 .in-game h1 { font-size: 1.25rem; }
 .room-code { font-size: .8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 .in-game .gameplay { margin: 0; }
+.in-game .game-hud { padding: 1rem; background: var(--faction-color, var(--surface)); --muted: var(--ink); --line: #17171966; }
+.in-game .game-hud .warning { color: var(--ink); }
+.in-game .game-hud .radar-relationship { color: var(--ink); }
+.in-game .game-hud .hud-heading { margin-bottom: 1rem; }
 .in-game .match-heading { border-top: 1px solid var(--line); }
 .in-game #room-tools, .in-game footer details { margin: 0; }
 .in-game footer { margin-top: 0; padding-top: 0; border-top: 1px solid var(--line); }
@@ -183,25 +229,35 @@ footer { margin-top: 3rem; padding-top: 1rem; border-top: 2px solid var(--ink); 
 .in-game .game-hud .own-faction svg { width: 3rem; height: 3rem; }
 .in-game .game-hud .round-clock { font-size: 2rem; }
 .in-game .game-hud .radar-face { display: initial; fill: var(--accent); }
-.in-game .game-hud .radar-ring { stroke-width: 1.5; }
-.in-game .game-hud .radar-entry { fill: #f7f8f1; fill-opacity: .09; stroke: var(--line); }
-.in-game .game-hud .radar-axis, .in-game .game-hud .radar-leader { stroke: var(--line); }
-.in-game .game-hud .radar-estimate { fill: #f7f8f1; }
-.in-game .game-hud .radar-center { fill: #f7f8f1; stroke: var(--accent); }
-.in-game .game-hud .radar-center[data-current="false"] { fill: var(--accent); stroke: #f7f8f1; }
-.in-game .game-hud [data-radar] > .radar-compass { fill: #f7f8f1; }
+.in-game .game-hud .radar-ring { stroke: #ffffff99; stroke-width: 1.5; }
+.in-game .game-hud .radar-range-label { fill: #fff; stroke: var(--ink); }
+.in-game .game-hud .radar-entry { fill: #fff; fill-opacity: .09; stroke: #ffffff99; }
+.in-game .game-hud .radar-axis, .in-game .game-hud .radar-leader { stroke: #ffffff99; }
+.in-game .game-hud .radar-estimate { fill: #fff; }
+.in-game .game-hud .radar-center { fill: #fff; stroke: var(--accent); }
+.in-game .game-hud .radar-center[data-current="false"] { fill: var(--accent); stroke: #fff; }
+.in-game .game-hud [data-radar] > .radar-compass { fill: #fff; }
 .in-game .game-hud .radar-marker-body { stroke-width: 2; }
-.in-game .game-hud .radar-progress-track { stroke: #f7f8f1; stroke-width: 6; }
+.in-game .game-hud .radar-progress-track { stroke: #fff; stroke-width: 6; }
 .in-game .game-hud .radar-progress { stroke-width: 4; }
-.in-game .game-hud .radar-link-base { display: initial; stroke: #f7f8f1; stroke-width: 7; }
+.in-game .game-hud .radar-link-base { display: initial; stroke: #fff; stroke-width: 7; }
 .in-game .game-hud .radar-link-base.incoming { stroke-dasharray: 5 4; }
-.in-game .game-hud .radar-arrow { stroke: #f7f8f1; stroke-width: 2; paint-order: stroke; }
+.in-game .game-hud .radar-arrow { stroke: #fff; stroke-width: 2; paint-order: stroke; }
 .in-game .game-hud .radar-role-badge[data-relationship="target"] { background: var(--accent); color: #fff; }
 .in-game .game-hud .radar-role-badge[data-relationship="threat"] { background: var(--threat); color: #fff; }
 .in-game .game-hud .hud-influence progress { height: .75rem; }
 .in-game .game-hud .hud-influence strong { font-size: 1.15rem; }
 @media (max-width: 640px) {
-  .radar-layout { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .entry-layout { grid-template-columns: 1fr; }
+  .entry-intro { padding: 1rem; }
+  .entry-intro h2 { font-size: 2rem; margin-bottom: .5rem; }
+  .entry-intro p { font-size: 1rem; margin-bottom: 0; }
+  .entry-intro img { display: none; }
+  .entry-layout #play { padding: 1rem; }
+  .radar-layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "players" "readout" "radar" "details"; gap: 0; }
+  .player-overview { margin-bottom: .75rem; }
+  .player-radar { margin-top: .75rem; }
+  .in-game .game-hud { padding: .75rem; }
   .radar-layout figure > svg { width: min(100%, 17.5rem, 36svh); }
   .radar-details { margin-top: .75rem; }
 }
@@ -209,6 +265,8 @@ footer { margin-top: 3rem; padding-top: 1rem; border-top: 2px solid var(--ink); 
   main { width: calc(100% - 2rem); padding-top: 1rem; }
   main.in-game { padding-top: max(.75rem, env(safe-area-inset-top)); }
   .hud-heading { gap: .5rem; }
+  .in-game .game-hud .hud-heading h2, .in-game .game-hud .round-clock { font-size: 1.75rem; }
+  .hud-controls button { font-size: .9rem; }
   .form-grid { grid-template-columns: 1fr; }
   .faction-cycle li { flex-direction: column; align-items: flex-start; gap: .35rem; }
   .edition { font-size: .85rem; }
@@ -217,7 +275,7 @@ footer { margin-top: 3rem; padding-top: 1rem; border-top: 2px solid var(--ink); 
 }
 @media (orientation: landscape) and (max-height: 500px) {
   main.in-game { width: calc(100% - max(2rem, env(safe-area-inset-left)) - max(2rem, env(safe-area-inset-right))); }
-  .radar-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 1rem; }
+  .radar-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "radar players" "radar readout" "details details"; gap: 0 1rem; }
   .radar-layout figure > svg { width: min(100%, 52svh); }
 }
 @media (prefers-reduced-motion: reduce) { button { transition: none; } }
