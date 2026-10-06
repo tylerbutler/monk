@@ -53,13 +53,15 @@ website. Unlike the static identity kit, the motion preview needs the web
 build and a server. The app does not load the Lottie player or animation.
 
 An implied ball paints two bounces from left to right; no ball is drawn.
-Yellow leads, red paints the first arch, and blue completes the second.
-On the second upswing, yellow paints over red at the shared stem before
-blue covers it. Red covers the first yellow arch.
+Yellow paints both arches, then red paints the first and blue completes
+the second. Each color starts 0.1 seconds before the previous color finishes.
+The second yellow arch stays above red at the shared stem until blue covers
+it. Red covers the first yellow arch.
 The paint stays in place, with a flat turn at the center baseline and no
 paint extending below it. Every color draws at a constant speed, taking
-0.7 seconds per arch. Yellow has a 0.2-second lead. The entrance takes
-1.6 seconds, followed by a 0.4-second hold, for 2 seconds total at 60 fps.
+0.7 seconds per arch. Red starts at 1.3 seconds and blue at 1.9 seconds.
+The entrance takes 2.6 seconds, followed by a 0.4-second hold, for 3 seconds
+total at 60 fps.
 The final frame matches the paired symbol, with red on the left and blue
 on the right.
 

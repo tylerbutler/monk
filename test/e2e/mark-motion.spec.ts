@@ -48,7 +48,7 @@ async function paint(page: Page) {
 test("keeps every painted frame above the mark baseline", async ({ page }) => {
   await page.goto("/brand/motion.html");
   await expect(page.getByLabel("Animation progress")).toBeEnabled();
-  for (let frame = 0; frame < 120; frame++) {
+  for (let frame = 0; frame < 180; frame++) {
     await seek(page, frame);
     expect((await paint(page)).belowBaseline, `paint below baseline at frame ${frame}`).toBe(0);
   }
@@ -60,7 +60,7 @@ test("draws each color at constant speed with equal time per arch", async ({ pag
   const archLength = 156 + Math.PI * 28;
   for (const [start, color, completed] of [
     [0, "242,207,69", 0], [42, "242,207,69", 1],
-    [12, "235,98,86", 0], [54, "105,181,245", 0],
+    [78, "235,98,86", 0], [114, "105,181,245", 0],
   ] as const) {
     for (const elapsed of [7, 14, 21, 28, 35, 42]) {
       await seek(page, start + elapsed);
@@ -79,18 +79,21 @@ test("draws each color at constant speed with equal time per arch", async ({ pag
 test("shows the second yellow upswing over red before blue covers it", async ({ page }) => {
   await page.goto("/brand/motion.html");
   await expect(page.getByLabel("Animation progress")).toBeEnabled();
-  for (const [frame, color] of [[50, [242, 207, 69, 255]], [60, [105, 181, 245, 255]]] as const) {
+  for (const [frame, color] of [[118, [242, 207, 69, 255]], [122, [105, 181, 245, 255]]] as const) {
     await seek(page, frame);
     expect((await paint(page)).sharedStem, `shared stem at frame ${frame}`).toEqual(color);
   }
 });
 
-test("paints yellow, red, then blue and holds the original mark", async ({ page }) => {
+test("introduces colors almost one at a time and holds the original mark", async ({ page }) => {
   await page.goto("/brand/motion.html");
   await expect(page.getByRole("heading", { name: "Paint the bounce." })).toBeVisible();
   const timeline = page.getByLabel("Animation progress");
   await expect(timeline).toBeEnabled();
-  for (const [frame, visible] of [[8, ["yellow"]], [28, ["yellow", "red"]], [70, ["yellow", "red", "blue"]]] as const) {
+  for (const [frame, visible] of [
+    [78, ["yellow"]], [79, ["yellow", "red"]],
+    [114, ["yellow", "red"]], [115, ["yellow", "red", "blue"]],
+  ] as const) {
     await seek(page, frame);
     const result = await paint(page);
     for (const color of ["yellow", "red", "blue"] as const) {
@@ -98,7 +101,9 @@ test("paints yellow, red, then blue and holds the original mark", async ({ page 
       else expect(result[color], `${color} at frame ${frame}`).toBe(0);
     }
   }
-  await seek(page, 119);
+  await expect(timeline).toHaveAttribute("max", "179");
+  await seek(page, 179);
+  await expect(page.locator("#time")).toHaveText("3.00 s");
   const final = await paint(page);
   expect(final.yellow).toBe(0);
   expect(final.red).toBeGreaterThan(10000);
@@ -109,11 +114,11 @@ test("paints yellow, red, then blue and holds the original mark", async ({ page 
   await page.getByLabel("Slow motion").check();
   await page.getByRole("button", { name: "Replay" }).click();
   await expect(page.getByRole("status")).toHaveText("Playing at half speed.");
-  await expect.poll(() => timeline.inputValue()).not.toBe("119");
+  await expect.poll(() => timeline.inputValue()).not.toBe("179");
   await expect(page.getByRole("status")).toHaveText("Finished.");
-  await expect(timeline).toHaveValue("119");
+  await expect(timeline).toHaveValue("179");
   await page.waitForTimeout(250);
-  await expect(timeline).toHaveValue("119");
+  await expect(timeline).toHaveValue("179");
 
   const download = page.waitForEvent("download");
   await page.getByRole("link", { name: "Download Lottie" }).click();

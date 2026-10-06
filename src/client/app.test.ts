@@ -938,6 +938,20 @@ it.each([
   } finally { app.cleanup(); }
 });
 
+it("keeps the invitation QR stable through authority updates and removes it when leaving", async () => {
+  const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true };
+  const app = browserApp(snapshot);
+  try {
+    const qr = app.root.querySelector("#invite-qr svg");
+    expect(qr).not.toBeNull();
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
+      snapshot, trial: null, startChecking: false });
+    expect(app.root.querySelector("#invite-qr svg")).toBe(qr);
+    app.root.querySelector<HTMLButtonElement>('[data-action="leave"]')?.click();
+    await vi.waitFor(() => expect(app.root.querySelector("#invite-qr")).toBeNull());
+  } finally { app.cleanup(); }
+});
+
 it("opens an invite with its room code filled in and ready to join", () => {
   sessionStorage.clear();
   history.replaceState(null, "", "/?room=ABCDEFGH");

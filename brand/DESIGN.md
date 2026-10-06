@@ -132,17 +132,18 @@ to the identity palette.
 ### Painted-bounce motion study
 
 The separate [motion preview](motion.html) draws the paired mark as paint
-left by an implied bouncing ball. No ball is visible. Yellow leads, red
-follows through the first arch, and blue finishes the second. The second
-yellow upswing paints over red at the shared stem, then blue covers it.
+left by an implied bouncing ball. No ball is visible. Yellow paints both
+arches, then red follows through the first and blue finishes the second.
+Each color starts 0.1 seconds before the previous color finishes. The second
+yellow arch stays above red at the shared stem until blue covers it.
 The first yellow arch stays beneath red. Every color
 draws at a constant speed, taking 0.7 seconds per arch, with no easing at
 the apex or baseline. The center turn stays flat at the baseline; no
 yellow curve extends below it. The finished paint stays still; the mark
 does not stretch, rotate, or rebound.
 
-The vector Lottie has 1.6 seconds of motion and a 0.4-second final hold
-within a 2-second, 60-fps sequence. Playback is once, not a loop. The final
+The vector Lottie has 2.6 seconds of motion and a 0.4-second final hold
+within a 3-second, 60-fps sequence. Playback is once, not a loop. The final
 state preserves the red-left/blue-right symbol. Reduced motion shows the
 static SVG, as does a loading failure. Replay, half speed, and a timeline
 are preview controls only; the game remains unchanged.
@@ -300,6 +301,9 @@ Player names, roles, and approximate distances stay visible, without a
 duplicate Players dropdown in the waiting room. When the distance list is
 unavailable, a plain roster stays visible. Start game sits next to Copy
 invite link for the lobby host and requires at least two joined players.
+The invitation also has an ink-on-white QR code with a four-module quiet
+zone. It uses the same public room URL as the link and is generated locally.
+A PNG download stays available when native image sharing is unsupported.
 Desktop pairs
 the list and controls with the radar; at 640px or less they precede the radar.
 Short landscape screens retain two columns. Stale positions are labeled,

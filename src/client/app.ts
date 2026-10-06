@@ -1,3 +1,5 @@
+import { flushSync, mount, unmount } from "svelte";
+import InviteQr from "./InviteQr.svelte";
 import { connectMatch } from "./connection";
 import { requestLocationPermission, startLocation } from "./location";
 import { startCompass } from "./compass";
@@ -77,6 +79,8 @@ function renderRules(parent: HTMLElement) {
 export function mountApp(root: HTMLElement): () => void {
   const game = document.createElement("div");
   game.className = "match-view";
+  const qrRoot = document.createElement("div"); qrRoot.id = "invite-qr";
+  let qrComponent: ReturnType<typeof mount> | null = null, qrUrl = "";
   const history = document.createElement("details"); history.id = "faction-history";
   let credentials: SessionCredentials | null = null, connection: MatchConnection | null = null;
   let snapshot: PlayerSnapshot | null = null, trial: TrialStatus | null = null;
@@ -106,6 +110,10 @@ export function mountApp(root: HTMLElement): () => void {
   const retained = new Map<string, { value: string; checked: boolean }>();
   const disclosures = new Map<string, boolean>();
 
+  function destroyInviteQr() {
+    if (qrComponent) void unmount(qrComponent);
+    qrComponent = null; qrUrl = "";
+  }
   function showError(reason: string, fieldId = "") {
     error = reason; errorField = fieldId; render();
     if (fieldId) {
@@ -454,6 +462,7 @@ export function mountApp(root: HTMLElement): () => void {
   }
   function render() {
     if (disposed) return;
+    if (!credentials || snapshot?.phase === "ended") destroyInviteQr();
     const playing = snapshot?.phase === "running" || snapshot?.phase === "paused";
     if (!snapshot?.radar || snapshot.phase === "ended") { stopCompass?.(); stopCompass = null; }
     const active = document.activeElement;
@@ -576,6 +585,13 @@ export function mountApp(root: HTMLElement): () => void {
           if (start.disabled) text(invites, "p", "Invite another player to start.");
         }
         if (inviteStatus) text(invites, "p", inviteStatus, "state-line").setAttribute("role", "status");
+        if (qrUrl !== invite.href) {
+          destroyInviteQr();
+          qrUrl = invite.href;
+          qrComponent = mount(InviteQr, { target: qrRoot, props: { url: invite.href, roomCode: credentials.matchCode } });
+          flushSync();
+        }
+        invites.append(qrRoot);
       }
       if (!snapshot) text(root, "p", "Connecting to the private match. Location is not collected.");
       if (snapshot) {
@@ -711,6 +727,7 @@ export function mountApp(root: HTMLElement): () => void {
     stopCompass?.(); stopCompass = null;
     clearInterval(ageInterval);
     if (audio) void audio.close().catch(() => console.warn("monk", "audio_close_failed"));
+    destroyInviteQr();
     destroyMatch(game);
     document.removeEventListener("visibilitychange", visibility); root.replaceChildren();
   };

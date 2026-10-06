@@ -118,8 +118,20 @@ in a browser or visit `/brand/` on the website to view it. `/brand` redirects
 to `/brand/`. The Vite build copies the public kit and its downloads into
 `dist/brand/`; internal design-tool records stay in the repository.
 The app uses the same wordmark, local Hanken Grotesk font, and faction palette.
-Its browser and installed-app icons use the supplied symbol. Gameplay rules
-and faction assignments are unchanged.
+The browser favicon uses the yellow avatar; installed-app icons use the paired
+symbol. Gameplay rules and faction assignments are unchanged.
+
+Open `/brand/motion.html` to preview or download the Lottie animation.
+Yellow leads across both arches, then red paints the first and blue paints
+the second. Each color starts 0.1 seconds before the previous color finishes.
+The second yellow arch stays above red until blue covers it. Each arch takes
+0.7 seconds; the full sequence takes 3 seconds, including a 0.4-second final
+hold. The preview plays once and shows the static mark for reduced motion
+or a loading failure. The gameplay app does not load the animation.
+
+Edit `scripts/generate-mark-animation.mjs`, then run `npm run build:mark` to
+regenerate `brand/assets/monk-entrance.json`. The regular build also runs
+the generator.
 
 ## Local use
 
@@ -160,6 +172,14 @@ Share **Copy invite link** or the eight-character room code. During play,
 open **Room & options**, then **Invite players**. Invitations
 remain available during play; new players can join running and paused rounds.
 New players get a grace period. Rooms hold at most 100 players.
+
+The invitation also shows a QR code. Scan it to join, or select **Download
+QR code** to save a 1024 x 1024 PNG named `monk-room-<ROOMCODE>.png`.
+**Share QR code** opens image sharing when the browser supports file sharing.
+The app uses `@marianmeres/svelte-qrcode` to generate the code on your device.
+It encodes only the public invite URL, with no host or player credentials,
+and does not send the URL to a QR service. The link and QR code remain
+available during running and paused rounds.
 
 The host selects **Start game**, next to **Copy invite link**, with at least
 two joined players. The player list stays visible without a separate
