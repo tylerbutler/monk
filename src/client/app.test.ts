@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
-import { mountApp } from "./app";
+import { mountApp } from "./app.svelte";
 import { describeEvent } from "./views";
 import { destroyMatch, renderMatch as updateMatch } from "./match-view.svelte";
 import type { MatchActions } from "./views";
@@ -201,13 +201,13 @@ it("keeps optional settings closed and disables redundant factions", () => {
   expect(root.querySelector<HTMLDetailsElement>("#advanced-settings")?.open).toBe(false);
   expect(root.querySelector<HTMLOptionElement>('select[data-action="set-faction"] option[value="rock"]')?.disabled).toBe(true);
 });
-it("shows faction and waiting radar without calibration warnings in the lobby", () => {
+it("shows faction and players without an empty radar or calibration warnings in the lobby", () => {
   const root = document.createElement("section");
   renderMatch(root, { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true }, actions);
   expect(root.querySelector('[data-faction-symbol="rock"]')).not.toBeNull();
   expect(root.querySelector(".warning")).toBeNull();
   expect(root.querySelector(".calibration")).toBeNull();
-  expect(root.querySelector(".player-radar")).not.toBeNull();
+  expect(root.querySelector(".player-radar")).toBeNull();
   expect(root.querySelector(".radar-players")?.textContent).toContain("Player 1");
   expect(root.querySelector(".radar-players")?.textContent).toContain("Player 2");
   expect(root.querySelector("#player-roster")).toBeNull();

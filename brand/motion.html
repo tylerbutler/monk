@@ -50,15 +50,18 @@
     </header>
     <main>
       <h1>Paint the bounce.</h1>
-      <p class="intro">Yellow leads. Red follows. Blue brings it home.<br>A bouncing trail, without the ball.</p>
+      <p class="intro"><span id="lead">Yellow leads. Red follows. Blue brings it home.</span><br>A bouncing trail, without the ball.</p>
       <label class="treatment">Treatment
         <select id="treatment" aria-describedby="treatment-description" disabled>
           <option value="stops">Different stops</option>
           <option value="all-arches">All arches</option>
+          <option value="loading">Loading</option>
+          <option value="realistic">Realistic bounce</option>
+          <option value="wordmark">Wordmark reveal</option>
         </select>
       </label>
       <p id="treatment-description">All colors start on the left. Red stops after the first arch; blue continues through the second and clears its first-arch trail.</p>
-      <div class="stage" role="img" aria-label="Monk arches painted in yellow, then red and blue">
+      <div id="stage" class="stage" role="img" aria-label="Monk arches painted in yellow, then red and blue">
         <div class="artboard">
           <div id="animation" aria-hidden="true" hidden></div>
           <svg id="still" viewBox="0 0 280 220" aria-hidden="true">
@@ -79,7 +82,7 @@
     </main>
     <footer>
       <p id="timing">3.3-second entrance + a 0.4-second hold.</p>
-      <p>Vector Lottie / 60 fps / transparent background</p>
+      <p id="format">Vector Lottie / 60 fps / transparent background</p>
     </footer>
     <script type="module" src="./motion.ts"></script>
   </body>

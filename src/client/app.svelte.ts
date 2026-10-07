@@ -1,16 +1,17 @@
 import { flushSync, mount, unmount } from "svelte";
-import InviteQr from "./InviteQr.svelte";
+import type { ComponentProps } from "svelte";
+import Entry from "./Entry.svelte";
+import RoomInvite from "./RoomInvite.svelte";
 import { connectMatch } from "./connection";
 import { requestLocationPermission, startLocation } from "./location";
 import { startCompass } from "./compass";
 import type { CompassState } from "./compass";
 import { addTrialSample, exportTrialSummary, newTrialSummary } from "./trial";
-import { describeEvent, names, symbols, targets } from "./views";
+import { describeEvent, names, symbols } from "./views";
 import { icons } from "./icons";
 import wordmark from "../../brand/assets/wordmark.svg?url";
-import pairedMark from "../../brand/assets/symbol-paired.svg?url";
 import { destroyMatch, renderActivity, renderMatch, setRadarHeading } from "./match-view.svelte";
-import { deviceSchema, gamePreset, isFactionChange, sessionCredentialsSchema } from "../shared/protocol";
+import { deviceSchema, isFactionChange, sessionCredentialsSchema } from "../shared/protocol";
 import type { ConnectionStatus, EngineEvent, HostCommand, LocationStatus, MatchConnection, PlayerSnapshot, ServerMessage, SessionCredentials, TrialSample, TrialStatus, TrialSummary } from "../shared/protocol";
 
 function addIcon(parent: HTMLElement, source: string, className = "ui-icon"): HTMLImageElement {
@@ -38,49 +39,13 @@ function field(parent: HTMLElement, label: string, name: string, type = "text", 
   wrapper.append(input); parent.append(wrapper); return input;
 }
 
-function renderRules(parent: HTMLElement) {
-  const section = document.createElement("section");
-  section.id = "how-to-play"; section.className = "rules";
-  section.setAttribute("aria-labelledby", "rules-heading"); parent.append(section);
-  text(section, "h2", "How to play").id = "rules-heading";
-
-  const cycle = document.createElement("ul"); cycle.className = "faction-cycle"; section.append(cycle);
-  for (const faction of ["rock", "scissors", "paper"] as const) {
-    const item = document.createElement("li"); item.dataset.faction = faction; cycle.append(item);
-    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("aria-hidden", "true");
-    const image = document.createElementNS(icon.namespaceURI, "image");
-    image.setAttribute("href", symbols[faction]); image.setAttribute("width", "24"); image.setAttribute("height", "24");
-    icon.append(image); item.append(icon);
-    const label = text(item, "div", "");
-    text(label, "strong", names[faction]);
-    text(label, "span", `converts ${names[targets[faction]]}`);
-  }
-
-  const steps = document.createElement("ol"); steps.className = "rules-steps"; section.append(steps);
-  for (const [heading, description] of [
-    ["Find your target", "Your faction decides who you can convert. Check the player list and radar for targets and threats."],
-    ["Stay in range", "Stay near your target while the progress bar fills. Wait for the conversion to be confirmed."],
-    ["Change sides. Keep playing.", "When someone converts you, join their faction and stay in the game. Your targets change too."],
-  ]) {
-    const item = document.createElement("li"); steps.append(item);
-    text(item, "h3", heading); text(item, "p", description);
-  }
-
-  const setup = document.createElement("details"); setup.id = "rules-details"; setup.className = "rules-setup"; section.append(setup);
-  text(setup, "summary", "Full rules and round settings");
-  text(setup, "p", `Conversion starts automatically when both players share usable locations and the game confirms range. Stay in range for ${gamePreset.dwellMs / 1000} seconds by default. An interruption resets progress. Players in your own faction cannot convert you.`);
-  text(setup, "p", "After conversion, a short grace period prevents anyone from converting you again. Your targets and threats change with your faction.");
-  text(setup, "h3", "Before you start");
-  text(setup, "p", `Create a room or join with an invite link or room code. The host can start with two players. A round lasts ${gamePreset.roundDurationMs / 60000} minutes by default, or until the host ends it. The host can change the settings before play.`);
-  text(setup, "p", "Select Share location when you are ready to take part in conversions. Keep the app visible and the screen on. Radar positions are approximate; a nearby marker alone does not confirm a conversion.");
-}
-
 export function mountApp(root: HTMLElement): () => void {
   const game = document.createElement("div");
   game.className = "match-view";
-  const qrRoot = document.createElement("div"); qrRoot.id = "invite-qr";
-  let qrComponent: ReturnType<typeof mount> | null = null, qrUrl = "";
+  const entryRoot = document.createElement("div"); entryRoot.className = "entry-view";
+  const inviteRoot = document.createElement("div"); inviteRoot.className = "room-invitation";
+  let entryComponent: ReturnType<typeof mount> | null = null;
+  let inviteComponent: ReturnType<typeof mount> | null = null;
   const history = document.createElement("details"); history.id = "faction-history";
   let credentials: SessionCredentials | null = null, connection: MatchConnection | null = null;
   let snapshot: PlayerSnapshot | null = null, trial: TrialStatus | null = null;
@@ -101,7 +66,6 @@ export function mountApp(root: HTMLElement): () => void {
   let stopCompass: (() => void) | null = null, compassFramePending = false;
   let error = "";
   let errorField = "";
-  let inviteStatus = "";
   let diagnosticStatus = "";
   const rawInvite = new URLSearchParams(window.location.search).get("room");
   const invitedCode = rawInvite?.trim().toUpperCase() ?? null;
@@ -109,10 +73,26 @@ export function mountApp(root: HTMLElement): () => void {
   if (invitedCode !== null && !validInvite) error = "This invite link has an invalid room code. Enter a valid eight-character code.";
   const retained = new Map<string, { value: string; checked: boolean }>();
   const disclosures = new Map<string, boolean>();
+  const entryProps = $state<ComponentProps<typeof Entry>>({
+    invitedCode: validInvite ? invitedCode : null, error: "", errorField: "",
+    create: async (label: string) => { connect(await request("/api/matches", { label })); },
+    join: async (code: string, label: string) => { connect(await request(`/api/matches/${code}/join`, { label })); },
+    reportError: showError,
+  });
+  const inviteProps = $state<ComponentProps<typeof RoomInvite>>({
+    url: "", roomCode: "", phase: null, canHost: false, playerCount: 0,
+    start: () => sendCommand({ type: "start" }), reportError: showError,
+  });
 
-  function destroyInviteQr() {
-    if (qrComponent) void unmount(qrComponent);
-    qrComponent = null; qrUrl = "";
+  function destroyInvitation() {
+    const component = inviteComponent;
+    if (component) flushSync(() => { void unmount(component); });
+    inviteComponent = null;
+  }
+  function destroyEntry() {
+    const component = entryComponent;
+    if (component) flushSync(() => { void unmount(component); });
+    entryComponent = null;
   }
   function showError(reason: string, fieldId = "") {
     error = reason; errorField = fieldId; render();
@@ -354,7 +334,7 @@ export function mountApp(root: HTMLElement): () => void {
     connection?.close(); connection = null; credentials = null; snapshot = null; trial = null;
     latest = null; summary = null; retained.clear(); disclosures.clear(); error = "";
     pendingCommands.clear(); pendingFeedback.clear(); acknowledged.clear(); feedback = [];
-    conversionNotices = []; inviteStatus = ""; factionHistory = []; historyAvailable = false; interruption = null;
+    conversionNotices = []; factionHistory = []; historyAvailable = false; interruption = null;
     history.replaceChildren(); history.open = false; historyDirty = true;
     destroyMatch(game);
     sessionStorage.removeItem("monk-session"); render();
@@ -462,7 +442,7 @@ export function mountApp(root: HTMLElement): () => void {
   }
   function render() {
     if (disposed) return;
-    if (!credentials || snapshot?.phase === "ended") destroyInviteQr();
+    if (!credentials || snapshot?.phase === "ended") destroyInvitation();
     const playing = snapshot?.phase === "running" || snapshot?.phase === "paused";
     if (!snapshot?.radar || snapshot.phase === "ended") { stopCompass?.(); stopCompass = null; }
     const active = document.activeElement;
@@ -480,6 +460,8 @@ export function mountApp(root: HTMLElement): () => void {
     root.replaceChildren();
     root.classList.toggle("in-game", playing);
     root.classList.toggle("homepage", !credentials);
+    root.classList.toggle("room-shell", !!credentials && !playing);
+    root.dataset.phase = snapshot?.phase ?? (credentials ? "connecting" : "entry");
     const header = document.createElement("header"); header.className = "masthead"; root.append(header);
     const title = text(header, "h1", "");
     const logo = document.createElement("img");
@@ -506,58 +488,14 @@ export function mountApp(root: HTMLElement): () => void {
     }
     if (error && credentials) { const alert = text(root, "p", error, "error"); alert.setAttribute("role", "alert"); }
     if (!credentials) {
-      const entry = document.createElement("div"); entry.className = "entry-layout"; entry.dataset.invited = String(validInvite); root.append(entry);
-      if (!validInvite) {
-        const intro = document.createElement("div"); intro.className = "entry-intro"; entry.append(intro);
-        const lead = text(intro, "h2", "Change sides.");
-        lead.append(document.createElement("br"), document.createTextNode("Keep playing."));
-        text(intro, "p", "An outdoor Rock, Paper, Scissors game for friends.");
-        const mark = document.createElement("img");
-        mark.src = pairedMark; mark.alt = ""; mark.width = 140; mark.height = 120; intro.append(mark);
+      root.append(entryRoot);
+      flushSync(() => { entryProps.error = error; entryProps.errorField = errorField; });
+      if (!entryComponent) {
+        entryComponent = mount(Entry, { target: entryRoot, props: entryProps });
+        flushSync();
       }
-      const area = document.createElement("section"); area.id = "play"; area.tabIndex = -1;
-      area.setAttribute("aria-labelledby", "play-heading"); entry.append(area);
-      text(area, "h2", validInvite ? "Join your friends." : "Play with friends").id = "play-heading";
-      if (validInvite) text(area, "p", `You are invited to room ${invitedCode}.`);
-      const name = field(area, "Display name (optional)", "displayName"); name.maxLength = 80; name.autocomplete = "off";
-      const create = () => button(area, "Create room", async () => {
-        connect(await request("/api/matches", { label: name.value.trim() }));
-      }, "create", validInvite ? "secondary" : "", icons.create, "Creating room...");
-      if (!validInvite) create();
-      if (error && errorField !== "matchCode") { const alert = text(area, "p", error, "error"); alert.setAttribute("role", "alert"); }
-      const form = document.createElement("form"); form.className = "join-form"; area.append(form);
-      const code = field(form, "Room code", "matchCode", "text", validInvite ? invitedCode : "");
-      code.required = true; code.maxLength = 8; code.autocomplete = "off";
-      code.autocapitalize = "characters"; code.spellcheck = false;
-      if (validInvite && code.parentElement) code.parentElement.hidden = true;
-      if (!validInvite) {
-        text(form, "p", "Enter the eight-character code from your host.", "input-help").id = "room-code-hint";
-        code.setAttribute("aria-describedby", "room-code-hint");
-      }
-      if (error && errorField === "matchCode") {
-        const alert = text(form, "p", error, "error"); alert.id = "room-code-error"; alert.setAttribute("role", "alert");
-        code.setAttribute("aria-invalid", "true");
-        code.setAttribute("aria-describedby", "room-code-hint room-code-error");
-      }
-      const submit = document.createElement("button"); submit.type = "submit"; submit.id = "action-join"; form.append(submit);
-      const caption = document.createTextNode("Join room"); submit.append(caption);
-      addIcon(submit, icons.join);
-      form.addEventListener("submit", async event => {
-        event.preventDefault();
-        const matchCode = code.value.trim().toUpperCase();
-        if (!/^[A-Z2-9]{8}$/.test(matchCode)) {
-          showError("Enter the eight-character room code.", "matchCode"); return;
-        }
-        submit.disabled = true; submit.setAttribute("aria-busy", "true"); caption.data = "Joining room...";
-        try {
-          connect(await request(`/api/matches/${matchCode}/join`, { label: name.value.trim() }));
-        } catch (failure) { showError(failure instanceof Error ? failure.message : "Join failed. Try again."); }
-        finally { submit.disabled = false; submit.removeAttribute("aria-busy"); caption.data = "Join room"; }
-      });
-      if (validInvite) create();
-      text(area, "p", "Location sharing stays off until you choose Share location. Agree on a safe outdoor play area.", "entry-safety");
-      renderRules(root);
     } else {
+      destroyEntry();
       const top = document.createElement("div"); top.className = "match-heading";
       if (!playing) root.append(top);
       const roomTools = document.createElement("details"); roomTools.id = "room-tools";
@@ -565,33 +503,18 @@ export function mountApp(root: HTMLElement): () => void {
       if (playing) { top.append(roomTools); text(roomTools, "summary", "Room & options", "", icons.settings).id = "room-tools-toggle"; }
       text(tools, "h2", `Room ${credentials.matchCode}`);
       if (snapshot?.phase !== "ended") {
+        const roomCode = credentials.matchCode;
         const invite = new URL("/", window.location.origin); invite.searchParams.set("room", credentials.matchCode);
-        const invites = document.createElement("details"); invites.id = "room-invite"; invites.open = snapshot?.phase === "lobby";
-        invites.dataset.phase = snapshot?.phase ?? "";
-        tools.append(invites); text(invites, "summary", "Invite players", "", icons.invite).id = "room-invite-toggle";
-        const link = document.createElement("a"); link.href = invite.href; link.textContent = invite.href;
-        link.className = "invite-link"; link.dataset.inviteLink = ""; link.target = "_blank"; link.rel = "noopener";
-        link.id = "room-invite-link";
-        invites.append(link);
-        button(invites, "Copy invite link", async () => {
-          inviteStatus = "";
-          if (!navigator.clipboard?.writeText) throw new Error("Copy is unavailable. Copy the invite link from its context menu.");
-          await navigator.clipboard.writeText(invite.href);
-          inviteStatus = "Link copied."; render();
-        }, "copy-invite", "secondary", icons.copy);
-        if (snapshot?.canHost && snapshot.phase === "lobby") {
-          const start = button(invites, "Start game", () => sendCommand({ type: "start" }), "start", "", icons.play);
-          start.disabled = snapshot.roster.length < 2;
-          if (start.disabled) text(invites, "p", "Invite another player to start.");
-        }
-        if (inviteStatus) text(invites, "p", inviteStatus, "state-line").setAttribute("role", "status");
-        if (qrUrl !== invite.href) {
-          destroyInviteQr();
-          qrUrl = invite.href;
-          qrComponent = mount(InviteQr, { target: qrRoot, props: { url: invite.href, roomCode: credentials.matchCode } });
+        if (inviteProps.url !== invite.href) destroyInvitation();
+        flushSync(() => Object.assign(inviteProps, {
+          url: invite.href, roomCode, phase: snapshot?.phase ?? null,
+          canHost: snapshot?.canHost ?? false, playerCount: snapshot?.roster.length ?? 0,
+        }));
+        tools.append(inviteRoot);
+        if (!inviteComponent) {
+          inviteComponent = mount(RoomInvite, { target: inviteRoot, props: inviteProps });
           flushSync();
         }
-        invites.append(qrRoot);
       }
       if (!snapshot) text(root, "p", "Connecting to the private match. Location is not collected.");
       if (snapshot) {
@@ -727,7 +650,8 @@ export function mountApp(root: HTMLElement): () => void {
     stopCompass?.(); stopCompass = null;
     clearInterval(ageInterval);
     if (audio) void audio.close().catch(() => console.warn("monk", "audio_close_failed"));
-    destroyInviteQr();
+    destroyInvitation();
+    destroyEntry();
     destroyMatch(game);
     document.removeEventListener("visibilitychange", visibility); root.replaceChildren();
   };

@@ -24,10 +24,14 @@ game.
 | --- | --- |
 | `assets/wordmark.svg` | Primary ink wordmark on white or any faction color |
 | `assets/wordmark-reversed.svg` | White wordmark on ink |
+| `assets/wordmark-paired.svg` | Wordmark reveal's static finish: red/blue m with ink onk |
 | `assets/symbol.svg` | One-color symbol, including small sizes |
 | `assets/symbol-paired.svg` | Rock red and Scissors blue symbol on white or Paper yellow, 48 px or wider |
 | `assets/monk-entrance.json` | Different stops: all colors start on the left, with red stopping after the first arch |
-| `assets/monk-entrance-all-arches.json` | All arches: every color paints both arches, then blue clears from the first |
+| `assets/monk-entrance-all-arches.json` | All arches: yellow/blue/red at four times the original speed, then red clears from the second |
+| `assets/monk-loading.json` | Continuous yellow/blue/red sweeps with realistic bounce timing through a fully visible m |
+| `assets/monk-entrance-realistic.json` | Yellow/blue/red entrance with a fast launch, slow peak, and accelerating descent |
+| `assets/monk-entrance-wordmark.json` | Realistic bounce, then a leftward m move and an ink onk reveal |
 | `motion.html` | Standalone animation preview with replay, slow motion, and a timeline |
 | `assets/avatar.svg` | Red/blue arches on yellow; safe within a circular crop |
 | `samples/avatar-512.png` | 512 x 512 avatar |
@@ -54,33 +58,61 @@ website. Unlike the static identity kit, the motion preview needs the web
 build and a server. The app does not load the Lottie player or animation.
 
 An implied ball paints two bounces from left to right; no ball is drawn.
-The treatment selector switches between two versions:
+The treatment selector switches between five versions:
 
 - **Different stops:** yellow paints both arches. Red follows from the
   left and stops after the first. Blue also starts on the left and crosses
   both, clearing its first-arch trail as it paints the second.
   Red starts at 1.3 seconds and blue at 1.9 seconds. The entrance takes
   3.3 seconds, followed by a 0.4-second hold, for 3.7 seconds total.
-- **All arches:** yellow, red, and blue each paint both arches. Red starts
-  at 1.3 seconds and blue at 2.6 seconds. Once blue finishes at 4 seconds,
-  its first-arch trail clears over 0.7 seconds to reveal red.
-  A 0.4-second hold brings the total to 5.1 seconds.
+- **All arches:** yellow, blue, and red each paint both arches at four
+  times the original speed, taking 0.175 seconds per arch. Blue starts
+  at 0.325 seconds and red at 0.65 seconds, with 0.025-second color overlaps.
+  Once red finishes at 1 second, its second-arch trail clears over
+  0.175 seconds to reveal blue. A 0.1-second hold brings the total to
+  1.275 seconds.
+- **Loading:** yellow, blue, and red sweep through a fully visible m.
+  Each color crosses both arches in 0.7 seconds, using the Realistic bounce
+  quadratic ease-out on ascent and ease-in on descent. A red underlay joins
+  the end to the start of the 2.1-second loop. There is no final hold
+  or red-left/blue-right finish.
+- **Realistic bounce:** yellow, blue, and red each cross both arches,
+  taking 0.5 seconds per arch, with 0.05-second color overlaps.
+  Blue starts at 0.95 seconds and red at 1.9 seconds. Quadratic timing
+  slows each ascent to a stop at the peak, then accelerates the descent.
+  Red finishes at 2.9 seconds; its second-arch trail clears over 0.5 seconds.
+  A 0.3-second hold brings the total to 3.7 seconds.
+- **Wordmark reveal:** Realistic bounce plays unchanged for 3.7 seconds,
+  including its white upward guides and final symbol hold. The finished m
+  moves left and scales down uniformly over 0.55 seconds, with quadratic
+  ease-out. The original o, n, and k shapes fade in over 0.45 seconds, all
+  in ink, starting 0.1 seconds apart. A 0.8-second hold brings the total to 5.5 seconds.
+  The full wordmark is 240 units wide on the 280 x 220 canvas and runs at 60 fps.
+  Its m stays red/blue; the original static ink wordmark is unchanged.
 
-Each color starts 0.1 seconds before the previous color finishes painting.
-Every arch is drawn at a constant speed, taking 0.7 seconds, at 60 fps.
+Different stops takes 0.7 seconds per arch, with 0.1-second color overlaps.
+Different stops draws at constant speed at 60 fps; All arches uses
+constant-speed motion at 120 fps. Loading, Realistic bounce, and Wordmark
+reveal use realistic bounce timing at 60 fps.
 Yellow stays beneath red and blue. The center turn is flat at the baseline,
-with no paint extending below it. Both final frames match the paired symbol:
+with no paint extending below it. The three symbol-entrance final frames match the paired symbol:
 red on the left, with blue on the right and on the shared stem.
 Replay, half speed, the timeline, and the download use the selected treatment.
 
-Both downloadable JSON files are vector-only, with a transparent 280 x 220 canvas.
-It uses strokes and trim paths, with no images, fonts, expressions, or effects.
-Play it once (`loop: false`) and hold its last frame. Show the static paired
-symbol when reduced motion is requested. The preview also keeps the static
-symbol visible if JavaScript or the animation cannot load.
+All five downloadable JSON files are vector-only, with a transparent 280 x 220 canvas.
+They use paths, fills, strokes, and trim paths, with no images, fonts,
+expressions, or effects. Wordmark letters use the supplied geometric shapes,
+not typeset text.
+Thin white guides outline only the upward strokes and disappear at the peak.
+This motion-only exception does not change the static marks.
+Play entrances once (`loop: false`) and hold their last frame. Play Loading
+with `loop: true`. The preview pauses when the document is hidden. Show the static paired
+symbol when reduced motion is requested, or `wordmark-paired.svg` for Wordmark reveal.
+The selected static finish also stays visible when an animation cannot load.
+Without JavaScript, the preview shows the default paired symbol.
 
 Edit `scripts/generate-mark-animation.mjs` to adjust the timing, then run
-`npm run build:mark` to regenerate both `assets/monk-entrance*.json` files.
+`npm run build:mark` to regenerate all five `assets/monk-*.json` files.
 The normal build also runs this step. Keep the final geometry and faction
 colors fixed.
 
@@ -101,7 +133,8 @@ in one column while the neutral row stays two columns.
 Leave at least one stem-width of clear space around a mark. Use the wordmark
 at 104 px wide or larger, and the symbol at 24 px wide or larger. Below
 48 px, use the one-color symbol. Keep the supplied proportions and colors.
-Do not rotate, stretch, outline, or add effects to the marks.
+Do not rotate, stretch, outline, or add effects to the static marks.
+Only the supplied motion treatments use temporary white upward-stroke guides.
 
 Use Hanken Grotesk Bold for headlines and Regular for body copy. The wordmark
 is custom geometry, not typeset Hanken Grotesk; do not rebuild it by typing

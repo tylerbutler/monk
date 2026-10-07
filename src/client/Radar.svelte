@@ -26,8 +26,8 @@
 <div class="radar-layout" data-match-activity>
   {#if radar}
     <section class="player-overview" aria-label="Player distances">
-      <h3>Player distances</h3>
-      <p class="distance-reference">{reference ? `Approximate distances from ${referenceName}.` : "Location needed for distances."}</p>
+      <h3>{snapshot.phase === "lobby" ? `Players (${snapshot.roster.length})` : "Player distances"}</h3>
+      <p class="distance-reference">{reference ? `Approximate distances from ${referenceName}.` : snapshot.phase === "lobby" ? "Location sharing is optional." : "Location needed for distances."}</p>
       <ol class="radar-players">
         {#each radar.players as p (p.playerId)}
           {@const player = snapshot.roster.find(player => player.id === p.playerId)}
@@ -65,7 +65,8 @@
       {#if !radar.players.length}<p class="radar-note">No other players to show yet.</p>{/if}
     </section>
   {/if}
-  <section class="player-radar" aria-label="Player radar" data-radar-display>
+  {#if snapshot.phase !== "lobby" || reference}
+    <section class="player-radar" aria-label="Player radar" data-radar-display>
     {#if snapshot.ownFaction}
       <div class="radar-guide" aria-label="Faction guide">
         {#each guide as { relation, faction }}
@@ -148,7 +149,8 @@
     {:else}
       <p class="radar-empty">Waiting for location.</p>
     {/if}
-  </section>
+    </section>
+  {/if}
   <div class="hud-readout">{@render children()}</div>
   {#if radar}
     <details id="radar-details" class="radar-details">

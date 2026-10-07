@@ -107,7 +107,7 @@
   {/if}
 {/snippet}
 
-<div class="game-hud" data-faction={snapshot.ownFaction ?? undefined}>
+<div class="game-hud" data-faction={snapshot.ownFaction ?? undefined} data-phase={snapshot.phase}>
   <header class="hud-heading">
     {#if snapshot.ownFaction}
       <div class="own-faction" data-faction={snapshot.ownFaction}>

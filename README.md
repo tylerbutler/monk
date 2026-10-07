@@ -29,9 +29,10 @@ Commit `package-lock.json` and `rules/manifest.toml` when dependencies change.
 npm test && npm run typecheck && npm run build && npm run check:bundle
 ```
 
-The gameplay UI uses Svelte with Vite. The TypeScript controller owns network
-connections and device permissions. The gameplay component stays mounted across
-updates, so radar, focused controls, and open details stay in place.
+The entry, rules, invitation, and gameplay UI use Svelte with Vite. The
+TypeScript controller in `src/client/app.svelte.ts` owns network connections
+and device permissions. Svelte components stay mounted across updates, so
+form input, invitation QR codes, radar, and focused controls stay in place.
 
 `npm test` compiles the real Gleam rules and runs unit/browser-API tests and
 tests in the Workers runtime. Worker tests first build the browser assets,
@@ -118,24 +119,43 @@ in a browser or visit `/brand/` on the website to view it. `/brand` redirects
 to `/brand/`. The Vite build copies the public kit and its downloads into
 `dist/brand/`; internal design-tool records stay in the repository.
 The app uses the same wordmark, local Hanken Grotesk font, and faction palette.
+Entry pairs a yellow brand panel with room actions. The waiting room groups
+invitations and QR sharing beside the player list on desktop, and stacks them
+on phones. Gameplay leads with the player's faction, round clock, and nearby
+players; host tools and location details remain in disclosures.
+The [app design guide](src/client/DESIGN.md) records the current layouts,
+controls, and responsive rules.
 The browser favicon uses the yellow avatar; installed-app icons use the paired
 symbol. Gameplay rules and faction assignments are unchanged.
 
 Open `/brand/motion.html` to preview or download the Lottie animation.
-Choose between two treatments. **Different stops** starts every color on
+Choose between five treatments. **Different stops** starts every color on
 the left: yellow paints both arches, red stops after the first, and blue
 crosses both while clearing its first-arch trail. **All arches** sends
-yellow, red, and blue across both arches, then clears blue from the first
-to reveal red. Each color starts 0.1 seconds before the previous color
-finishes painting. Each arch takes 0.7 seconds. Both treatments finish on
-the original red-left/blue-right mark, with a 0.4-second hold.
-The sequences take 3.7 and 5.1 seconds, respectively. The download matches
-the selected treatment. The preview plays once and shows the static mark
-for reduced motion or a loading failure. The gameplay app does not load
-the animation.
+yellow, blue, and red across both arches at four times the original speed, then clears
+red from the second to reveal blue. Different stops takes 0.7 seconds
+per arch, with 0.1-second color overlaps and a 0.4-second hold.
+All arches takes 0.175 seconds per arch, with 0.025-second color overlaps
+and a 0.1-second hold, for 1.275 seconds total. **Realistic bounce** follows
+the same yellow/blue/red route with a fast launch, a slow peak, and an
+accelerating descent. It takes 3.7 seconds, including a 0.3-second hold.
+These three entrances finish on the original red-left/blue-right mark.
+**Loading** sweeps yellow, blue, and red through a fully visible m in a
+continuous 2.1-second loop, without a final hold or split-color finish.
+It uses the Realistic bounce speed profile, with a fast rise, slow peak,
+and accelerating descent, at 0.35 seconds per arch.
+**Wordmark reveal** plays Realistic bounce unchanged for 3.7 seconds, then
+moves and scales the colored m left over 0.55 seconds. The original
+**o**, **n**, and **k** shapes fade in over 0.45 seconds, all in ink.
+A 0.8-second hold brings the total to 5.5 seconds.
+All five use thin white outlines during upward motion only.
+The download matches the selected treatment. The preview shows the static
+symbol or complete wordmark for reduced motion or a loading failure,
+and pauses when hidden.
+The gameplay app does not load these animations.
 
 Edit `scripts/generate-mark-animation.mjs`, then run `npm run build:mark` to
-regenerate both `brand/assets/monk-entrance*.json` files. The regular build
+regenerate the five `brand/assets/monk-*.json` files. The regular build
 also runs the generator.
 
 ## Local use

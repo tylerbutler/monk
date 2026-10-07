@@ -132,26 +132,52 @@ to the identity palette.
 ### Painted-bounce motion study
 
 The separate [motion preview](motion.html) draws the paired mark as paint
-left by an implied bouncing ball. No ball is visible. Two selectable
-treatments start every color at the left baseline, in yellow/red/blue order.
+left by an implied bouncing ball. No ball is visible. Five selectable
+treatments start every color at the left baseline.
 **Different stops** sends yellow across both arches and stops red after the
 first. Blue crosses both, clearing its first-arch trail while it paints
-the second. **All arches** sends every color across both arches, then
-clears blue's first-arch trail to reveal red. Yellow stays beneath red and
-blue; blue covers red at the shared stem.
+the second, in yellow/red/blue order. **All arches** sends every color
+across both arches, in yellow/blue/red order, at four times the original
+speed. Red's second-arch trail then clears to reveal blue. Yellow stays beneath red
+and blue; blue covers red at the shared stem in the entrance final marks.
+**Realistic bounce** follows the All arches route with a fast launch,
+a slow peak, and an accelerating descent. **Loading** continuously sweeps
+yellow, blue, and red through a fully visible m; a red underlay joins
+the end of each cycle to its start.
+**Wordmark reveal** uses Realistic bounce unchanged as its opening, then
+moves the finished colored m left and scales it down uniformly. The original
+o, n, and k shapes appear in ink; the final wordmark keeps the red/blue m.
+This is a motion finish, not a replacement for the primary ink wordmark.
 
-Each color starts 0.1 seconds before the previous color finishes painting.
-Every color draws at a constant speed, taking 0.7 seconds per arch, with
-no easing at the apex or baseline. The blue trail clears at the same
-speed. The center turn stays flat at the baseline; no paint extends below
-it. The finished paint stays still; the mark does not stretch, rotate,
-or rebound.
+Different stops takes 0.7 seconds per arch, with 0.1-second color overlaps.
+All arches takes 0.175 seconds per arch, with 0.025-second color overlaps.
+Loading takes 0.35 seconds per arch, without overlaps. Realistic bounce
+takes 0.5 seconds per arch, with 0.05-second overlaps, quadratic ease-out
+on ascent, and quadratic ease-in on descent. Loading uses the same speed
+profile within each 0.35-second arch; Wordmark reveal uses the complete
+Realistic bounce entrance. Different stops and All arches draw their
+bounces at a constant speed. Entrance trails clear at constant speed.
+The center turn stays flat at the baseline; no paint extends below
+it. Final holds are still; the mark does not stretch, rotate, or rebound.
 
-The vector Lotties have 3.3 and 4.7 seconds of motion, respectively, each
-with a 0.4-second final hold, at 60 fps. Playback is once, not a loop.
-Both final states preserve the red-left/blue-right symbol. Reduced motion
-shows the static SVG, as does a loading failure. Replay, half speed, the
-timeline, and the download follow the selected treatment. These controls
+White 32-unit guide strokes sit under the 28-unit color strokes during
+ascent only. A small leading edge separates each rise from earlier paint.
+Guides disappear at the peak and never appear in the finished entrance marks.
+This is a motion-only exception to the no-outline rule; static SVGs are unchanged.
+
+Different stops has 3.3 seconds of motion and a 0.4-second hold at 60 fps.
+All arches has 1.175 seconds of motion and a 0.1-second hold at 120 fps.
+Realistic bounce has 3.4 seconds of motion and a 0.3-second hold at 60 fps.
+These entrances play once and preserve the red-left/blue-right symbol.
+Loading is a continuous 2.1-second loop at 60 fps with no final hold.
+Wordmark reveal keeps the 3.7-second Realistic bounce opening, then moves
+and scales the m over 0.55 seconds with quadratic ease-out. The ink letters
+fade in over 0.45 seconds, with 0.1-second start offsets. Its 0.8-second
+hold brings the total to 5.5 seconds at 60 fps. The full wordmark is centered
+at 240 units wide within the existing 280 x 220 artboard.
+Reduced motion and loading failures show the selected static finish:
+the paired symbol, or the complete `wordmark-paired.svg` for Wordmark reveal.
+Replay, half speed, the timeline, and the download follow the selected treatment. These controls
 are preview-only; the game remains unchanged.
 
 ## Typography

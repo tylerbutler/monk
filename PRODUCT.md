@@ -70,6 +70,11 @@ is limited to two iPhones; its results are still pending.
   and labeled radar ranges. Technical location details remain optional.
 - Room entry precedes the short rules; invitations prioritize joining.
   Invalid room codes retain input and return focus to the code field.
+- Entry keeps the paired arches visible on phones beside a compact yellow
+  introduction. Room actions remain within the first small-phone viewport.
+- The waiting room pairs a yellow invitation area with the player list on
+  desktop and stacks them on phones. An empty radar stays hidden in the
+  waiting room; it appears when a reference position is available.
 - The marketing identity kit is separate from the app, under `brand/`.
 - The website build includes the public identity kit at `/brand/` and the
   linked faction workups at `/brand/studies/`. Internal design-tool records

@@ -1,5 +1,5 @@
 import "./styles.css";
-import { mountApp } from "./app";
+import { mountApp } from "./app.svelte";
 
 const root = document.getElementById("app");
 if (!root) throw new Error("Monk application root is missing.");

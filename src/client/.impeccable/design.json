@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-07T06:35:45.965-07:00",
+  "title": "Design System: Monk app - Side by Side",
+  "extensions": {
+    "colorMeta": {
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "tonalRamp": ["oklch(0.15 0.0039 286.05)", "oklch(0.26 0.0039 286.05)", "oklch(0.38 0.0039 286.05)", "oklch(0.49 0.0039 286.05)", "oklch(0.61 0.0039 286.05)", "oklch(0.72 0.0039 286.05)", "oklch(0.84 0.0039 286.05)", "oklch(0.95 0.0039 286.05)"]
+      },
+      "white": {
+        "role": "neutral",
+        "displayName": "White",
+        "tonalRamp": ["oklch(0.15 0 0)", "oklch(0.26 0 0)", "oklch(0.38 0 0)", "oklch(0.49 0 0)", "oklch(0.61 0 0)", "oklch(0.72 0 0)", "oklch(0.84 0 0)", "oklch(0.95 0 0)"]
+      },
+      "faction-rock": {
+        "role": "primary",
+        "displayName": "Rock red",
+        "tonalRamp": ["oklch(0.15 0.1722 27.66)", "oklch(0.26 0.1722 27.66)", "oklch(0.38 0.1722 27.66)", "oklch(0.49 0.1722 27.66)", "oklch(0.61 0.1722 27.66)", "oklch(0.72 0.1722 27.66)", "oklch(0.84 0.1722 27.66)", "oklch(0.95 0.1722 27.66)"]
+      },
+      "faction-paper": {
+        "role": "primary",
+        "displayName": "Paper yellow",
+        "tonalRamp": ["oklch(0.15 0.1544 94.40)", "oklch(0.26 0.1544 94.40)", "oklch(0.38 0.1544 94.40)", "oklch(0.49 0.1544 94.40)", "oklch(0.61 0.1544 94.40)", "oklch(0.72 0.1544 94.40)", "oklch(0.84 0.1544 94.40)", "oklch(0.95 0.1544 94.40)"]
+      },
+      "faction-scissors": {
+        "role": "primary",
+        "displayName": "Scissors blue",
+        "tonalRamp": ["oklch(0.15 0.1199 245.73)", "oklch(0.26 0.1199 245.73)", "oklch(0.38 0.1199 245.73)", "oklch(0.49 0.1199 245.73)", "oklch(0.61 0.1199 245.73)", "oklch(0.72 0.1199 245.73)", "oklch(0.84 0.1199 245.73)", "oklch(0.95 0.1199 245.73)"]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted",
+        "tonalRamp": ["oklch(0.15 0 0)", "oklch(0.26 0 0)", "oklch(0.38 0 0)", "oklch(0.49 0 0)", "oklch(0.61 0 0)", "oklch(0.72 0 0)", "oklch(0.84 0 0)", "oklch(0.95 0 0)"]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Line",
+        "tonalRamp": ["oklch(0.15 0 0)", "oklch(0.26 0 0)", "oklch(0.38 0 0)", "oklch(0.49 0 0)", "oklch(0.61 0 0)", "oklch(0.72 0 0)", "oklch(0.84 0 0)", "oklch(0.95 0 0)"]
+      },
+      "surface-subtle": {
+        "role": "neutral",
+        "displayName": "Surface subtle",
+        "tonalRamp": ["oklch(0.15 0 0)", "oklch(0.26 0 0)", "oklch(0.38 0 0)", "oklch(0.49 0 0)", "oklch(0.61 0 0)", "oklch(0.72 0 0)", "oklch(0.84 0 0)", "oklch(0.95 0 0)"]
+      },
+      "threat": {
+        "role": "secondary",
+        "displayName": "Threat",
+        "tonalRamp": ["oklch(0.15 0.1353 28.53)", "oklch(0.26 0.1353 28.53)", "oklch(0.38 0.1353 28.53)", "oklch(0.49 0.1353 28.53)", "oklch(0.61 0.1353 28.53)", "oklch(0.72 0.1353 28.53)", "oklch(0.84 0.1353 28.53)", "oklch(0.95 0.1353 28.53)"]
+      },
+      "incoming-surface": {
+        "role": "secondary",
+        "displayName": "Incoming surface",
+        "tonalRamp": ["oklch(0.15 0.0172 44.81)", "oklch(0.26 0.0172 44.81)", "oklch(0.38 0.0172 44.81)", "oklch(0.49 0.0172 44.81)", "oklch(0.61 0.0172 44.81)", "oklch(0.72 0.0172 44.81)", "oklch(0.84 0.0172 44.81)", "oklch(0.95 0.0172 44.81)"]
+      },
+      "control-hover": {
+        "role": "neutral",
+        "displayName": "Control hover",
+        "tonalRamp": ["oklch(0.15 0.0053 286.09)", "oklch(0.26 0.0053 286.09)", "oklch(0.38 0.0053 286.09)", "oklch(0.49 0.0053 286.09)", "oklch(0.61 0.0053 286.09)", "oklch(0.72 0.0053 286.09)", "oklch(0.84 0.0053 286.09)", "oklch(0.95 0.0053 286.09)"]
+      },
+      "field-line": {
+        "role": "neutral",
+        "displayName": "Field line",
+        "tonalRamp": ["oklch(0.15 0.0039 286.05 / 0.4)", "oklch(0.26 0.0039 286.05 / 0.4)", "oklch(0.38 0.0039 286.05 / 0.4)", "oklch(0.49 0.0039 286.05 / 0.4)", "oklch(0.61 0.0039 286.05 / 0.4)", "oklch(0.72 0.0039 286.05 / 0.4)", "oklch(0.84 0.0039 286.05 / 0.4)", "oklch(0.95 0.0039 286.05 / 0.4)"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Playing faction heading", "purpose": "Desktop own-faction heading; responsive sizes are recorded in DESIGN.md, not a kit-wide display ramp." },
+      "headline": { "displayName": "Section heading", "purpose": "App sections and non-playing HUD headings." },
+      "title": { "displayName": "Subheading", "purpose": "Player-list headings and other subsections." },
+      "body": { "displayName": "Body", "purpose": "Instructions and operational copy, capped at 70ch." },
+      "label": { "displayName": "Field label", "purpose": "Form labels; buttons and summaries have their own weight 650." },
+      "caption": { "displayName": "Caption", "purpose": "QR/radar captions and distance reference notes." },
+      "metadata": { "displayName": "Metadata", "purpose": "Faction labels and supporting location information." }
+    },
+    "shadows": [],
+    "motion": [
+      { "name": "button-background", "value": "background-color 160ms ease-out", "purpose": "Button state color only; disabled under prefers-reduced-motion: reduce. No app splash or gameplay animation dependency." }
+    ],
+    "breakpoints": [
+      { "name": "entry-compact lower boundary: min-width", "value": "641px" },
+      { "name": "entry-stack upper boundary: max-width", "value": "900px" },
+      { "name": "phone: max-width", "value": "640px" },
+      { "name": "narrow-phone: max-width", "value": "480px" },
+      { "name": "short-landscape: orientation landscape and max-height", "value": "500px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Ink-led action; inline SVG copies the shipped Tabler outline circle-plus geometry. CSS variables stay live-bound with standalone fallbacks.",
+      "html": "<button class=\"ds-button-primary\" type=\"button\"><svg class=\"ds-action-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0\"/><path d=\"M9 12h6\"/><path d=\"M12 9v6\"/></svg>Create room</button>",
+      "css": ".ds-button-primary { min-height: 3rem; font-family: \"Hanken Grotesk\", sans-serif; font-size: 1rem; line-height: 1.55; font-weight: 650; padding: .7rem 1rem; border: 1px solid var(--accent, #171719); border-radius: .25rem; background: var(--accent, #171719); color: #fff; cursor: pointer; margin: .5rem .5rem .5rem 0; transition: background-color 160ms ease-out; -webkit-tap-highlight-color: #f2cf4566; } .ds-action-icon { width: 1.15em; height: 1.15em; vertical-align: -.2em; margin-inline-end: .45em; } .ds-button-primary:hover { background: #303033; } .ds-button-primary:active { background: #000; } .ds-button-primary:focus-visible { outline: 3px solid var(--ink, #171719); outline-offset: 3px; } .ds-button-primary:disabled { opacity: .55; cursor: not-allowed; } .ds-button-primary[aria-busy=\"true\"] { cursor: wait; } @media (prefers-reduced-motion: reduce) { .ds-button-primary { transition: none; } }"
+    },
+    {
+      "name": "Secondary button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Outlined action on the current field; white backing is a scoped HUD exception, not this variant's global background.",
+      "html": "<button class=\"ds-button-secondary\" type=\"button\"><svg class=\"ds-copy-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M7 9.667a2.667 2.667 0 0 1 2.667 -2.667h8.666a2.667 2.667 0 0 1 2.667 2.667v8.666a2.667 2.667 0 0 1 -2.667 2.667h-8.666a2.667 2.667 0 0 1 -2.667 -2.667l0 -8.666\"/><path d=\"M4.012 16.737a2.005 2.005 0 0 1 -1.012 -1.737v-10c0 -1.1 .9 -2 2 -2h10c.75 0 1.158 .385 1.5 1\"/></svg>Copy invite link</button>",
+      "css": ".ds-button-secondary { min-height: 3rem; font-family: \"Hanken Grotesk\", sans-serif; font-size: 1rem; line-height: 1.55; font-weight: 650; padding: .7rem 1rem; border: 1px solid var(--accent, #171719); border-radius: .25rem; background: transparent; color: var(--accent, #171719); cursor: pointer; margin: .5rem .5rem .5rem 0; transition: background-color 160ms ease-out; -webkit-tap-highlight-color: #f2cf4566; } .ds-copy-icon { width: 1.15em; height: 1.15em; vertical-align: -.2em; margin-inline-end: .45em; } .ds-button-secondary:hover { background: var(--surface-subtle, #f5f5f5); } .ds-button-secondary:focus-visible { outline: 3px solid var(--ink, #171719); outline-offset: 3px; } .ds-button-secondary:disabled { opacity: .55; cursor: not-allowed; } .ds-button-secondary[aria-busy=\"true\"] { cursor: wait; } @media (prefers-reduced-motion: reduce) { .ds-button-secondary { transition: none; } }"
+    },
+    {
+      "name": "Room-code field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Labeled code input with linked helper text; aria-invalid changes the stroke. Error text belongs inline and entered values persist.",
+      "html": "<label class=\"ds-code-label\" for=\"ds-room-code\">Room code<input class=\"ds-code-input\" id=\"ds-room-code\" name=\"matchCode\" maxlength=\"8\" required autocomplete=\"off\" autocapitalize=\"characters\" spellcheck=\"false\" aria-describedby=\"ds-code-help\" /></label><p class=\"ds-code-help\" id=\"ds-code-help\">Enter the eight-character code from your host.</p>",
+      "css": ".ds-code-label { display: grid; gap: .35rem; font-family: \"Hanken Grotesk\", sans-serif; font-size: 1rem; line-height: 1.55; color: var(--ink, #171719); font-weight: 600; margin: .75rem 0; } .ds-code-input { width: 100%; min-height: 3rem; font: inherit; color: var(--ink, #171719); background: #fff; border: 1px solid #757575; border-radius: .25rem; padding: .65rem .75rem; caret-color: var(--accent, #171719); -webkit-tap-highlight-color: #f2cf4566; } .ds-code-input::placeholder { color: var(--muted, #535353); } .ds-code-input[aria-invalid=\"true\"] { border-color: var(--threat, #85221b); } .ds-code-input:focus-visible { outline: 3px solid var(--ink, #171719); outline-offset: 3px; } .ds-code-help { font-family: \"Hanken Grotesk\", sans-serif; font-size: .85rem; line-height: 1.45; margin: -.25rem 0 .5rem; color: var(--muted, #535353); }"
+    },
+    {
+      "name": "Skip-to-play navigation",
+      "kind": "nav",
+      "description": "The entry masthead's real anchor, not a pill or invented navigation bar.",
+      "html": "<a class=\"ds-skip-play\" href=\"#play\">Skip to play</a>",
+      "css": ".ds-skip-play { display: inline-flex; align-items: center; min-height: 2.75rem; font-family: \"Hanken Grotesk\", sans-serif; font-size: 1rem; line-height: 1.55; color: var(--accent, #171719); font-weight: 650; text-decoration: underline; text-underline-offset: .2em; -webkit-tap-highlight-color: #f2cf4566; } .ds-skip-play:hover { color: var(--ink, #171719); } .ds-skip-play:focus-visible { outline: 3px solid var(--ink, #171719); outline-offset: 3px; }"
+    },
+    {
+      "name": "Relationship label",
+      "kind": "chip",
+      "description": "Non-interactive outlined text role; threat changes currentColor. This does not canonize radar glyph shorthand.",
+      "html": "<span class=\"ds-relationship\" data-relationship=\"threat\">Threat</span>",
+      "css": ".ds-relationship { font-family: \"Hanken Grotesk\", sans-serif; line-height: 1.55; font-size: .85rem; font-weight: 650; padding: .1rem .4rem; border: 1px solid currentColor; border-radius: .2rem; color: var(--muted, #535353); } .ds-relationship[data-relationship=\"target\"] { color: var(--accent, #171719); } .ds-relationship[data-relationship=\"threat\"] { color: var(--threat, #85221b); }"
+    },
+    {
+      "name": "Technical disclosure",
+      "kind": "custom",
+      "description": "Native details/summary interaction; the body is copied from the shipped radar explanation.",
+      "html": "<details class=\"ds-disclosure\"><summary class=\"ds-disclosure-summary\">Radar details</summary><p class=\"ds-disclosure-note\">Influence must stay confirmed until the bar fills. Leaving range or losing location quality stops progress.</p></details>",
+      "css": ".ds-disclosure { font-family: \"Hanken Grotesk\", sans-serif; font-size: 1rem; line-height: 1.55; color: var(--ink, #171719); margin: 1rem 0 0; border-top: 1px solid var(--line, #d9d9d9); } .ds-disclosure-summary { cursor: pointer; min-height: 2.75rem; padding: .6rem 0; font-weight: 650; -webkit-tap-highlight-color: #f2cf4566; } .ds-disclosure-summary:focus-visible { outline: 3px solid var(--ink, #171719); outline-offset: 3px; } .ds-disclosure-note { max-width: 70ch; margin: .7rem 0; color: var(--muted, #535353); font-size: .95rem; }"
+    },
+    {
+      "name": "Player distance row",
+      "kind": "custom",
+      "description": "Static specimen of the pictured nearby-player pattern with approximate distance; hand SVG paths are copied from Tabler hand-two-fingers.",
+      "html": "<ol class=\"ds-player-list\"><li class=\"ds-player-row\"><div class=\"ds-player-summary\"><div class=\"ds-player-heading\"><strong><svg class=\"ds-player-hand\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M8 13v-8.5a1.5 1.5 0 0 1 3 0v7.5\"/><path d=\"M17 11.5a1.5 1.5 0 0 1 3 0v4.5a6 6 0 0 1 -6 6h-2h.208a6 6 0 0 1 -5.012 -2.7a69.74 69.74 0 0 1 -.196 -.3c-.312 -.479 -1.407 -2.388 -3.286 -5.728a1.5 1.5 0 0 1 .536 -2.022a1.867 1.867 0 0 1 2.28 .28l1.47 1.47\"/><path d=\"M14 10.5a1.5 1.5 0 0 1 3 0v1.5\"/><path d=\"M11 5.5v-2a1.5 1.5 0 1 1 3 0v8.5\"/></svg>Test Scissors</strong><span class=\"ds-player-faction\">Scissors</span><span class=\"ds-player-relation\">Target</span></div><p class=\"ds-player-distance\"><span class=\"ds-distance-qualifier\">about </span><strong>60 m</strong> E</p></div><details class=\"ds-player-details\"><summary class=\"ds-player-details-summary\">Location details</summary><p class=\"ds-player-note\">Location is approximate.</p></details></li></ol>",
+      "css": ".ds-player-list { padding-left: 1.5rem; margin: 0; max-height: 18rem; overflow-y: auto; scrollbar-color: var(--ink, #171719) transparent; font-family: \"Hanken Grotesk\", sans-serif; line-height: 1.55; font-size: 1rem; color: var(--ink, #171719); } .ds-player-row { padding: 1rem 0; border-bottom: 1px solid var(--line, #d9d9d9); overflow-wrap: anywhere; } .ds-player-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: .5rem; } .ds-player-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .5rem; } .ds-player-heading strong { flex-basis: 100%; } .ds-player-hand { width: 1.7rem; height: 1.7rem; padding: .2rem; margin-inline-end: .45rem; vertical-align: -.45rem; border-radius: 50%; background: var(--faction-scissors, #69b5f5); } .ds-player-faction { font-size: .85rem; } .ds-player-relation { font-size: .85rem; font-weight: 650; padding: .1rem .4rem; border: 1px solid currentColor; border-radius: .2rem; color: var(--accent, #171719); } .ds-player-distance { margin: 0; text-align: right; white-space: nowrap; font-size: .85rem; font-variant-numeric: tabular-nums; } .ds-player-distance strong { font-size: 1.8rem; line-height: 1.1; letter-spacing: -.025em; } .ds-distance-qualifier { display: block; font-size: .75rem; } .ds-player-details { margin: 0; } .ds-player-details-summary { cursor: pointer; min-height: 2.75rem; padding: .6rem 0; font-size: .8rem; font-weight: 500; } .ds-player-details-summary:focus-visible { outline: 3px solid var(--ink, #171719); outline-offset: 3px; } .ds-player-note { margin: .25rem 0; font-size: .95rem; color: var(--muted, #535353); }"
+    },
+    {
+      "name": "Own-faction HUD heading",
+      "kind": "card",
+      "refersTo": "game-hud",
+      "description": "A square flat field, not an elevated card. This is only the heading specimen; the full HUD retains player/readout/radar and disclosures.",
+      "html": "<div class=\"ds-hud\"><header class=\"ds-hud-heading\"><div class=\"ds-own-faction\"><svg class=\"ds-own-hand\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M8 11v-3.5a1.5 1.5 0 0 1 3 0v2.5\"/><path d=\"M11 9.5v-3a1.5 1.5 0 0 1 3 0v3.5\"/><path d=\"M14 7.5a1.5 1.5 0 0 1 3 0v2.5\"/><path d=\"M17 9.5a1.5 1.5 0 0 1 3 0v4.5a6 6 0 0 1 -6 6h-2h.208a6 6 0 0 1 -5.012 -2.7l-.196 -.3c-.312 -.479 -1.407 -2.388 -3.286 -5.728a1.5 1.5 0 0 1 .536 -2.022a1.867 1.867 0 0 1 2.28 .28l1.47 1.47\"/></svg><h2 class=\"ds-hud-title\">Rock</h2></div><div class=\"ds-hud-round\"><p class=\"ds-round-state\">Round running</p><p class=\"ds-round-clock\" aria-label=\"Round time\">9:59</p></div></header></div>",
+      "css": ".ds-hud { padding: 1.5rem; background: var(--faction-rock, #eb6256); color: var(--ink, #171719); font-family: \"Hanken Grotesk\", sans-serif; line-height: 1.55; } .ds-hud-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-bottom: 1.25rem; margin-bottom: 1.25rem; border-bottom: 1px solid #17171966; } .ds-own-faction { display: flex; align-items: center; gap: .6rem; min-width: 0; } .ds-own-hand { width: 3rem; height: 3rem; flex-shrink: 0; padding: .4rem; border-radius: 50%; background: var(--faction-rock, #eb6256); } .ds-hud-title { margin: 0; font-size: 2.5rem; font-weight: 750; line-height: 1.2; letter-spacing: -.035em; text-wrap: balance; } .ds-hud-round { text-align: right; flex-shrink: 0; } .ds-round-state { margin: 0; font-size: .8rem; font-weight: 600; } .ds-round-clock { margin: 0; font-size: 2.5rem; font-weight: 700; line-height: 1.15; letter-spacing: -.035em; font-variant-numeric: tabular-nums; } @media (max-width: 640px) { .ds-hud { padding: 1rem; } .ds-hud-heading { padding-bottom: .75rem; margin-bottom: 1rem; } .ds-hud-title, .ds-round-clock { font-size: 2rem; } } @media (max-width: 480px) { .ds-hud-heading { gap: .5rem; } .ds-hud-title, .ds-round-clock { font-size: 1.75rem; } }"
+    },
+    {
+      "name": "Branded entry introduction",
+      "kind": "custom",
+      "description": "Source-led responsive yellow introduction. The supplied symbol is inlined without changing its paths or viewBox; it is never a text-glyph logo.",
+      "html": "<div class=\"ds-entry-intro\"><div><h2 class=\"ds-entry-title\">Change sides.<br />Keep playing.</h2><p class=\"ds-entry-copy\">An outdoor Rock, Paper, Scissors game for friends.</p></div><svg class=\"ds-entry-mark\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 140 120\" aria-hidden=\"true\"><path fill=\"#eb6256\" d=\"M0 120V42a42 42 0 0 1 84 0v78H56V42a14 14 0 0 0-28 0v78Z\"/><path fill=\"#69b5f5\" d=\"M56 120V42a42 42 0 0 1 84 0v78h-28V42a14 14 0 0 0-28 0v78Z\"/></svg></div>",
+      "css": ".ds-entry-intro { display: flex; flex-direction: column; justify-content: space-between; gap: 2rem; padding: 3rem; background: var(--faction-paper, #f2cf45); color: var(--ink, #171719); font-family: \"Hanken Grotesk\", sans-serif; } .ds-entry-title { margin: 0 0 1.25rem; font-size: 3.75rem; font-weight: 750; line-height: 1; letter-spacing: -.04em; text-wrap: balance; } .ds-entry-copy { max-width: 30ch; font-size: 1.15rem; line-height: 1.5; margin: 0; } .ds-entry-mark { display: block; width: 14rem; height: auto; margin: 1.5rem; } @media (min-width: 641px) and (max-width: 900px) { .ds-entry-intro { display: grid; grid-template-columns: minmax(0, 1fr) 5rem; align-items: center; gap: 1.5rem; padding: 1.5rem; } .ds-entry-title { font-size: 2rem; margin-bottom: .75rem; } .ds-entry-copy { font-size: 1rem; } .ds-entry-mark { width: 5rem; margin: 0; } } @media (max-width: 640px) { .ds-entry-intro { display: grid; grid-template-columns: minmax(0, 1fr) 4rem; align-items: center; gap: 1rem; padding: 1rem; } .ds-entry-title { font-size: 1.75rem; line-height: 1.05; margin-bottom: .5rem; } .ds-entry-copy { font-size: .9rem; line-height: 1.4; } .ds-entry-mark { width: 4rem; margin: 0; } } @media (max-width: 480px) { .ds-entry-intro { padding: .75rem; grid-template-columns: minmax(0, 1fr) 3.5rem; gap: .75rem; } .ds-entry-title { font-size: 1.5rem; } .ds-entry-copy { font-size: .85rem; } .ds-entry-mark { width: 3.5rem; } }"
+    },
+    {
+      "name": "In-game radar frame",
+      "kind": "custom",
+      "description": "Static frame specimen from the 320-unit SVG. Rings and range labels are functional; dynamic markers and glyph role badges are intentionally not synthesized here.",
+      "html": "<figure class=\"ds-radar-figure\"><svg class=\"ds-radar-svg\" viewBox=\"0 0 320 320\" aria-hidden=\"true\"><circle cx=\"160\" cy=\"160\" r=\"136\" class=\"ds-radar-face\"/><circle cx=\"160\" cy=\"160\" r=\"60\" class=\"ds-radar-ring\"/><circle cx=\"160\" cy=\"160\" r=\"120\" class=\"ds-radar-ring\"/><text x=\"166\" y=\"95\" class=\"ds-range-label\">37.5 m</text><text x=\"166\" y=\"35\" class=\"ds-range-label\">75 m</text><path d=\"M160 40V280M40 160H280\" class=\"ds-radar-axis\"/><text x=\"160\" y=\"19\" text-anchor=\"middle\" class=\"ds-radar-compass\">North</text><text x=\"160\" y=\"311\" text-anchor=\"middle\" class=\"ds-radar-compass\">S</text><text x=\"307\" y=\"165\" text-anchor=\"middle\" class=\"ds-radar-compass\">E</text><text x=\"13\" y=\"165\" text-anchor=\"middle\" class=\"ds-radar-compass\">W</text><circle cx=\"160\" cy=\"160\" r=\"7\" class=\"ds-radar-center\"/><text x=\"160\" y=\"186\" text-anchor=\"middle\" class=\"ds-radar-you\">You</text></svg><figcaption class=\"ds-radar-caption\">Rings: 37.5 m / 75 m</figcaption></figure>",
+      "css": ".ds-radar-figure { margin: 0; text-align: center; font-family: \"Hanken Grotesk\", sans-serif; font-size: 1rem; line-height: 1.55; color: var(--ink, #171719); } .ds-radar-svg { display: block; width: 100%; max-width: 20rem; height: auto; color: var(--ink, #171719); margin-inline: auto; } .ds-radar-face { fill: var(--accent, #171719); } .ds-radar-ring { fill: none; stroke: #ffffff99; stroke-width: 1.5; } .ds-radar-axis { fill: none; stroke: #ffffff99; stroke-width: 1; } .ds-range-label { fill: #fff; stroke: var(--ink, #171719); stroke-width: 3; paint-order: stroke; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; } .ds-radar-compass { fill: var(--ink, #171719); font-size: 13px; font-weight: 700; } .ds-radar-you { fill: #fff; font-size: 13px; font-weight: 700; } .ds-radar-center { fill: #fff; stroke: var(--accent, #171719); stroke-width: 2; } .ds-radar-caption { font-size: .8rem; margin: 0; } @media (max-width: 640px) { .ds-radar-svg { width: min(100%, 17.5rem, 36svh); } } @media (orientation: landscape) and (max-height: 500px) { .ds-radar-svg { width: min(100%, 52svh); } }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Side by Side",
+    "overview": "The app extends the supplied paired-arch identity into a clear, flat interface for outdoor play. Local Hanken Grotesk, original SVG marks, exact faction colors, ink controls, and thin dividers do the work; there is no new world, image comp, authored shipping raster, or splash animation.\n\nThis scoped record is authoritative for **app-specific layout, sizing, and controls** in `src/client/`. It inherits marks, palette, font, and identity geometry from [the kit guide](../../brand/DESIGN.md) and [kit assets](../../brand/assets/). The kit's earlier app measurements do not override the current stylesheet recorded here. [Root DESIGN.md](../../DESIGN.md) remains the separate game/system concept; [PRODUCT.md](../../PRODUCT.md) remains product truth. Visitor mode is **Operate**, not a mode imposed on other surfaces.",
+    "keyCharacteristics": [
+      "Flat yellow entry and invitation fields; an own-faction field during running and paused play.",
+      "Supplied paired arches remain visible on phones; lettering remains artwork.",
+      "Named factions and hand SVGs support color; distances and clocks use tabular numerals.",
+      "Nearby players, conversion state, and consent controls stay legible; technical detail uses disclosures.",
+      "Persistent entry/rules and invitation components preserve input and interaction continuity."
+    ],
+    "rules": [
+      { "name": "The Shared Factions Rule", "body": "Red stays Rock, yellow stays Paper, and blue stays Scissors. Keep faction names and supplied hand SVGs alongside color.", "section": "colors" },
+      { "name": "The Readable Pairings Rule", "body": "Use ink text on white and faction fields; reverse text on ink. White radar labels, halos, and link underlays belong to the ink radar drawing, not a new white-on-faction body-text treatment.", "section": "colors" },
+      { "name": "The Lettering Is Artwork Rule", "body": "Use the supplied path wordmark and paired arches; Hanken Grotesk supports the identity, never substitutes for its lettering.", "section": "typography" },
+      { "name": "The Stable Numbers Rule", "body": "Use tabular numerals for clocks, distances, conversion readouts, compact in-game room codes, measurements, and history times.", "section": "typography" },
+      { "name": "The Readout Before Diagnostics Rule", "body": "Keep faction, clock, nearby players, and conversion state exposed. Put technical location detail and secondary room/host tools in disclosures without removing consent, warnings, safe-play notes, or any host action.", "section": "layout" },
+      { "name": "The Flat Fields Rule", "body": "Separate app regions with color and thin dividers, not elevated generic cards. Preserve functional focus outlines and radar halos.", "section": "elevation" }
+    ],
+    "dos": [
+      "**Do** inherit the exact faction palette, local Hanken Grotesk, and supplied SVG geometry.",
+      "**Do** use this app record for current control sizes and breakpoint behavior rather than the kit's earlier app measurements.",
+      "**Do** keep arches on phones and stack entry panels throughout 641–900px so the code field remains readable.",
+      "**Do** preserve approximate/last-known text, visible consent controls, rules, warnings, safe-play notes, and every host action.",
+      "**Do** retain thin dividers, focus outlines, functional circles, and radar halos in the flat system."
+    ],
+    "donts": [
+      "**Don't** swap faction meanings, type the wordmark, or redraw the paired arches.",
+      "**Don't** add elevated generic cards, decorative raster imagery, or a splash-animation dependency to this app extension.",
+      "**Don't** hide distances behind technical disclosures or treat radar positions as conversion confirmation.",
+      "**Don't** globalize this app's Operate mode or its yellow entry/lobby composition to unrelated kit surfaces.",
+      "**Don't** treat synthesized sidecar swatch strips as new palette tokens or the bounded app finish as a marketing-kit or physical-GPS approval."
+    ]
+  }
+}

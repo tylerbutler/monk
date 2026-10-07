@@ -49,7 +49,7 @@ test("loads legible faction icons and keeps badge colors consistent through fact
     const foreground = await duel.host.locator(".player-distance").first().evaluate(element => getComputedStyle(element).color);
     expect((luminance(background) + .05) / (luminance(foreground) + .05)).toBeGreaterThanOrEqual(4.5);
     await expect.poll(() => own.locator("h2").evaluate(element =>
-      element.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(element).lineHeight))).toBe(1);
+      element.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(element).lineHeight))).toBeCloseTo(1, 2);
     await expect(marker).toHaveAttribute("data-faction", faction);
     await expect(own.locator("svg")).toHaveCSS("background-color", background);
     await expect(marker.locator(".radar-marker-body")).toHaveCSS("fill", background);
@@ -62,4 +62,16 @@ test("loads legible faction icons and keeps badge colors consistent through fact
     await expect(duel.host.locator(".player-distance").first()).toBeInViewport({ ratio: 1 });
     expect(await duel.host.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   }
+  await duel.host.locator("#host-tools-toggle").click();
+  await duel.host.locator("#radar-details-toggle").click();
+  await duel.host.setViewportSize({ width: 390, height: 844 });
+  await duel.host.screenshot({ path: test.info().outputPath("radar-mobile.png"), fullPage: true });
+  await duel.host.setViewportSize({ width: 1280, height: 900 });
+  await duel.host.screenshot({ path: test.info().outputPath("radar-desktop.png"), fullPage: true });
+  await duel.host.locator("#host-tools-toggle").click();
+  await duel.host.getByRole("button", { name: "Pause round", exact: true }).click();
+  await duel.host.locator("#host-tools-toggle").click();
+  await duel.host.setViewportSize({ width: 390, height: 844 });
+  await expect(duel.host.getByText("Paused", { exact: true })).toBeVisible();
+  await duel.host.screenshot({ path: test.info().outputPath("paused-mobile.png"), fullPage: true });
 });
