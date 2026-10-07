@@ -2,7 +2,7 @@
 set -euo pipefail
 
 gleam_version="$(sed -n 's/^gleam = "\([0-9.]*\)"$/\1/p' mise.toml)"
-if [[ "$gleam_version" != "1.18.1" ]]; then
+if [[ "$gleam_version" != "1.19.0" ]]; then
   echo "Update the Cloudflare compiler checksum when changing the Gleam pin." >&2
   exit 1
 fi
@@ -20,7 +20,7 @@ if ! command -v gleam >/dev/null 2>&1; then
     curl --fail --show-error --silent --location --retry 3 \
       "https://github.com/gleam-lang/gleam/releases/download/v$gleam_version/gleam-v$gleam_version-x86_64-unknown-linux-musl.tar.gz" \
       --output "$archive"
-    printf '%s  %s\n' "4955a38c2e8c99457458e2471472ccd5ee3c45bd7637a315ce33bccf0dd75d9e" "$archive" | sha256sum --check
+    printf '%s  %s\n' "6083148cb404460810afe35e7878527e58fd2512dd79a76b47d59723815753be" "$archive" | sha256sum --check
     tar -xzf "$archive" -C "$tool_dir" gleam
     rm "$archive"
   fi

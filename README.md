@@ -10,7 +10,7 @@ accuracy, Android accuracy, comprehension, or field feedback latency.
 
 ## Setup
 
-Use Node 24.21.0 and Gleam 1.18.1. `mise.toml` pins both tools. With
+Use Node 24.21.0 and Gleam 1.19.0. `mise.toml` pins both tools. With
 [mise](https://mise.jdx.dev/) installed:
 
 ```sh
@@ -122,16 +122,21 @@ The browser favicon uses the yellow avatar; installed-app icons use the paired
 symbol. Gameplay rules and faction assignments are unchanged.
 
 Open `/brand/motion.html` to preview or download the Lottie animation.
-Yellow leads across both arches, then red paints the first and blue paints
-the second. Each color starts 0.1 seconds before the previous color finishes.
-The yellow paint stays beneath red and blue. Each arch takes
-0.7 seconds; the full sequence takes 3 seconds, including a 0.4-second final
-hold. The preview plays once and shows the static mark for reduced motion
-or a loading failure. The gameplay app does not load the animation.
+Choose between two treatments. **Different stops** starts every color on
+the left: yellow paints both arches, red stops after the first, and blue
+crosses both while clearing its first-arch trail. **All arches** sends
+yellow, red, and blue across both arches, then clears blue from the first
+to reveal red. Each color starts 0.1 seconds before the previous color
+finishes painting. Each arch takes 0.7 seconds. Both treatments finish on
+the original red-left/blue-right mark, with a 0.4-second hold.
+The sequences take 3.7 and 5.1 seconds, respectively. The download matches
+the selected treatment. The preview plays once and shows the static mark
+for reduced motion or a loading failure. The gameplay app does not load
+the animation.
 
 Edit `scripts/generate-mark-animation.mjs`, then run `npm run build:mark` to
-regenerate `brand/assets/monk-entrance.json`. The regular build also runs
-the generator.
+regenerate both `brand/assets/monk-entrance*.json` files. The regular build
+also runs the generator.
 
 ## Local use
 

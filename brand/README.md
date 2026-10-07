@@ -26,7 +26,8 @@ game.
 | `assets/wordmark-reversed.svg` | White wordmark on ink |
 | `assets/symbol.svg` | One-color symbol, including small sizes |
 | `assets/symbol-paired.svg` | Rock red and Scissors blue symbol on white or Paper yellow, 48 px or wider |
-| `assets/monk-entrance.json` | Transparent Lottie entrance: a yellow paint trail resolves into red/blue arches |
+| `assets/monk-entrance.json` | Different stops: all colors start on the left, with red stopping after the first arch |
+| `assets/monk-entrance-all-arches.json` | All arches: every color paints both arches, then blue clears from the first |
 | `motion.html` | Standalone animation preview with replay, slow motion, and a timeline |
 | `assets/avatar.svg` | Red/blue arches on yellow; safe within a circular crop |
 | `samples/avatar-512.png` | 512 x 512 avatar |
@@ -53,27 +54,35 @@ website. Unlike the static identity kit, the motion preview needs the web
 build and a server. The app does not load the Lottie player or animation.
 
 An implied ball paints two bounces from left to right; no ball is drawn.
-Yellow paints both arches, then red paints the first and blue completes
-the second. Each color starts 0.1 seconds before the previous color finishes.
-Both yellow arches stay beneath red and blue. Red covers the first arch;
-blue covers the second and the shared stem.
-The paint stays in place, with a flat turn at the center baseline and no
-paint extending below it. Every color draws at a constant speed, taking
-0.7 seconds per arch. Red starts at 1.3 seconds and blue at 1.9 seconds.
-The entrance takes 2.6 seconds, followed by a 0.4-second hold, for 3 seconds
-total at 60 fps.
-The final frame matches the paired symbol, with red on the left and blue
-on the right.
+The treatment selector switches between two versions:
 
-The downloadable JSON is vector-only, with a transparent 280 x 220 canvas.
+- **Different stops:** yellow paints both arches. Red follows from the
+  left and stops after the first. Blue also starts on the left and crosses
+  both, clearing its first-arch trail as it paints the second.
+  Red starts at 1.3 seconds and blue at 1.9 seconds. The entrance takes
+  3.3 seconds, followed by a 0.4-second hold, for 3.7 seconds total.
+- **All arches:** yellow, red, and blue each paint both arches. Red starts
+  at 1.3 seconds and blue at 2.6 seconds. Once blue finishes at 4 seconds,
+  its first-arch trail clears over 0.7 seconds to reveal red.
+  A 0.4-second hold brings the total to 5.1 seconds.
+
+Each color starts 0.1 seconds before the previous color finishes painting.
+Every arch is drawn at a constant speed, taking 0.7 seconds, at 60 fps.
+Yellow stays beneath red and blue. The center turn is flat at the baseline,
+with no paint extending below it. Both final frames match the paired symbol:
+red on the left, with blue on the right and on the shared stem.
+Replay, half speed, the timeline, and the download use the selected treatment.
+
+Both downloadable JSON files are vector-only, with a transparent 280 x 220 canvas.
 It uses strokes and trim paths, with no images, fonts, expressions, or effects.
 Play it once (`loop: false`) and hold its last frame. Show the static paired
 symbol when reduced motion is requested. The preview also keeps the static
 symbol visible if JavaScript or the animation cannot load.
 
 Edit `scripts/generate-mark-animation.mjs` to adjust the timing, then run
-`npm run build:mark` to regenerate `assets/monk-entrance.json`. The normal
-build also runs this step. Keep the final geometry and faction colors fixed.
+`npm run build:mark` to regenerate both `assets/monk-entrance*.json` files.
+The normal build also runs this step. Keep the final geometry and faction
+colors fixed.
 
 ## Basic use
 

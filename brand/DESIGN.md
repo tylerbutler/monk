@@ -132,20 +132,27 @@ to the identity palette.
 ### Painted-bounce motion study
 
 The separate [motion preview](motion.html) draws the paired mark as paint
-left by an implied bouncing ball. No ball is visible. Yellow paints both
-arches, then red follows through the first and blue finishes the second.
-Each color starts 0.1 seconds before the previous color finishes. Both yellow
-arches stay beneath red and blue. Blue covers red at the shared stem. Every color
-draws at a constant speed, taking 0.7 seconds per arch, with no easing at
-the apex or baseline. The center turn stays flat at the baseline; no
-yellow curve extends below it. The finished paint stays still; the mark
-does not stretch, rotate, or rebound.
+left by an implied bouncing ball. No ball is visible. Two selectable
+treatments start every color at the left baseline, in yellow/red/blue order.
+**Different stops** sends yellow across both arches and stops red after the
+first. Blue crosses both, clearing its first-arch trail while it paints
+the second. **All arches** sends every color across both arches, then
+clears blue's first-arch trail to reveal red. Yellow stays beneath red and
+blue; blue covers red at the shared stem.
 
-The vector Lottie has 2.6 seconds of motion and a 0.4-second final hold
-within a 3-second, 60-fps sequence. Playback is once, not a loop. The final
-state preserves the red-left/blue-right symbol. Reduced motion shows the
-static SVG, as does a loading failure. Replay, half speed, and a timeline
-are preview controls only; the game remains unchanged.
+Each color starts 0.1 seconds before the previous color finishes painting.
+Every color draws at a constant speed, taking 0.7 seconds per arch, with
+no easing at the apex or baseline. The blue trail clears at the same
+speed. The center turn stays flat at the baseline; no paint extends below
+it. The finished paint stays still; the mark does not stretch, rotate,
+or rebound.
+
+The vector Lotties have 3.3 and 4.7 seconds of motion, respectively, each
+with a 0.4-second final hold, at 60 fps. Playback is once, not a loop.
+Both final states preserve the red-left/blue-right symbol. Reduced motion
+shows the static SVG, as does a loading failure. Replay, half speed, the
+timeline, and the download follow the selected treatment. These controls
+are preview-only; the game remains unchanged.
 
 ## Typography
 

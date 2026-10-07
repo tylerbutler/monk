@@ -7,10 +7,27 @@ const slow = document.querySelector<HTMLInputElement>("#slow")!;
 const progress = document.querySelector<HTMLInputElement>("#progress")!;
 const time = document.querySelector<HTMLSpanElement>("#time")!;
 const status = document.querySelector<HTMLParagraphElement>("#status")!;
+const treatment = document.querySelector<HTMLSelectElement>("#treatment")!;
+const description = document.querySelector<HTMLParagraphElement>("#treatment-description")!;
+const timing = document.querySelector<HTMLParagraphElement>("#timing")!;
+const download = document.querySelector<HTMLAnchorElement>("#download")!;
+const treatments = [
+  {
+    id: "stops", file: "monk-entrance.json",
+    description: "All colors start on the left. Red stops after the first arch; blue continues through the second and clears its first-arch trail.",
+    timing: "3.3-second entrance + a 0.4-second hold.",
+  },
+  {
+    id: "all-arches", file: "monk-entrance-all-arches.json",
+    description: "Yellow, red, and blue each paint both arches. After blue finishes, its first-arch trail clears to reveal red.",
+    timing: "4.7-second entrance + a 0.4-second hold.",
+  },
+];
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 let animation: AnimationItem | undefined;
 let ready = false;
 let failed = false;
+let loadVersion = 0;
 
 function showStill(show: boolean) {
   still.toggleAttribute("hidden", !show);
@@ -73,31 +90,59 @@ document.addEventListener("visibilitychange", () => {
 });
 
 async function load() {
+  const version = ++loadVersion;
+  ready = false;
+  failed = false;
+  animation?.destroy();
+  animation = undefined;
+  showStill(true);
+  for (const control of [replay, slow, progress]) control.disabled = true;
   status.textContent = "Loading animation.";
-  const [{ default: lottie }, response] = await Promise.all([
-    import("lottie-web"),
-    fetch(new URL("./assets/monk-entrance.json", window.location.href)),
-  ]);
-  if (!response.ok) throw new Error(`Animation request failed: ${response.status}`);
-  animation = lottie.loadAnimation({
-    container, renderer: "svg", loop: false, autoplay: false,
-    animationData: await response.json(),
-    rendererSettings: { preserveAspectRatio: "xMidYMid meet" },
-  });
-  animation.addEventListener("data_failed", fail);
-  animation.addEventListener("error", fail);
-  animation.addEventListener("enterFrame", updateTime);
-  animation.addEventListener("complete", () => {
-    updateTime();
-    status.textContent = "Finished.";
-  });
-  animation.addEventListener("DOMLoaded", () => {
-    if (failed || !animation) return;
-    ready = true;
-    progress.max = String(animation.totalFrames - 1);
-    applyPreference();
-    if (!reducedMotion.matches) play();
-  });
+  try {
+    const selected = treatments.find(item => item.id === treatment.value);
+    if (!selected) throw new Error(`Unknown animation treatment: ${treatment.value}`);
+    description.textContent = selected.description;
+    timing.textContent = selected.timing;
+    download.href = new URL(`./assets/${selected.file}`, window.location.href).href;
+    download.download = selected.file;
+    const [{ default: lottie }, response] = await Promise.all([
+      import("lottie-web"),
+      fetch(download.href),
+    ]);
+    if (!response.ok) throw new Error(`Animation request failed: ${response.status}`);
+    const animationData: unknown = await response.json();
+    if (version !== loadVersion) return;
+    const current = lottie.loadAnimation({
+      container, renderer: "svg", loop: false, autoplay: false,
+      animationData,
+      rendererSettings: { preserveAspectRatio: "xMidYMid meet" },
+    });
+    animation = current;
+    const onError = (error: unknown) => {
+      if (current === animation) fail(error);
+    };
+    current.addEventListener("data_failed", onError);
+    current.addEventListener("error", onError);
+    current.addEventListener("enterFrame", () => {
+      if (current === animation) updateTime();
+    });
+    current.addEventListener("complete", () => {
+      if (current !== animation) return;
+      updateTime();
+      status.textContent = "Finished.";
+    });
+    current.addEventListener("DOMLoaded", () => {
+      if (failed || current !== animation) return;
+      ready = true;
+      progress.max = String(current.totalFrames - 1);
+      applyPreference();
+      if (!reducedMotion.matches) play();
+    });
+  } catch (error) {
+    if (version === loadVersion) fail(error);
+  }
 }
 
-void load().catch(fail);
+treatment.disabled = false;
+treatment.addEventListener("change", () => { void load(); });
+void load();

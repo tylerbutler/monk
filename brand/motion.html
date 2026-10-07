@@ -19,7 +19,10 @@
       .artboard > div, .artboard > svg { position: absolute; inset: 0; width: 100%; height: 100%; }
       [hidden] { display: none !important; }
       .controls { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem 1.5rem; padding-top: 1.5rem; }
-      button, input { font: inherit; accent-color: var(--ink); }
+      button, input, select { font: inherit; accent-color: var(--ink); }
+      .treatment { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1rem; margin-bottom: .75rem; }
+      .treatment select { min-height: 44px; max-width: 100%; padding: .5rem .75rem; color: var(--ink); background: var(--white); border: 1px solid var(--line); border-radius: .3rem; }
+      #treatment-description { max-width: 65ch; margin-bottom: 1.5rem; }
       button { min-height: 44px; padding: .65rem 1.5rem; border: 1px solid var(--ink); border-radius: .3rem; color: var(--white); background: var(--ink); cursor: pointer; }
       button:hover:not(:disabled) { background: #303033; }
       button:disabled { opacity: .45; cursor: not-allowed; }
@@ -48,6 +51,13 @@
     <main>
       <h1>Paint the bounce.</h1>
       <p class="intro">Yellow leads. Red follows. Blue brings it home.<br>A bouncing trail, without the ball.</p>
+      <label class="treatment">Treatment
+        <select id="treatment" aria-describedby="treatment-description" disabled>
+          <option value="stops">Different stops</option>
+          <option value="all-arches">All arches</option>
+        </select>
+      </label>
+      <p id="treatment-description">All colors start on the left. Red stops after the first arch; blue continues through the second and clears its first-arch trail.</p>
       <div class="stage" role="img" aria-label="Monk arches painted in yellow, then red and blue">
         <div class="artboard">
           <div id="animation" aria-hidden="true" hidden></div>
@@ -59,16 +69,16 @@
       <div class="controls">
         <button id="replay" type="button" disabled>Replay</button>
         <label class="slow"><input id="slow" type="checkbox" disabled>Slow motion</label>
-        <a class="download" href="./assets/monk-entrance.json" download>Download Lottie</a>
+        <a id="download" class="download" href="./assets/monk-entrance.json" download="monk-entrance.json">Download Lottie</a>
       </div>
       <div class="timeline">
-        <input id="progress" type="range" min="0" max="179" step="1" value="179" aria-label="Animation progress" disabled>
-        <span id="time" aria-hidden="true">3.00 s</span>
+        <input id="progress" type="range" min="0" max="221" step="1" value="221" aria-label="Animation progress" disabled>
+        <span id="time" aria-hidden="true">3.70 s</span>
       </div>
       <p id="status" role="status">Static preview. Enable JavaScript to play the animation.</p>
     </main>
     <footer>
-      <p>2.6-second entrance + a short hold.</p>
+      <p id="timing">3.3-second entrance + a 0.4-second hold.</p>
       <p>Vector Lottie / 60 fps / transparent background</p>
     </footer>
     <script type="module" src="./motion.ts"></script>
