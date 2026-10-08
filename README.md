@@ -154,6 +154,13 @@ symbol or complete wordmark for reduced motion or a loading failure,
 and pauses when hidden.
 The gameplay app does not load these animations.
 
+Open `/brand/conversion-motion.html` for a separate gameplay motion mockup.
+It previews conversion progress, a screen-covering faction-color bubble and
+hand stamp when you change sides, and a smaller radar stamp when you convert
+another player. Replay controls, a timeline, all three factions, interruption,
+half speed, and reduced motion are included. Players and positions are
+simulated; the preview does not change live gameplay or request location access.
+
 Edit `scripts/generate-mark-animation.mjs`, then run `npm run build:mark` to
 regenerate the five `brand/assets/monk-*.json` files. The regular build
 also runs the generator.

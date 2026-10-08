@@ -33,6 +33,7 @@ game.
 | `assets/monk-entrance-realistic.json` | Yellow/blue/red entrance with a fast launch, slow peak, and accelerating descent |
 | `assets/monk-entrance-wordmark.json` | Realistic bounce, then a leftward m move and an ink onk reveal |
 | `motion.html` | Standalone animation preview with replay, slow motion, and a timeline |
+| `conversion-motion.html` | Replayable gameplay motion mockup: progress, faction bubble, and hand stamp |
 | `assets/avatar.svg` | Red/blue arches on yellow; safe within a circular crop |
 | `samples/avatar-512.png` | 512 x 512 avatar |
 | `samples/social-1200x630.png` | Yellow wide social graphic with ink type and red/blue mark |
@@ -50,6 +51,30 @@ game.
 SVG marks use paths rather than text. They do not require a font to render.
 The two equal arches share a stem. Their colors can change, but both forms
 stay in place.
+
+## Conversion motion mockup
+
+After `npm run build`, open `/brand/conversion-motion.html` on the local or
+deployed website. This separate preview uses simulated players and positions.
+It does not join a room, request location access, or change live gameplay.
+
+Choose being converted, converting another player, or an interrupted conversion.
+Select any resulting faction. Replay the full sequence, jump to the stamp, or
+drag the timeline to inspect individual moments. Half speed slows playback.
+Reduced motion replaces expansion and travel with short fades; an operating
+system reduced-motion setting cannot be turned off in the preview.
+
+The sample conversion takes five seconds, followed by a 200 ms confirmation
+wait. On self-conversion, a 480 ms central bubble covers the screen in the new
+faction color. A 160 ms hand stamp and one impact ring mark the change. The
+overlay clears over 320 ms to reveal the updated faction, 1.3 seconds after
+confirmation. Outgoing conversion uses a radar pulse, a smaller marker stamp,
+and a confirmation below the radar. Interruption clears progress without a
+stamp or faction change. Hidden tabs pause playback.
+
+The preview reuses the app's faction names, relationships, and Tabler hand
+icons. CSS and the browser's Web Animations API provide the motion; no new
+animation dependency is required.
 
 ## Motion study
 

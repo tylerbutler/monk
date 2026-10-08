@@ -1,0 +1,147 @@
+import { expect, test, type Page } from "@playwright/test";
+
+async function seek(page: Page, milliseconds: number) {
+  await page.getByLabel("Sequence position").evaluate((element, value) => {
+    if (!(element instanceof HTMLInputElement)) throw new Error("Expected the preview timeline");
+    element.value = String(value);
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+  }, milliseconds);
+}
+
+test.beforeEach(async ({ page }) => {
+  await page.goto("/brand/conversion-motion.html");
+});
+
+test("reveals the new faction with a screen-covering bubble and a stamp", async ({ page }) => {
+  await expect(page.getByLabel("Sequence position")).toBeEnabled();
+  await seek(page, 5100);
+  await expect(page.locator("#conversion-state")).toContainText("Confirming");
+  await expect(page.locator("#takeover")).toBeHidden();
+  await expect(page.locator("#own-name")).toHaveText("Rock");
+
+  await seek(page, 5680);
+  const coverage = await page.locator("#bubble").evaluate(element => {
+    const screen = document.querySelector("#game-screen");
+    if (!screen) throw new Error("Missing the game screen");
+    const bubble = element.getBoundingClientRect();
+    const bounds = screen.getBoundingClientRect();
+    return {
+      radius: bubble.width / 2,
+      required: Math.hypot(bounds.width, bounds.height) / 2,
+      centerX: bubble.x + bubble.width / 2,
+      centerY: bubble.y + bubble.height / 2,
+      screenX: bounds.x + bounds.width / 2,
+      screenY: bounds.y + bounds.height / 2,
+    };
+  });
+  expect(coverage.radius).toBeGreaterThan(coverage.required);
+  expect(coverage.centerX).toBeCloseTo(coverage.screenX, 0);
+  expect(coverage.centerY).toBeCloseTo(coverage.screenY, 0);
+
+  await seek(page, 5920);
+  await expect(page.locator("#faction-stamp")).toBeVisible();
+  await expect(page.locator("#reveal-name")).toHaveText("Paper");
+  await expect(page.locator("#reveal-copy")).toContainText("You are now");
+  await expect(page.locator("#impact-ring")).toBeVisible();
+
+  await seek(page, 6500);
+  await expect(page.locator("#takeover")).toBeHidden();
+  await expect(page.locator("#own-name")).toHaveText("Paper");
+  await expect(page.locator("#result-message")).toContainText("You are now Paper");
+});
+
+for (const faction of [
+  { id: "rock", name: "Rock", color: "rgb(235, 98, 86)" },
+  { id: "paper", name: "Paper", color: "rgb(242, 207, 69)" },
+  { id: "scissors", name: "Scissors", color: "rgb(105, 181, 245)" },
+]) {
+  test(`finishes and replays the ${faction.name} conversion`, async ({ page }) => {
+    await page.getByLabel("Resulting faction").selectOption(faction.id);
+    await seek(page, 6500);
+    await expect(page.locator("#own-name")).toHaveText(faction.name);
+    await expect(page.locator("#game-screen")).toHaveCSS("background-color", faction.color);
+    await page.getByRole("button", { name: "Play stamp", exact: true }).click();
+    await expect(page.locator("#takeover")).toBeVisible();
+    await expect(page.locator("#result-message")).toBeVisible();
+    await expect(page.locator("#takeover")).toBeHidden();
+    await expect(page.locator("#own-name")).toHaveText(faction.name);
+  });
+}
+
+test("stamps the converted player without taking over your screen", async ({ page }) => {
+  await page.getByRole("button", { name: "You convert someone", exact: true }).click();
+  await seek(page, 5100);
+  await expect(page.locator("#conversion-state")).toContainText("Confirming");
+  await expect(page.locator("#target-marker")).toHaveAttribute("data-faction", "rock");
+  await expect(page.locator("#own-name")).toHaveText("Paper");
+  await seek(page, 5400);
+  await expect(page.locator("#signal")).toBeVisible();
+  await seek(page, 5920);
+  await expect(page.locator("#target-marker")).toHaveAttribute("data-faction", "paper");
+  await expect(page.locator("#target-stamp")).toBeVisible();
+  await expect(page.locator("#result-message")).toContainText("Alex joined Paper");
+  await expect(page.locator("#takeover")).toBeHidden();
+  await expect(page.locator("#own-name")).toHaveText("Paper");
+});
+
+test("interruption clears progress without showing a successful conversion", async ({ page }) => {
+  await seek(page, 5920);
+  await page.getByRole("button", { name: "Conversion stops", exact: true }).click();
+  await seek(page, 3200);
+  await expect(page.locator("#conversion-state")).toContainText("Conversion stopped");
+  await expect(page.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "0");
+  await expect(page.locator("#own-name")).toHaveText("Rock");
+  await expect(page.locator("#takeover")).toBeHidden();
+  await expect(page.locator("#target-stamp")).toBeHidden();
+  await expect(page.locator("#result-message")).toBeHidden();
+  await page.getByRole("button", { name: "Replay sequence", exact: true }).click();
+  await expect(page.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow", "0");
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  const value = await page.getByLabel("Sequence position").inputValue();
+  await page.waitForTimeout(150);
+  expect(await page.getByLabel("Sequence position").inputValue()).toBe(value);
+});
+
+test("reduced motion keeps the result but removes expansion and impact", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(page.getByLabel("Reduced motion", { exact: true })).toBeChecked();
+  await expect(page.getByLabel("Reduced motion", { exact: true })).toBeDisabled();
+  await seek(page, 5300);
+  await expect(page.locator("#bubble")).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
+  await seek(page, 5920);
+  await expect(page.locator("#faction-stamp")).toBeVisible();
+  await expect(page.locator("#reveal-name")).toHaveText("Paper");
+  await expect(page.locator("#impact-ring")).toBeHidden();
+  await seek(page, 6500);
+  await expect(page.locator("#own-name")).toHaveText("Paper");
+  await page.getByRole("button", { name: "You convert someone", exact: true }).click();
+  await seek(page, 5400);
+  await expect(page.locator("#signal")).toBeHidden();
+  await seek(page, 6500);
+  await expect(page.locator("#result-message")).toContainText("Alex joined Paper");
+});
+
+test("scene changes cancel playback and do not leak the previous result", async ({ page }) => {
+  await page.getByRole("button", { name: "Play stamp", exact: true }).click();
+  await page.getByRole("button", { name: "Conversion stops", exact: true }).click();
+  await page.waitForTimeout(1500);
+  await expect(page.locator("#own-name")).toHaveText("Rock");
+  await expect(page.locator("#takeover")).toBeHidden();
+  await expect(page.locator("#result-message")).toBeHidden();
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeDisabled();
+});
+
+test("the mobile preview and controls fit without horizontal scrolling", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect(page.getByRole("button", { name: "Play stamp", exact: true })).toBeEnabled();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await page.getByRole("button", { name: "Play stamp", exact: true }).click();
+  const visibleScreen = await page.locator("#game-screen").evaluate(element => {
+    const bounds = element.getBoundingClientRect();
+    return { top: bounds.top, bottom: bounds.bottom, viewport: innerHeight };
+  });
+  expect(visibleScreen.top).toBeGreaterThanOrEqual(0);
+  expect(visibleScreen.bottom).toBeLessThanOrEqual(visibleScreen.viewport);
+  await expect(page.locator("#result-message")).toBeVisible();
+  await expect(page.locator("#own-name")).toHaveText("Paper");
+});

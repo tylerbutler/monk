@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#ffffff">
+    <title>Monk - Conversion motion</title>
+    <link rel="icon" href="./assets/avatar.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="./styles.css">
+    <style>
+      body { max-width: 1120px; margin: auto; padding: 0 clamp(20px, 4vw, 56px) 32px; }
+      [hidden] { display: none !important; }
+      .preview-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-block: 24px; border-bottom: 1px solid var(--line); }
+      .preview-header img { width: 104px; }
+      .preview-header a { display: inline-flex; align-items: center; min-height: 44px; font-size: .9rem; }
+      main { display: grid; grid-template-columns: 1fr 380px; gap: 40px 64px; padding-top: 40px; align-items: start; }
+      .direction h1 { max-width: 9ch; font-size: clamp(2.5rem, 5vw, 4.25rem); margin-bottom: 20px; }
+      .direction > p { max-width: 37ch; font-size: 1.05rem; margin-bottom: 32px; }
+      fieldset { border: 0; padding: 0; margin: 0 0 28px; min-width: 0; }
+      legend, .faction-choice { font-weight: 650; }
+      legend { margin-bottom: 8px; }
+      button, select, input { font: inherit; accent-color: var(--ink); }
+      button, select { min-height: 44px; border: 1px solid var(--ink); border-radius: .25rem; cursor: pointer; }
+      button { padding: 10px 14px; background: var(--ink); color: var(--white); font-weight: 650; }
+      button:hover:not(:disabled) { background: #303033; }
+      button:disabled { opacity: .45; cursor: not-allowed; }
+      .scene-options { display: grid; gap: 0; }
+      .scene-options button { display: flex; align-items: center; justify-content: space-between; gap: 12px; text-align: left; border-radius: 0; padding: 16px 0; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink); }
+      .scene-options button::after { content: ""; width: 9px; height: 9px; border: 1px solid var(--ink); border-radius: 50%; flex-shrink: 0; }
+      .scene-options button[aria-pressed="true"]::after { background: var(--ink); }
+      .scene-options button:hover:not(:disabled) { background: #f5f5f5; }
+      .faction-choice { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+      select { padding: 8px 12px; background: var(--white); color: var(--ink); min-width: 120px; }
+      .motion-thesis { padding-top: 24px; border-top: 1px solid var(--line); }
+      .motion-thesis h2 { font-size: 1.2rem; margin-bottom: 8px; }
+      .motion-thesis p { margin-bottom: 12px; font-size: .95rem; max-width: 37ch; }
+      .motion-thesis small { display: block; color: var(--secondary); line-height: 1.5; }
+      .preview { min-width: 0; }
+      .game-screen { --current: var(--faction-rock); --result: var(--faction-paper); position: relative; width: 100%; min-height: 600px; aspect-ratio: 380 / 650; padding: 22px; overflow: hidden; isolation: isolate; background: var(--current); border-radius: 12px; color: var(--ink); scroll-margin-block: 16px; }
+      .game-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+      .own-faction { display: flex; align-items: center; gap: 8px; }
+      .own-faction img { width: 32px; height: 32px; }
+      .own-faction h2 { font-size: 1.9rem; }
+      .round-clock { font-size: 1.2rem; font-weight: 700; font-variant-numeric: tabular-nums; margin: 0; }
+      .round-label { margin: 6px 0 18px; font-size: .8rem; }
+      .radar { position: relative; width: 100%; aspect-ratio: 1; border-radius: 50%; background: var(--ink); overflow: hidden; }
+      .radar-grid { position: absolute; inset: 0; width: 100%; height: 100%; }
+      .radar-grid .grid-line { fill: none; stroke: #ffffff33; stroke-width: 1; }
+      .radar-link { stroke: var(--result); stroke-width: 2; stroke-dasharray: 4 4; }
+      #radar-arrow { fill: var(--result); }
+      #signal { fill: var(--result); stroke: var(--white); stroke-width: 2; }
+      .marker { position: absolute; translate: -50% -50%; text-align: center; }
+      .marker-own { left: 50%; top: 50%; }
+      .marker-target { left: 74%; top: 28%; }
+      .marker-hand { position: relative; display: grid; place-items: center; width: 46px; height: 46px; margin: auto; border-radius: 50%; background: var(--marker-color); }
+      .marker-hand > img { width: 28px; height: 28px; }
+      .marker-own { --marker-color: var(--current); }
+      .marker-label { display: block; margin-top: 6px; color: var(--white); font-size: .8rem; }
+      .marker-label strong { display: block; font-size: .7rem; font-weight: 400; }
+      .marker-ring { position: absolute; width: 60px; height: 60px; inset: -7px; max-width: none; rotate: -90deg; }
+      .marker-ring circle { fill: none; stroke: var(--result); stroke-width: 2; stroke-linecap: round; }
+      .target-stamp { position: absolute; inset: -8px; border: 3px solid var(--ink); outline: 2px solid var(--result); outline-offset: 3px; border-radius: 50%; background: var(--result); display: grid; place-items: center; rotate: -5deg; }
+      .target-stamp img { width: 36px; height: 36px; }
+      .radar-distance { position: absolute; bottom: 18px; left: 0; right: 0; text-align: center; margin: 0; color: var(--white); font-size: .7rem; }
+      .influence { position: relative; margin-top: 18px; padding: 16px; background: var(--white); border: 1px solid var(--ink); border-radius: .25rem; }
+      .influence h3 { font-size: .95rem; line-height: 1.35; margin-bottom: 12px; }
+      .progress-readout { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; margin-bottom: 8px; font-size: .9rem; }
+      .progress-track { position: relative; height: 12px; background: #e9e9e9; overflow: hidden; border-radius: 2px; }
+      .progress-fill { position: absolute; inset: 0; background: var(--result); transform-origin: left; transform: scaleX(.58); }
+      .progress-tip { position: absolute; width: 8px; height: 8px; top: 2px; left: 58%; translate: -50% 0; border-radius: 50%; background: var(--ink); }
+      .influence > p { font-size: .75rem; line-height: 1.4; margin: 10px 0 0; }
+      .result-message { display: flex; gap: 12px; align-items: center; margin-top: 18px; padding: 16px; min-height: 106px; color: var(--white); background: var(--ink); border-radius: .25rem; }
+      .result-message img { width: 40px; height: 40px; padding: 5px; background: var(--result); border-radius: 50%; }
+      .result-message strong { display: block; font-size: 1.05rem; }
+      .result-message p { font-size: .8rem; margin: 4px 0 0; }
+      .screen-note { margin: 14px 0 0; font-size: .7rem; text-align: center; }
+      .takeover { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+      .bubble { position: absolute; left: 50%; top: 50%; width: max(220%, 800px); aspect-ratio: 1; translate: -50% -50%; border-radius: 50%; background: var(--result); }
+      .reveal { position: relative; width: 100%; text-align: center; padding: 20px; }
+      .faction-stamp { position: relative; display: grid; place-items: center; width: 164px; height: 164px; margin: 0 auto 28px; border: 5px solid var(--ink); border-radius: 50%; rotate: -5deg; }
+      .faction-stamp img { width: 108px; height: 108px; }
+      .impact-ring { position: absolute; width: 190px; height: 190px; border: 2px solid var(--ink); border-radius: 50%; top: 7px; left: calc(50% - 95px); }
+      .reveal-copy { position: relative; }
+      .reveal-copy p { font-size: 1.1rem; margin-bottom: 4px; }
+      .reveal-copy h2 { font-size: 3.25rem; font-weight: 750; }
+      .game-screen[data-reduced-motion="true"] .bubble { transform: scale(1); }
+      .playback { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+      .playback #replay, .playback #pause { color: var(--ink); background: var(--white); }
+      .playback #replay:hover:not(:disabled), .playback #pause:hover:not(:disabled) { background: #f5f5f5; }
+      .playback button { font-size: .85rem; flex: 1 0 auto; }
+      .timeline { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+      .timeline input { min-width: 0; flex: 1; min-height: 44px; margin: 0; cursor: pointer; }
+      .timeline output { font-size: .85rem; min-width: 5ch; font-variant-numeric: tabular-nums; }
+      .preferences { display: flex; flex-wrap: wrap; gap: 0 20px; font-size: .85rem; }
+      .preferences label { display: inline-flex; align-items: center; min-height: 44px; gap: 8px; cursor: pointer; }
+      .preferences input { width: 17px; height: 17px; margin: 0; }
+      #status { min-height: 3em; margin: 4px 0 0; font-size: .8rem; color: var(--secondary); }
+      footer { margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--line); font-size: .8rem; color: var(--secondary); }
+      @media (max-width: 800px) {
+        main { grid-template-columns: 1fr 340px; gap: 32px; }
+        .direction h1 { font-size: 2.75rem; }
+        .game-screen { padding: 18px; }
+        .own-faction h2 { font-size: 1.65rem; }
+      }
+      @media (max-width: 680px) {
+        .preview-header { padding-block: 16px; }
+        .preview-header a { font-size: .8rem; }
+        main { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-top: 28px; }
+        .direction h1 { max-width: 15ch; font-size: 2.5rem; margin-bottom: 12px; }
+        .direction > p { font-size: .95rem; margin-bottom: 20px; max-width: 45ch; }
+        fieldset { margin-bottom: 16px; }
+        .scene-options { display: flex; gap: 8px; }
+        .scene-options button { flex: 1; justify-content: center; padding: 10px 8px; font-size: .8rem; border: 1px solid var(--ink); border-radius: .25rem; text-align: center; }
+        .scene-options button::after { display: none; }
+        .scene-options button[aria-pressed="true"] { background: var(--ink); color: var(--white); }
+        .faction-choice { font-size: .9rem; margin-bottom: 0; }
+        .motion-thesis { display: none; }
+        .preview { width: min(100%, 380px); margin-inline: auto; }
+        .game-screen { padding: 18px; }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Motion study only. Preserve the Side by Side identity and game rules.
+         Use one central bubble-and-stamp reveal; keep outgoing feedback on radar. -->
+    <header class="preview-header">
+      <img src="./assets/wordmark.svg" width="104" height="32" alt="Monk">
+      <a href="./">Back to the brand kit</a>
+    </header>
+    <main>
+      <section class="direction" aria-labelledby="title">
+        <h1 id="title">Change sides.<br>Make it land.</h1>
+        <p>A new color fills the screen. Your new hand lands like a stamp. Then, straight back to the game.</p>
+        <fieldset>
+          <legend>Choose a moment</legend>
+          <div class="scene-options">
+            <button type="button" data-scene="self" aria-pressed="true" disabled>You get converted</button>
+            <button type="button" data-scene="other" aria-pressed="false" disabled>You convert someone</button>
+            <button type="button" data-scene="stopped" aria-pressed="false" disabled>Conversion stops</button>
+          </div>
+        </fieldset>
+        <label class="faction-choice">Resulting faction
+          <select id="faction" disabled>
+            <option value="rock">Rock</option>
+            <option value="paper" selected>Paper</option>
+            <option value="scissors">Scissors</option>
+          </select>
+        </label>
+        <div class="motion-thesis">
+          <h2 id="scene-title">The change takes over.</h2>
+          <p id="scene-description">A central bubble fills the screen in your new faction color. The hand stamps into place, with one short impact ring.</p>
+          <small>480 ms bubble / 160 ms stamp / 320 ms exit.<br>5-second sample dwell. The result waits for confirmation.</small>
+        </div>
+      </section>
+      <section class="preview" aria-label="Replayable conversion preview">
+        <div id="game-screen" class="game-screen" data-faction="rock" data-reduced-motion="false" aria-label="Simulated gameplay screen">
+          <div class="game-heading">
+            <div class="own-faction">
+              <img id="own-icon" width="32" height="32" alt="" aria-hidden="true">
+              <h2 id="own-name">Rock</h2>
+            </div>
+            <p class="round-clock">04:32</p>
+          </div>
+          <p class="round-label">Round running / Motion preview</p>
+          <div class="radar" aria-label="Simulated nearby players">
+            <svg class="radar-grid" viewBox="0 0 300 300" aria-hidden="true">
+              <circle class="grid-line" cx="150" cy="150" r="49"/>
+              <circle class="grid-line" cx="150" cy="150" r="98"/>
+              <path class="grid-line" d="M0 150h300M150 0v300"/>
+              <line id="radar-link" class="radar-link" x1="150" y1="150" x2="222" y2="84"/>
+              <path id="radar-arrow" d="M180 117l12 -3 -3 -10z"/>
+              <circle id="signal" cx="150" cy="150" r="6" hidden/>
+            </svg>
+            <div class="marker marker-own">
+              <div class="marker-hand">
+                <img id="self-marker-icon" width="28" height="28" alt="" aria-hidden="true">
+                <svg id="own-ring" class="marker-ring" viewBox="0 0 60 60" aria-hidden="true"><circle cx="30" cy="30" r="27" pathLength="100"/></svg>
+              </div>
+              <span class="marker-label">You<strong id="self-marker-name">Rock</strong></span>
+            </div>
+            <div id="target-marker" class="marker marker-target" data-faction="paper">
+              <div class="marker-hand">
+                <img id="target-icon" width="28" height="28" alt="" aria-hidden="true">
+                <svg id="target-ring" class="marker-ring" viewBox="0 0 60 60" aria-hidden="true" hidden><circle cx="30" cy="30" r="27" pathLength="100"/></svg>
+                <div id="target-stamp" class="target-stamp" hidden><img id="target-stamp-icon" width="36" height="36" alt="" aria-hidden="true"></div>
+              </div>
+              <span class="marker-label">Alex<strong id="target-name">Paper</strong></span>
+            </div>
+            <p class="radar-distance">Approx. 60 m / Simulated positions</p>
+          </div>
+          <div id="influence" class="influence">
+            <h3 id="conversion-heading">You are being converted by Alex</h3>
+            <div class="progress-readout"><strong id="conversion-state">3 s left</strong><span id="percent">58%</span></div>
+            <div id="progress" class="progress-track" role="progressbar" aria-label="Conversion progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="58">
+              <div id="progress-fill" class="progress-fill"></div>
+              <div id="progress-tip" class="progress-tip" aria-hidden="true"></div>
+            </div>
+            <p id="guidance">Move out of range to stop conversion.</p>
+          </div>
+          <div id="result-message" class="result-message" role="status" hidden>
+            <img id="result-icon" width="40" height="40" alt="" aria-hidden="true">
+            <div><strong id="result-title"></strong><p id="result-detail"></p></div>
+          </div>
+          <p class="screen-note">Preview only. No room or location access.</p>
+          <div id="takeover" class="takeover" aria-hidden="true" hidden>
+            <div id="bubble" class="bubble"></div>
+            <div class="reveal">
+              <div id="impact-ring" class="impact-ring" hidden></div>
+              <div id="faction-stamp" class="faction-stamp"><img id="stamp-icon" width="108" height="108" alt=""></div>
+              <div id="reveal-copy" class="reveal-copy"><p>You are now</p><h2 id="reveal-name">Paper</h2></div>
+            </div>
+          </div>
+        </div>
+        <div class="playback">
+          <button id="stamp-replay" type="button" disabled>Play stamp</button>
+          <button id="replay" type="button" disabled>Replay sequence</button>
+          <button id="pause" type="button" disabled>Pause</button>
+        </div>
+        <div class="timeline">
+          <input id="timeline" type="range" min="0" max="6500" step="10" value="2900" aria-label="Sequence position" disabled>
+          <output id="time" for="timeline">2.90 s</output>
+        </div>
+        <div class="preferences">
+          <label><input id="slow" type="checkbox" disabled>Half speed</label>
+          <label><input id="reduced" type="checkbox" disabled>Reduced motion</label>
+        </div>
+        <p id="status" role="status">Static preview. Enable JavaScript to play the sequence.</p>
+      </section>
+    </main>
+    <footer>Motion mockup / Existing faction colors and Tabler hands / No changes to live gameplay.</footer>
+    <script type="module" src="./conversion-motion.ts"></script>
+  </body>
+</html>
