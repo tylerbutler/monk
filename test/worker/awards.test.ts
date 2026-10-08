@@ -1,11 +1,11 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { env } from "cloudflare:workers";
-import { reset, runInDurableObject } from "cloudflare:test";
-import { checkpointEngine } from "../../src/worker/engine";
+import { evictDurableObject, reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { advanceEngine, checkpointEngine, restoreEngine } from "../../src/worker/engine";
 import { loadRecord, recordSchema } from "../../src/worker/storage";
 import { advanceAwardData } from "../../src/worker/award-data";
 import type { PositionReport } from "../../src/shared/protocol";
-import { closeSockets, connect, hostCommand, joinMatch, openSocket, runningMatch } from "./helpers";
+import { closeSockets, connect, createMatch, hostCommand, joinMatch, openSocket, runningMatch } from "./helpers";
 
 afterEach(async () => { await closeSockets(); vi.restoreAllMocks(); await reset(); });
 
@@ -176,3 +176,191 @@ it("stores only coordinate-free award data", async () => {
   expect(saved).toBeTruthy();
   expect(JSON.stringify(saved)).not.toMatch(/latitude|longitude|accuracyM|capturedAtMs|distanceM|bearingDegrees|observations|reports|frames|history/);
 });
+
+it("recovers collected rounds without outage credit", async () => {
+  const match = await preparedConversion();
+  await match.convert();
+  const newcomer = await connect(await joinMatch(match.credentials.matchCode));
+  newcomer.send({ version: 1, type: "snapshot_request" });
+  const newId = (await newcomer.next("snapshot")).snapshot.ownPlayerId!;
+  await hostCommand(match.host, { type: "set_faction", playerId: newId, faction: "scissors" });
+  match.advance(2);
+  await report(newcomer, 1, match.now());
+  const saved = (await match.read()).awardData!;
+  expect(saved.openEncounters[match.ids[0]]).toBeDefined();
+  expect(saved.players[match.ids[1]].pendingComebackEligibleMs).not.toBeNull();
+  await runInDurableObject(match.stub, async (instance, state) => {
+    const timer: ReturnType<typeof setTimeout> | null = Reflect.get(instance, "timer");
+    if (timer !== null) clearTimeout(timer);
+    await state.storage.deleteAlarm();
+  });
+  match.advance(100000);
+  await evictDurableObject(match.stub);
+  const recoveredHost = await connect(match.credentials);
+  const recovered = (await match.read()).awardData!;
+  expect(recovered).toMatchObject({ coverage: "complete", openEncounters: {},
+    lastFrame: { phase: "paused", atMs: match.now() }, lastConversionBatch: saved.lastConversionBatch });
+  for (const [id, player] of Object.entries(saved.players)) {
+    expect(recovered.players[id]).toEqual({ ...player, currentUnconvertedEligibleMs: 0, pendingComebackEligibleMs: null });
+  }
+  await hostCommand(recoveredHost, { type: "begin_resume" });
+  await report(recoveredHost, 4, match.now());
+  match.advance(1000);
+  await report(recoveredHost, 5, match.now());
+  expect((await match.read()).awardData!.players[match.ids[0]].eligibleMs).toBe(saved.players[match.ids[0]].eligibleMs + 1000);
+});
+
+it.each(["lobby", "running", "paused", "ended"] as const)("starts legacy %s collection with honest coverage", async phase => {
+  const credentials = await createMatch();
+  await joinMatch(credentials.matchCode);
+  const stub = env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode));
+  const original = await runInDurableObject(stub, async (_, state) => {
+    const record = await loadRecord(state.storage);
+    if (!record) throw new Error("Missing legacy award fixture.");
+    let engine = restoreEngine(record.checkpoint, Date.now());
+    for (const type of phase === "lobby" ? [] : phase === "running" ? ["start"] as const :
+      phase === "paused" ? ["start", "pause"] as const : ["start", "end"] as const) {
+      const next = advanceEngine(engine, { nowMs: engine.last_at,
+        actor: { id: record.checkpoint.hostId, host: true, playerId: null },
+        commands: [{ type }], observations: [] });
+      engine = next.state; record.events.push(...next.events);
+    }
+    record.checkpoint = checkpointEngine(engine, engine.last_at);
+    const { awardData: _removed, ...legacy } = record;
+    await state.storage.put("record", legacy);
+    expect((await loadRecord(state.storage))?.awardData).toBeNull();
+    return record;
+  });
+  await evictDurableObject(stub);
+  await connect(credentials);
+  const record = await runInDurableObject(stub, (_, state) => loadRecord(state.storage));
+  expect(record?.awardData).toMatchObject({ coverage: phase === "lobby" ? "complete" : "partial",
+    startedAfterEventSeq: original.checkpoint.eventSeq, lastProcessedEventSeq: original.checkpoint.eventSeq,
+    lastFrame: { phase: phase === "running" ? "paused" : phase }, lastConversionBatch: null, openEncounters: {} });
+  expect(Object.values(record!.awardData!.players).every(p =>
+    p.conversionsMade === 0 && p.conversionsReceived === 0 && p.eligibleMs === 0 &&
+    p.incomingEncounters === 0 && p.fastestComebackEligibleMs === null)).toBe(true);
+  expect(record?.sessions).toEqual(original.sessions);
+  expect(record?.events).toEqual(original.events);
+  expect(record?.checkpoint.parameters).toEqual(original.checkpoint.parameters);
+});
+
+it("rejects malformed present award data", async () => {
+  const match = await preparedConversion();
+  const original = await match.read();
+  const data = original.awardData!;
+  await runInDurableObject(match.stub, async (_, state) => {
+    for (const invalid of [
+      { ...data, version: 2 },
+      { ...data, lastProcessedEventSeq: original.checkpoint.eventSeq + 1 },
+      { ...data, lastFrame: { ...data.lastFrame, phase: "ended" } },
+      { ...data, lastFrame: { ...data.lastFrame, remainingMs: data.lastFrame.remainingMs + 1 } },
+      { ...data, lastFrame: { ...data.lastFrame, players: data.lastFrame.players.slice(1) } },
+    ]) {
+      await state.storage.put("record", { ...original, awardData: invalid });
+      await expect(loadRecord(state.storage)).rejects.toThrow("Stored match record is invalid.");
+    }
+    await state.storage.put("record", original);
+  });
+});
+
+it("stops eligibility on explicit suspend and last socket close", async () => {
+  const match = await preparedConversion();
+  const additional = await connect({ ...match.credentials, hostToken: null });
+  const initial = (await match.read()).awardData!;
+  match.advance(1000);
+  await new Promise<void>(resolve => {
+    additional.socket.addEventListener("close", () => resolve(), { once: true }); additional.socket.close();
+  });
+  match.host.send({ version: 1, type: "snapshot_request" });
+  expect((await match.host.next("snapshot")).snapshot.roster.find(p => p.id === match.ids[0])?.active).toBe(true);
+  match.host.send({ version: 1, type: "suspend", reason: "Stop sharing." });
+  match.host.send({ version: 1, type: "snapshot_request" }); await match.host.next("snapshot");
+  const suspended = (await match.read()).awardData!;
+  expect(suspended.players[match.ids[0]]).toMatchObject({
+    eligibleMs: initial.players[match.ids[0]].eligibleMs + 1000, currentUnconvertedEligibleMs: 0,
+    rangeBreaksReceived: 0, closeCallsReceived: 0,
+  });
+  match.advance(1000);
+  await report(match.host, 3, match.now());
+  match.advance(1000);
+  await new Promise<void>(resolve => {
+    match.host.socket.addEventListener("close", () => resolve(), { once: true }); match.host.socket.close();
+  });
+  match.other.send({ version: 1, type: "snapshot_request" }); await match.other.next("snapshot");
+  const closed = (await match.read()).awardData!;
+  expect(closed.players[match.ids[0]]).toMatchObject({
+    eligibleMs: initial.players[match.ids[0]].eligibleMs + 2000, currentUnconvertedEligibleMs: 0,
+    pendingComebackEligibleMs: null,
+  });
+  expect(closed.lastFrame.players.find(p => p.id === match.ids[0])?.usableUntilMs).toBeNull();
+});
+
+it.each(["unknown age", "inaccurate", "stale", "repeated capture"] as const)(
+  "does not refresh eligibility through %s reports", async kind => {
+    const match = await preparedConversion();
+    const initial = (await match.read()).awardData!;
+    const start = match.now();
+    match.advance(31000);
+    await report(match.host, 3, kind === "repeated capture" ? start : match.now(), {
+      reportedAgeMs: kind === "unknown age" ? null : kind === "stale" ? 30000 : 0,
+      accuracyM: kind === "inaccurate" ? 4 : 1,
+    });
+    const saved = (await match.read()).awardData!;
+    expect(saved.players[match.ids[0]].eligibleMs).toBe(initial.players[match.ids[0]].eligibleMs + 30000);
+    expect(saved.lastFrame.players.find(p => p.id === match.ids[0])?.usableUntilMs).toBeNull();
+    match.advance(1000);
+    await runInDurableObject(match.stub, instance => instance.alarm());
+    expect((await match.read()).awardData!.players[match.ids[0]].eligibleMs).toBe(saved.players[match.ids[0]].eligibleMs);
+  });
+
+it.each(["host end", "round expiry"] as const)("closes round intervals at %s without location messages", async kind => {
+  let now = Date.now();
+  vi.spyOn(Date, "now").mockImplementation(() => now);
+  const match = await runningMatch(1000);
+  const stub = env.MATCHES.get(env.MATCHES.idFromName(match.credentials.matchCode));
+  now += kind === "host end" ? 500 : 2000;
+  if (kind === "host end") await hostCommand(match.host, { type: "end" });
+  else await runDurableObjectAlarm(stub);
+  const read = () => runInDurableObject(stub, (_, state) => loadRecord(state.storage));
+  const saved = (await read())!.awardData!;
+  expect(saved.lastFrame).toMatchObject({ phase: "ended", remainingMs: kind === "host end" ? 500 : 0 });
+  expect(saved.players[match.ids[0]]).toMatchObject({ eligibleMs: kind === "host end" ? 500 : 1000,
+    currentUnconvertedEligibleMs: 0 });
+  now += 1000;
+  await runInDurableObject(stub, instance => instance.alarm());
+  expect((await read())!.awardData!.players).toEqual(saved.players);
+});
+
+it("deletes award data with the expired room", async () => {
+  const match = await preparedConversion();
+  await match.convert();
+  expect((await match.read()).awardData).not.toBeNull();
+  const saved = await match.read();
+  match.advance(saved.expiresAtMs - match.now());
+  await runDurableObjectAlarm(match.stub);
+  expect((await match.host.next("error")).code).toBe("expired");
+  expect(await runInDurableObject(match.stub, (_, state) => state.storage.list())).toEqual(new Map());
+  await runInDurableObject(match.stub, instance => instance.alarm());
+  expect(await runInDurableObject(match.stub, (_, state) => state.storage.list())).toEqual(new Map());
+});
+
+it("retains summaries across roster turnover", async () => {
+  const match = await preparedConversion();
+  await match.convert();
+  const original = (await match.read()).awardData!.players[match.ids[1]];
+  for (let index = 0; index < 101; index++) {
+    const guest = await connect(await joinMatch(match.credentials.matchCode));
+    guest.send({ version: 1, type: "leave" });
+    guest.send({ version: 1, type: "snapshot_request" }); await guest.next("snapshot");
+    await new Promise<void>(resolve => {
+      guest.socket.addEventListener("close", () => resolve(), { once: true }); guest.socket.close();
+    });
+    match.host.messages.length = 0; match.other.messages.length = 0;
+  }
+  const saved = (await match.read()).awardData!;
+  expect(saved.lastFrame.players).toHaveLength(2);
+  expect(Object.keys(saved.players)).toHaveLength(103);
+  expect(saved.players[match.ids[1]]).toEqual(original);
+  expect(Object.keys(saved.openEncounters).length).toBeLessThanOrEqual(2);
+}, 30000);

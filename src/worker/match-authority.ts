@@ -10,7 +10,7 @@ import type { ClockEstimate, ClockProbeSample, CommandOutcome, EngineEvent, Feed
 import { estimateClock, normalizeObservation } from "../shared/clock";
 import { gameObservation } from "./locations";
 import type { KnownPosition } from "./locations";
-import { advanceAwardData, createAwardData } from "./award-data";
+import { advanceAwardData, createAwardData, recoverAwardData } from "./award-data";
 
 const attachmentSchema = z.strictObject({
   actor: actorSchema.nullable(), streamId: z.string(), streamSeq: z.number().int().nonnegative(),
@@ -42,10 +42,15 @@ export class MatchAuthority extends DurableObject<Env> {
     ctx.blockConcurrencyWhile(async () => {
       this.record = await loadRecord(ctx.storage);
       if (this.record) {
-        this.engine = restoreEngine(this.record.checkpoint, Date.now());
-        const checkpoint = checkpointEngine(this.engine, Date.now());
-        await commitRecord(ctx.storage, { ...this.record, checkpoint }, []);
-        this.record = { ...this.record, checkpoint };
+        const engine = restoreEngine(this.record.checkpoint, Date.now());
+        const frame = awardFrameFor(engine);
+        const record = { ...this.record, checkpoint: checkpointEngine(engine, engine.last_at),
+          awardData: this.record.awardData === null
+            ? createAwardData(frame, this.record.checkpoint.phase === "lobby" ? "complete" : "partial")
+            : recoverAwardData(this.record.awardData, frame) };
+        await commitRecord(ctx.storage, record, []);
+        this.record = record;
+        this.engine = engine;
         for (const socket of ctx.getWebSockets()) {
           const connection = this.attachment(socket);
           socket.serializeAttachment({ ...connection, streamId: crypto.randomUUID(), streamSeq: 0 });

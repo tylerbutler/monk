@@ -15,7 +15,7 @@ async function trial(withoutParameters = false) {
     await runInDurableObject(stub, async (_, state) => {
       const record = await loadRecord(state.storage);
       if (!record) throw new Error("Missing legacy lobby fixture");
-      await state.storage.put("record", { ...record, checkpoint: { ...record.checkpoint, parameters: null } });
+      await state.storage.put("record", { ...record, awardData: null, checkpoint: { ...record.checkpoint, parameters: null } });
     });
     await evictDurableObject(stub);
   }
@@ -126,7 +126,7 @@ it("recovers running as paused, preserves committed duration, and clears observa
     const record = await loadRecord(state.storage);
     if (!record) throw new Error("Missing fixture record");
     const checkpoint = checkpointEngine(pulse(runningFixture(["rock", "scissors"]), 1000, [0, 4]).state, 1000);
-    await state.storage.put("record", { ...record,
+    await state.storage.put("record", { ...record, awardData: null,
       checkpoint: { ...checkpoint, id: record.matchCode, hostId: record.checkpoint.hostId, createdAtMs: record.createdAtMs } });
   });
 
@@ -189,7 +189,7 @@ it.each(["test", "normal"] as const)("migrates saved %s rooms without losing ide
   const original = await runInDurableObject(stub, async (_, state) => {
     const record = await loadRecord(state.storage);
     if (!record) throw new Error("Missing legacy room");
-    const legacy = { ...record, checkpoint: { ...record.checkpoint, mode, phase: "running" as const,
+    const legacy = { ...record, awardData: null, checkpoint: { ...record.checkpoint, mode, phase: "running" as const,
       remainingMs: 123456, parameters: { ...record.checkpoint.parameters!,
         entryRadiusM: 19, retentionRadiusM: 29, freshnessMs: 5000, dwellMs: 4000 } } };
     await state.storage.put("record", legacy);

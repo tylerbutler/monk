@@ -312,6 +312,30 @@ Agree on safe routes and a bounded play area in person.
 Private tokens stay in `sessionStorage` and authenticate the first WebSocket
 frame, not the URL. Invite links contain only the room code. Do not share tokens.
 
+## Award data collection
+
+The server collects round summaries for the
+[proposed player awards](docs/superpowers/specs/2026-10-07-player-awards-design.md).
+It records accepted conversions, faction-specific counts, unique counterparts,
+conversion streaks, influence encounters, range breaks, Close Calls, and
+underdog conversions. It also records eligible playing time, the longest
+eligible interval without a conversion received, comeback times, and the
+last successful conversion batch. Host faction changes do not count as
+conversions. The app does not select winners or show award results.
+
+Eligible time excludes pauses, grace, unusable location, and suspension.
+Recovery preserves saved totals and completed times, then clears open
+encounters and timing attempts without counting the outage. The server marks
+older rounds as partial coverage; it does not rebuild missing statistics
+from their event history. Older lobbies can start with complete coverage.
+
+These summaries, counterpart IDs, and timing cursors stay on the server.
+Player messages and host diagnostics do not include them. The server keeps
+departed players' summaries until the room expires, 24 hours after creation,
+then deletes them with the match record. Award collection adds no coordinates,
+location samples, or routes and does not change the existing location policy
+or gameplay rules.
+
 ## Optional two-iPhone measurements
 
 Open **Host controls > Host diagnostics**, then **Optional location measurement** in the lobby.
