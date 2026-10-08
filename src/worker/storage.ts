@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { checkpointSchema, eventSchema, gamePreset, locationInactivityMs, outcomeSchema } from "../shared/protocol";
 import type { EngineEvent } from "../shared/protocol";
+import { awardDataSchema } from "./award-data";
 
 const sessionSchema = z.strictObject({
   id: z.string().min(1), host: z.boolean(), playerId: z.string().nullable(),
@@ -13,6 +14,7 @@ export const recordSchema = z.strictObject({
   matchCode: z.string().regex(/^[A-Z2-9]{8}$/),
   createdAtMs: z.number().int().nonnegative(), expiresAtMs: z.number().int().nonnegative(),
   checkpoint: storedCheckpointSchema,
+  awardData: awardDataSchema.nullable().default(null),
   sessions: z.array(sessionSchema).max(101),
   events: z.array(eventSchema),
   outcomes: z.array(outcomeSchema).max(10000),
@@ -22,7 +24,17 @@ export const recordSchema = z.strictObject({
   })).default([]),
 }).refine(r => r.expiresAtMs === r.createdAtMs + 86400000 &&
   r.checkpoint.id === r.matchCode && r.checkpoint.createdAtMs === r.createdAtMs &&
-  r.events.every(e => e.eventSeq <= r.checkpoint.eventSeq), { message: "Inconsistent match record." });
+  r.events.every(e => e.eventSeq <= r.checkpoint.eventSeq) &&
+  (r.awardData === null ||
+    r.awardData.lastProcessedEventSeq <= r.checkpoint.eventSeq &&
+    r.awardData.lastFrame.eventSeq <= r.checkpoint.eventSeq &&
+    r.awardData.lastFrame.phase === r.checkpoint.phase &&
+    r.awardData.lastFrame.remainingMs === r.checkpoint.remainingMs &&
+    r.awardData.lastFrame.dwellMs === (r.checkpoint.parameters?.dwellMs ?? null) &&
+    r.awardData.lastFrame.players.length === r.checkpoint.players.length &&
+    r.awardData.lastFrame.players.every(p => r.checkpoint.players.some(saved =>
+      saved.id === p.id && saved.label === p.label && saved.faction === p.faction && saved.graceMs === p.graceMs))),
+  { message: "Inconsistent match record." });
 export type MatchRecord = z.infer<typeof recordSchema>;
 export async function loadRecord(storage: DurableObjectStorage): Promise<MatchRecord | null> {
   const raw = await storage.get<unknown>("record");

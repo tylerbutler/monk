@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
-import { advanceEngine, checkpointEngine, createEngine, distanceBetween, restoreEngine, snapshotFor, suspendEngine } from "./engine";
+import { advanceEngine, awardFrameFor, checkpointEngine, createEngine, distanceBetween, restoreEngine, snapshotFor, suspendEngine } from "./engine";
 import type { EngineState, EngineTransition } from "./engine";
 import { issueToken, verifyToken } from "./auth";
 import { commitRecord, loadRecord } from "./storage";
@@ -10,6 +10,7 @@ import type { ClockEstimate, ClockProbeSample, CommandOutcome, EngineEvent, Feed
 import { estimateClock, normalizeObservation } from "../shared/clock";
 import { gameObservation } from "./locations";
 import type { KnownPosition } from "./locations";
+import { advanceAwardData, createAwardData } from "./award-data";
 
 const attachmentSchema = z.strictObject({
   actor: actorSchema.nullable(), streamId: z.string(), streamSeq: z.number().int().nonnegative(),
@@ -118,7 +119,8 @@ export class MatchAuthority extends DurableObject<Env> {
         outcome: socket === caller ? outcome : null, trial: this.trialFor(actor), startChecking: false });
     }
   }
-  private async accept(next: EngineTransition, outcome: CommandOutcome | null = null, sessions?: MatchRecord["sessions"]): Promise<void> {
+  private async accept(next: EngineTransition, outcome: CommandOutcome | null = null, sessions?: MatchRecord["sessions"],
+    eligibilityResetIds: readonly string[] = []): Promise<void> {
     if (!this.record) throw new Error("Match record is unavailable.");
     const players = this.record.checkpoint.players;
     next.events = next.events.map(event => isFactionChange(event) ? { ...event,
@@ -132,7 +134,9 @@ export class MatchAuthority extends DurableObject<Env> {
       ],
     }));
     const record = { ...this.record, feedback: [...this.record.feedback, ...feedback],
-      sessions: sessions ?? this.record.sessions, checkpoint: checkpointEngine(next.state, Date.now()),
+      sessions: sessions ?? this.record.sessions, checkpoint: checkpointEngine(next.state, next.state.last_at),
+      awardData: this.record.awardData === null ? null :
+        advanceAwardData(this.record.awardData, awardFrameFor(next.state), next.events, eligibilityResetIds),
       outcomes: outcome ? [...this.record.outcomes, outcome] : this.record.outcomes };
     await commitRecord(this.ctx.storage, record, next.events);
     this.record = { ...record, events: [...record.events, ...next.events] };
@@ -203,6 +207,7 @@ export class MatchAuthority extends DurableObject<Env> {
         const record: MatchRecord = {
           matchCode: code, createdAtMs: now, expiresAtMs: now + 86400000,
           checkpoint: checkpointEngine(engine, now),
+          awardData: createAwardData(awardFrameFor(engine), "complete"),
           sessions: [
             { id: hostId, host: true, playerId: null, verifier: credential.verifier },
             { id: playerId, host: false, playerId, verifier: playerCredential.verifier },
@@ -393,7 +398,8 @@ export class MatchAuthority extends DurableObject<Env> {
         const next = advanceEngine(gameplay ? this.engine : suspendEngine(this.engine, actor.playerId), {
           nowMs: receivedAtMs, actor: null, commands: [], observations: gameplay ? [gameplay] : [],
         });
-        try { await this.accept(next); } catch { this.error(socket, "storage_failed", "Fix was not applied. Retry after reconnecting."); return; }
+        const resetIds = !gameplay || gameplay.accuracyM > (view.parameters?.maxAccuracyM ?? 0) ? [actor.playerId] : [];
+        try { await this.accept(next, null, undefined, resetIds); } catch { this.error(socket, "storage_failed", "Fix was not applied. Retry after reconnecting."); return; }
         if (this.record.checkpoint.phase !== "ended") {
           this.reports.set(actor.playerId, { seq: message.report.seq, capturedAtMs: message.report.capturedAtMs });
           this.lastKnownPositions.set(actor.playerId, known);
@@ -434,7 +440,7 @@ export class MatchAuthority extends DurableObject<Env> {
           commands: message.type === "leave" ? [{ type: "leave", playerId: actor.playerId }] : [],
         });
         const sessions = message.type === "leave" ? this.record.sessions.filter(s => s.playerId !== actor.playerId) : this.record.sessions;
-        try { await this.accept(next, null, sessions); } catch { this.error(socket, "storage_failed", "Suspension was not saved. Stop local location collection."); return; }
+        try { await this.accept(next, null, sessions, message.type === "suspend" ? [actor.playerId] : []); } catch { this.error(socket, "storage_failed", "Suspension was not saved. Stop local location collection."); return; }
         if (message.type === "leave") {
           this.lastKnownPositions.delete(actor.playerId); this.reports.delete(actor.playerId); this.captureTimings.delete(actor.playerId);
         }
@@ -498,7 +504,7 @@ export class MatchAuthority extends DurableObject<Env> {
           this.attachment(s).actor?.playerId === actor.playerId && s.readyState === WebSocket.OPEN);
         if (!others) {
           const next = advanceEngine(suspendEngine(this.engine, actor.playerId), { nowMs: Date.now(), actor: null, commands: [], observations: [] });
-          await this.accept(next);
+          await this.accept(next, null, undefined, [actor.playerId]);
           const known = this.lastKnownPositions.get(actor.playerId);
           if (known) this.lastKnownPositions.set(actor.playerId, { ...known, sharing: false });
           this.measurements.delete(actor.playerId);
