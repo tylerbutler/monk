@@ -72,8 +72,11 @@ countdown at the bottom drains through 3, 2, and 1; reduced motion keeps the
 ring fixed while the numbers change. The overlay then clears over 320 ms to
 reveal the updated faction, 3.96 seconds after confirmation.
 Outgoing conversion keeps its original timing, with a radar pulse, a smaller
-marker stamp, and a confirmation below the radar. Interruption clears progress
-without a stamp or faction change. Hidden tabs pause playback.
+marker stamp, and a confirmation below the radar. When an attempt to convert
+Alex stops, their ring becomes dashed for 120 ms, then expands and fades over
+530 ms. Reduced motion fades the dashed ring without expansion. Progress
+clears without a success stamp or a change to either faction. Hidden tabs
+pause playback.
 
 The preview reuses the app's faction names, relationships, and Tabler hand
 icons. CSS and the browser's Web Animations API provide the motion; no new

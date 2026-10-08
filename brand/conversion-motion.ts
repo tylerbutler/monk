@@ -59,11 +59,12 @@ const descriptions = {
     "480 ms bubble / 160 ms stamp / 3 s hold / 320 ms exit."],
   other: ["A new player on your side.", "A pulse travels to Alex. Your hand stamps onto their marker, and the confirmation stays below the radar.",
     "360 ms radar pulse / 160 ms marker stamp."],
-  stopped: ["No confirmation, no stamp.", "Alex moves out of range before the timer finishes. Progress clears, your faction stays unchanged, and no success effect plays.",
-    "Conversion stops before confirmation. No stamp or hold."],
+  stopped: ["The conversion breaks.", "Alex moves out of range before the timer finishes. Their ring cracks into dashes, then expands and fades. Neither faction changes.",
+    "120 ms crack / 530 ms expansion and fade. No success stamp."],
 };
 const dwellMs = 5000, confirmedAt = 5200, stampAt = 5680;
 const holdAt = stampAt + 160, holdMs = 3000, exitAt = holdAt + holdMs, endMs = exitAt + 320;
+const stoppedAt = 3000, failureMs = 650;
 let scene: Scene = "self";
 let sceneEndMs = endMs;
 let nextFaction: Faction = "paper";
@@ -99,6 +100,18 @@ function buildEffects() {
   animate(takeover, [{ opacity: 1 }, { opacity: 0 }], exitAt, 320);
   animate(signal, [{ transform: "translate(0, 0)", opacity: 1 }, { transform: "translate(72px, -66px)", opacity: 1 }], confirmedAt, 360, "cubic-bezier(.16, 1, .3, 1)");
   animate(result, [{ opacity: 0 }, { opacity: 1 }], stampAt, gentler ? 120 : 160);
+  if (scene === "stopped") {
+    const failureFrames: Keyframe[] = [
+      { opacity: 1 },
+      { opacity: 1, offset: 120 / failureMs, easing: "cubic-bezier(.16, 1, .3, 1)" },
+      { opacity: 0 },
+    ];
+    if (!gentler) {
+      failureFrames[0].transform = failureFrames[1].transform = "scale(1)";
+      failureFrames[2].transform = "scale(1.75)";
+    }
+    animate(targetRing, failureFrames, stoppedAt, failureMs);
+  }
   animate(tip, gentler ? [{ opacity: 1 }, { opacity: 1 }]
     : [{ opacity: .45, transform: "scale(.8)" }, { opacity: 1, transform: "scale(1.15)" }, { opacity: .45, transform: "scale(.8)" }],
   0, 1100);
@@ -106,11 +119,12 @@ function buildEffects() {
 
 function render() {
   const gentler = preference.matches || reduced.checked;
-  const stopped = scene === "stopped" && position >= 3000;
+  const outgoing = scene !== "self";
+  const stopped = scene === "stopped" && position >= stoppedAt;
   const confirmed = scene !== "stopped" && position >= confirmedAt;
   const stamped = confirmed && position >= stampAt;
-  const ownFaction = scene === "other" || stamped ? nextFaction : targets[nextFaction];
-  const targetFaction = scene === "other" && !stamped ? targets[nextFaction] : nextFaction;
+  const ownFaction = outgoing || stamped ? nextFaction : targets[nextFaction];
+  const targetFaction = outgoing && !stamped ? targets[nextFaction] : nextFaction;
   const fraction = stopped ? 0 : Math.min(position / dwellMs, 1);
   const percentage = Math.round(fraction * 100);
   for (const { animation, element, start } of effects) {
@@ -127,7 +141,7 @@ function render() {
   targetIcon.src = symbols[targetFaction];
   stampIcon.src = targetStampIcon.src = resultIcon.src = symbols[nextFaction];
   revealName.textContent = names[nextFaction];
-  heading.textContent = scene === "other" ? "You are converting Alex" : "You are being converted by Alex";
+  heading.textContent = outgoing ? "You are converting Alex" : "You are being converted by Alex";
   conversionState.textContent = stopped ? "Conversion stopped" : position >= dwellMs ? "Confirming..."
     : `${Math.ceil((dwellMs - position) / 1000)} s left`;
   percent.textContent = `${percentage}%`;
@@ -137,7 +151,7 @@ function render() {
   tip.style.left = `${percentage}%`;
   tip.hidden = stopped || confirmed || gentler;
   guidance.textContent = stopped ? "Alex moved out of range. Your faction has not changed."
-    : scene === "other" ? "Stay in range until confirmed." : "Move out of range to stop conversion.";
+    : outgoing ? "Stay in range until confirmed." : "Move out of range to stop conversion.";
   influence.hidden = stamped;
   result.hidden = !stamped;
   const message = scene === "other" ? `Alex joined ${names[nextFaction]}` : `You are now ${names[nextFaction]}`;
@@ -153,14 +167,14 @@ function render() {
   targetStamp.hidden = scene !== "other" || !stamped;
   impactRing.hidden = gentler || scene !== "self" || position < stampAt + 60 || position >= stampAt + 460;
   signal.toggleAttribute("hidden", gentler || scene !== "other" || !confirmed || position >= confirmedAt + 360);
-  ownRing.toggleAttribute("hidden", scene === "other" || stopped || confirmed);
-  targetRing.toggleAttribute("hidden", scene !== "other" || confirmed);
+  ownRing.toggleAttribute("hidden", outgoing || stopped || confirmed);
+  targetRing.toggleAttribute("hidden", !outgoing || confirmed || (stopped && position >= stoppedAt + failureMs));
   for (const ring of [ownRing, targetRing]) {
-    ring.querySelector("circle")!.setAttribute("stroke-dasharray", `${percentage} 100`);
+    ring.querySelector("circle")!.setAttribute("stroke-dasharray", stopped && ring === targetRing ? "3 3" : `${percentage} 100`);
   }
   link.toggleAttribute("hidden", stopped || confirmed);
   arrow.toggleAttribute("hidden", stopped || confirmed);
-  arrow.setAttribute("d", scene === "other" ? "M192 106l-12 3 3 10z" : "M180 117l12 -3 -3 -10z");
+  arrow.setAttribute("d", outgoing ? "M192 106l-12 3 3 10z" : "M180 117l12 -3 -3 -10z");
   timeline.value = String(position);
   const seconds = `${(position / 1000).toFixed(2)} s`;
   time.value = seconds;

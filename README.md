@@ -158,8 +158,9 @@ Open `/brand/conversion-motion.html` for a separate gameplay motion mockup.
 It previews conversion progress, a screen-covering faction-color bubble and
 hand stamp when you change sides, and a smaller radar stamp when you convert
 another player. The full-screen stamp holds for three seconds with a small
-circular countdown at the bottom. Replay controls, a timeline, all three
-factions, interruption, half speed, and reduced motion are included.
+circular countdown at the bottom. On interruption, the target ring becomes
+dashed, then expands and fades; reduced motion uses a fade only. Replay
+controls, a timeline, all three factions, half speed, and reduced motion are included.
 Players and positions are
 simulated; the preview does not change live gameplay or request location access.
 

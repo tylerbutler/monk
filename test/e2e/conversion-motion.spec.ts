@@ -122,13 +122,54 @@ test("stamps the converted player without taking over your screen", async ({ pag
   await expect(page.locator("#own-name")).toHaveText("Paper");
 });
 
+test("cracks the target ring before expanding and fading on interruption", async ({ page }) => {
+  await page.getByRole("button", { name: "Conversion stops", exact: true }).click();
+  await seek(page, 2990);
+  const ring = page.locator("#target-ring");
+  await expect(ring).toBeVisible();
+  await expect(page.locator("#target-ring circle")).toHaveAttribute("stroke-dasharray", "60 100");
+  const originalWidth = await ring.evaluate(element => element.getBoundingClientRect().width);
+  await expect(page.locator("#own-name")).toHaveText("Paper");
+  await expect(page.locator("#target-marker")).toHaveAttribute("data-faction", "rock");
+
+  await seek(page, 3040);
+  await expect(ring).toBeVisible();
+  await expect(page.locator("#target-ring circle")).toHaveAttribute("stroke-dasharray", "3 3");
+  await expect(ring).toHaveCSS("opacity", "1");
+  expect(await ring.evaluate(element => element.getBoundingClientRect().width)).toBeCloseTo(originalWidth, 1);
+  await expect(page.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "0");
+
+  await seek(page, 3300);
+  expect(await ring.evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThan(originalWidth);
+  const opacity = Number(await ring.evaluate(element => getComputedStyle(element).opacity));
+  expect(opacity).toBeGreaterThan(0);
+  expect(opacity).toBeLessThan(1);
+  await seek(page, 3650);
+  await expect(ring).toBeHidden();
+  await expect(page.locator("#own-name")).toHaveText("Paper");
+  await expect(page.locator("#target-marker")).toHaveAttribute("data-faction", "rock");
+  await expect(page.locator("#target-stamp")).toBeHidden();
+  await expect(page.locator("#result-message")).toBeHidden();
+
+  await page.getByRole("button", { name: "Play interruption", exact: true }).click();
+  await expect(ring).toBeVisible();
+  await expect(page.locator("#target-ring circle")).toHaveAttribute("stroke-dasharray", /^\d+ 100$/);
+  await seek(page, 3040);
+  await expect(ring).toHaveCSS("opacity", "1");
+  await page.getByRole("button", { name: "You convert someone", exact: true }).click();
+  await seek(page, 3300);
+  await expect(ring).toHaveCSS("opacity", "1");
+  expect(await ring.evaluate(element => element.getBoundingClientRect().width)).toBeCloseTo(originalWidth, 1);
+  await expect(page.locator("#target-ring circle")).toHaveAttribute("stroke-dasharray", "66 100");
+});
+
 test("interruption clears progress without showing a successful conversion", async ({ page }) => {
   await seek(page, 5920);
   await page.getByRole("button", { name: "Conversion stops", exact: true }).click();
   await seek(page, 3200);
   await expect(page.locator("#conversion-state")).toContainText("Conversion stopped");
   await expect(page.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "0");
-  await expect(page.locator("#own-name")).toHaveText("Rock");
+  await expect(page.locator("#own-name")).toHaveText("Paper");
   await expect(page.locator("#takeover")).toBeHidden();
   await expect(page.locator("#target-stamp")).toBeHidden();
   await expect(page.locator("#result-message")).toBeHidden();
@@ -162,13 +203,26 @@ test("reduced motion keeps the result but removes expansion and impact", async (
   await expect(page.locator("#signal")).toBeHidden();
   await seek(page, 6500);
   await expect(page.locator("#result-message")).toContainText("Alex joined Paper");
+  await page.getByRole("button", { name: "Conversion stops", exact: true }).click();
+  await seek(page, 3040);
+  await expect(page.locator("#target-ring circle")).toHaveAttribute("stroke-dasharray", "3 3");
+  const width = await page.locator("#target-ring").evaluate(element => element.getBoundingClientRect().width);
+  await seek(page, 3300);
+  await expect(page.locator("#target-ring")).toBeVisible();
+  await expect(page.locator("#target-ring")).toHaveCSS("transform", "none");
+  expect(await page.locator("#target-ring").evaluate(element => element.getBoundingClientRect().width)).toBe(width);
+  const ringOpacity = Number(await page.locator("#target-ring").evaluate(element => getComputedStyle(element).opacity));
+  expect(ringOpacity).toBeGreaterThan(0);
+  expect(ringOpacity).toBeLessThan(1);
+  await seek(page, 3650);
+  await expect(page.locator("#target-ring")).toBeHidden();
 });
 
 test("scene changes cancel playback and do not leak the previous result", async ({ page }) => {
   await page.getByRole("button", { name: "Play stamp", exact: true }).click();
   await page.getByRole("button", { name: "Conversion stops", exact: true }).click();
   await page.waitForTimeout(1500);
-  await expect(page.locator("#own-name")).toHaveText("Rock");
+  await expect(page.locator("#own-name")).toHaveText("Paper");
   await expect(page.locator("#takeover")).toBeHidden();
   await expect(page.locator("#result-message")).toBeHidden();
   await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeDisabled();
