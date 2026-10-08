@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { advanceEngine, checkpointEngine, createEngine, distanceBetween, isSuperior, restoreEngine, snapshotFor, suspendEngine } from "./engine";
+import { advanceEngine, awardFrameFor, checkpointEngine, createEngine, distanceBetween, isSuperior, restoreEngine, snapshotFor, suspendEngine } from "./engine";
 import { command, fix, host, lobbyFixture, parameters, pulse, runningFixture } from "../../test/fixtures";
 import { gamePreset } from "../shared/protocol";
 
@@ -159,6 +159,42 @@ function productionRound() {
 function productionFix(playerId: string, eastM: number, nowMs: number, accuracyM = 1) {
   return { ...fix(playerId, eastM, nowMs), expiresAtMs: nowMs + 30000, accuracyM };
 }
+
+it("projects award frames without location reports", () => {
+  const state = advanceEngine(productionRound(), { nowMs: 100, actor: null, commands: [],
+    observations: [productionFix("p1", 0, 100)] }).state;
+  expect(awardFrameFor(state)).toEqual({
+    atMs: 100, eventSeq: state.event_seq, phase: "running", remainingMs: 599900, dwellMs: 30000,
+    players: [
+      { id: "p1", label: "Player 1", faction: "rock", graceMs: 0, usableUntilMs: 30100 },
+      { id: "p2", label: "Player 2", faction: "scissors", graceMs: 0, usableUntilMs: null },
+    ],
+  });
+  expect(JSON.stringify(awardFrameFor(state))).not.toMatch(/latitude|longitude|accuracyM|capturedAtMs|distanceM|bearingDegrees/);
+});
+
+it("uses engine eligibility rather than radar visibility", () => {
+  const fresh = advanceEngine(productionRound(), { nowMs: 100, actor: null, commands: [],
+    observations: [productionFix("p1", 0, 100, 15), productionFix("p2", 20, 100, 15.01)] }).state;
+  expect(awardFrameFor(fresh).players.map(p => p.usableUntilMs)).toEqual([30100, null]);
+  const grace = command(fresh, 100, { type: "set_faction", playerId: "p1", faction: "paper" }).state;
+  expect(awardFrameFor(grace).players[0]).toMatchObject({ graceMs: 3000, usableUntilMs: 30100 });
+  const expired = advanceEngine(fresh, { nowMs: 30100, actor: null, commands: [], observations: [] }).state;
+  expect(awardFrameFor(expired).players.map(p => p.usableUntilMs)).toEqual([null, null]);
+  for (const state of [productionRound(), command(fresh, 200, { type: "end" }).state,
+    restoreEngine(checkpointEngine(fresh, 100), 200)]) {
+    expect(awardFrameFor(state).players.every(p => p.usableUntilMs === null)).toBe(true);
+  }
+});
+
+it("keeps an unchanged capture deadline in award frames", () => {
+  const observation = productionFix("p1", 0, 100);
+  const fresh = advanceEngine(productionRound(), { nowMs: 100, actor: null, commands: [], observations: [observation] }).state;
+  const repeated = advanceEngine(fresh, { nowMs: 1000, actor: null, commands: [],
+    observations: [{ ...observation, seq: 1001 }] }).state;
+  expect(awardFrameFor(repeated).players[0].usableUntilMs).toBe(30100);
+  expect(awardFrameFor(repeated).atMs).toBe(1000);
+});
 
 it("includes both uncertainty radii in entry range", () => {
   const state = productionRound();

@@ -6,6 +6,8 @@ import { checkpointSchema, engineInputSchema, eventSchema, snapshotSchema } from
 import type { DomainCommand, EngineCheckpoint, EngineEvent, EngineInput, Faction, Observation, PlayerSnapshot, RuleParameters } from "../shared/protocol";
 import { gameObservation, positionAgeMs } from "./locations";
 import type { KnownPosition } from "./locations";
+import { awardFrameSchema } from "./award-data";
+import type { AwardFrame } from "./award-data";
 
 export type EngineState = ReturnType<typeof rules.new_match>;
 const factions = { rock: d.Faction$Rock(), paper: d.Faction$Paper(), scissors: d.Faction$Scissors() };
@@ -71,6 +73,19 @@ export function advanceEngine(state: EngineState, raw: EngineInput): EngineTrans
 
 export function checkpointEngine(state: EngineState, nowMs: number): EngineCheckpoint {
   return fromCheckpoint(rules.checkpoint(state, nowMs));
+}
+export function awardFrameFor(state: EngineState): AwardFrame {
+  const parameters = nullable(state.parameters);
+  const observations = state.observations.toArray();
+  return awardFrameSchema.parse({
+    atMs: state.last_at, eventSeq: state.event_seq, phase: state.phase,
+    remainingMs: state.remaining, dwellMs: parameters?.dwell ?? null,
+    players: state.players.toArray().map(p => ({
+      ...player(p),
+      usableUntilMs: parameters ? observations.find(o =>
+        o.id === p.id && o.expires_at > state.last_at && o.accuracy <= parameters.accuracy)?.expires_at ?? null : null,
+    })),
+  });
 }
 export function restoreEngine(raw: EngineCheckpoint, nowMs: number): EngineState {
   const c = checkpointSchema.parse(raw);
