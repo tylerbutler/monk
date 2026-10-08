@@ -160,6 +160,37 @@ progress::-moz-progress-bar { background: var(--accent); }
 .influence[data-direction="incoming"] progress::-webkit-progress-value { background: var(--threat); }
 .influence[data-direction="incoming"] progress::-moz-progress-bar { background: var(--threat); }
 .influence-idle { margin: .5rem 0; }
+.conversion-progress { position: relative; }
+.conversion-progress progress { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); }
+.conversion-progress-track { position: relative; height: .75rem; background: var(--line); overflow: hidden; border-radius: 2px; }
+.conversion-progress-fill { position: absolute; inset: 0; transform-origin: left; background: var(--faction-color, var(--ink)); }
+.conversion-progress-tip { position: absolute; top: 2px; width: 8px; height: 8px; translate: -50% 0; border-radius: 50%; background: var(--ink); animation: conversion-tip 1100ms linear infinite; }
+.conversion-result { display: flex; align-items: center; gap: .75rem; margin-top: .75rem; padding: 1rem; background: var(--ink); color: #fff; border-radius: .25rem; animation: conversion-fade 160ms 480ms both; }
+.conversion-result img { width: 2.5rem; height: 2.5rem; padding: .3rem; border-radius: 50%; background: var(--faction-color); }
+.conversion-result p { margin: .25rem 0 0; font-size: .8rem; }
+.conversion-takeover { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; overflow: hidden; isolation: isolate; pointer-events: none; color: var(--ink); animation: conversion-exit 320ms 3640ms both; }
+.conversion-bubble { position: absolute; left: 50%; top: 50%; width: 200vmax; height: 200vmax; translate: -50% -50%; border-radius: 50%; background: var(--faction-color); animation: conversion-bubble 480ms cubic-bezier(.16, 1, .3, 1) both; }
+.conversion-reveal { position: relative; width: 100%; text-align: center; padding: 1.25rem; }
+.conversion-faction-stamp { display: grid; place-items: center; width: 164px; height: 164px; margin: 0 auto 1.75rem; border: 5px solid var(--ink); border-radius: 50%; rotate: -5deg; animation: conversion-stamp 160ms 480ms cubic-bezier(.16, 1, .3, 1) both; }
+.conversion-faction-stamp img { width: 108px; height: 108px; }
+.conversion-impact-ring { position: absolute; width: 190px; height: 190px; top: 7px; left: calc(50% - 95px); border: 2px solid var(--ink); border-radius: 50%; animation: conversion-impact 400ms 540ms both; }
+.conversion-reveal-copy { animation: conversion-fade 140ms 600ms both; }
+.conversion-reveal-copy p { max-width: none; margin: .25rem 0; font-size: 1.1rem; }
+.conversion-reveal-copy p:last-child { font-size: .9rem; }
+.conversion-reveal-copy .conversion-simultaneous { margin-top: 1rem; }
+.conversion-reveal-copy h2 { font-size: 3.25rem; font-weight: 750; margin: 0; }
+.conversion-hold-countdown { position: absolute; bottom: max(24px, env(safe-area-inset-bottom)); left: 50%; translate: -50% 0; width: 40px; height: 40px; display: grid; place-items: center; font-size: .85rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.conversion-hold-countdown[hidden] { display: none; }
+.conversion-hold-countdown svg { position: absolute; inset: 0; width: 40px; height: 40px; rotate: -90deg; }
+.conversion-hold-countdown circle { fill: none; stroke: var(--ink); stroke-width: 2; }
+.conversion-countdown-track { opacity: .2; }
+.conversion-countdown-ring { stroke-linecap: round; transition: stroke-dashoffset 50ms linear; }
+@keyframes conversion-tip { 0%, 100% { opacity: .45; transform: scale(.8); } 50% { opacity: 1; transform: scale(1.15); } }
+@keyframes conversion-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes conversion-exit { from { opacity: 1; } to { opacity: 0; } }
+@keyframes conversion-bubble { from { transform: scale(0); } to { transform: scale(1); } }
+@keyframes conversion-stamp { from { transform: scale(1.4) rotate(-9deg); opacity: 0; } 12% { opacity: 1; } to { transform: scale(1) rotate(0deg); opacity: 1; } }
+@keyframes conversion-impact { from { transform: scale(.75); opacity: .5; } to { transform: scale(1.4); opacity: 0; } }
 .player-radar { grid-area: radar; margin: 0; min-width: 0; }
 .hud-readout { grid-area: readout; min-width: 0; align-self: start; }
 .hud-controls { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin-top: .75rem; }
@@ -197,6 +228,25 @@ progress::-moz-progress-bar { background: var(--accent); }
 .radar-progress-track { stroke: var(--line); }
 .radar-progress { stroke: var(--accent); }
 .radar-progress.incoming { stroke: var(--threat); }
+.radar-own-progress { fill: none; stroke: var(--faction-color); stroke-width: 2; }
+.radar-conversion-signal { fill: var(--faction-color); stroke: #fff; stroke-width: 2; animation: conversion-signal 360ms cubic-bezier(.16, 1, .3, 1) both; }
+.radar-conversion-stamp { animation: conversion-stamp 160ms 480ms cubic-bezier(.16, 1, .3, 1) both; }
+.radar-conversion-stamp circle { fill: var(--faction-color); stroke: var(--ink); stroke-width: 3; }
+.radar-failure { animation: conversion-failure 650ms linear both; }
+.radar-failure circle { fill: none; stroke: var(--faction-color); stroke-width: 2; }
+@keyframes conversion-signal { from { transform: translate(0, 0); } to { transform: translate(var(--signal-x), var(--signal-y)); } }
+@keyframes conversion-failure { 0%, 18.4615% { transform: scale(1); opacity: 1; animation-timing-function: cubic-bezier(.16, 1, .3, 1); } 100% { transform: scale(1.75); opacity: 0; } }
+/* The app reparents the HUD on updates; seek from event age so motion cannot restart. */
+.conversion-progress-tip, .conversion-result, .conversion-takeover, .conversion-bubble,
+.conversion-faction-stamp, .conversion-impact-ring, .conversion-reveal-copy,
+.radar-conversion-signal, .radar-conversion-stamp, .radar-failure {
+  animation-play-state: paused;
+  animation-delay: calc(0ms - var(--motion-age, 0ms));
+}
+.conversion-result, .conversion-faction-stamp, .radar-conversion-stamp { animation-delay: calc(480ms - var(--motion-age, 0ms)); }
+.conversion-takeover { animation-delay: calc(3640ms - var(--motion-age, 0ms)); }
+.conversion-impact-ring { animation-delay: calc(540ms - var(--motion-age, 0ms)); }
+.conversion-reveal-copy { animation-delay: calc(600ms - var(--motion-age, 0ms)); }
 .radar-center[data-current="false"] { fill: var(--surface); stroke: var(--ink); stroke-dasharray: 2 2; }
 .location-sharing { font-weight: 650; }
 .host-controls > details { margin: 0; }
@@ -367,4 +417,14 @@ footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line);
   .radar-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "radar players" "radar readout" "details details"; gap: 0 1rem; }
   .radar-layout figure > svg { width: min(100%, 52svh); }
 }
-@media (prefers-reduced-motion: reduce) { button { transition: none; } }
+@media (prefers-reduced-motion: reduce) {
+  button { transition: none; }
+  .conversion-progress-tip, .conversion-impact-ring, .radar-conversion-signal { display: none; }
+  .conversion-bubble { animation: conversion-fade 120ms both; }
+  .conversion-faction-stamp, .radar-conversion-stamp { animation: conversion-fade 120ms 480ms both; }
+  .radar-failure { animation: conversion-failure-fade 650ms linear both; }
+  .conversion-countdown-ring { stroke-dashoffset: 0; transition: none; }
+  .conversion-bubble, .radar-failure { animation-delay: calc(0ms - var(--motion-age, 0ms)); animation-play-state: paused; }
+  .conversion-faction-stamp, .radar-conversion-stamp { animation-delay: calc(480ms - var(--motion-age, 0ms)); animation-play-state: paused; }
+}
+@keyframes conversion-failure-fade { 0%, 18.4615% { opacity: 1; } 100% { opacity: 0; } }

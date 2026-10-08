@@ -317,6 +317,30 @@ and pale backing. Stopped/offline/approximate states retain their text.
 The fixed conversion notice is dismissible, width `min(100% - 2rem, 48rem)`,
 safe-area-aware, and scrollable within the viewport.
 
+### Conversion motion
+Live server-confirmed conversions use the approved bubble-and-stamp study.
+The converting faction colors progress fills, with a small pulsing tip;
+the native progress element retains its accessible value and label.
+Incoming influence also draws a progress ring around the radar's own center.
+
+A conversion received fills the viewport with a centered faction-color
+bubble (480ms), stamps the supplied hand (160ms), holds for three seconds
+with a bottom circular countdown, then fades out (320ms). The overlay does
+not intercept controls or change game timing. An outgoing conversion sends
+a radar pulse (360ms), stamps the target marker, and adds a short ink-backed
+confirmation below the radar. Interrupted influence cracks the target ring
+into dashes, holds for 120ms, then expands and fades over 530ms.
+
+CSS carries the motion; no animation dependency is added to gameplay.
+An event-age clock seeks the CSS effects so outer app renders cannot restart
+them when they reparent the HUD. Simultaneous outgoing confirmation also
+appears within the incoming reveal, so both results remain visible.
+Reduced motion replaces bubble and stamp movement with fades, removes the
+traveling pulse, impact ring, and pulsing tip, and keeps a static countdown
+ring with changing numerals. Hidden, offline, paused, and ended states cancel
+effects. Snapshot restoration and host faction changes do not trigger success
+animations. Names and hand icons accompany faction colors throughout.
+
 ### Disclosures / continuity
 Native summaries have minimum 2.75rem height, .6rem vertical padding, and
 weight 650. Full rules, room/options, host controls/settings/diagnostics,

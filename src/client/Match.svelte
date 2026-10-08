@@ -2,14 +2,15 @@
   import { flushSync } from "svelte";
   import { configureSchema, factionSchema, gamePreset, locationInactivityMs } from "../shared/protocol";
   import type { PlayerSnapshot, RuleParameters } from "../shared/protocol";
-  import type { HudState, MatchActions } from "./views";
-  import { activitySnapshot, clock, names, symbols } from "./views";
+  import type { GameMotion, HudState, MatchActions } from "./views";
+  import { activitySnapshot, clock, motionTiming, names, symbols } from "./views";
   import { icons } from "./icons";
   import Radar from "./Radar.svelte";
 
-  let { snapshot, actions, live, elapsedMs, hud, headingDegrees }: {
+  let { snapshot, actions, live, elapsedMs, hud, headingDegrees, motion }: {
     snapshot: PlayerSnapshot; actions: MatchActions; live: boolean; elapsedMs: number;
     hud: HudState | null; headingDegrees: number | null;
+    motion: GameMotion;
   } = $props();
   const activity = $derived(activitySnapshot(snapshot, live, elapsedMs));
   const parameters = $derived(snapshot.parameters ?? gamePreset);
@@ -18,6 +19,25 @@
     snapshot.phase === "ended" ? "Round ended" : "Round running");
   let advancedOpen = $state(false), validation = $state("");
   let hostTools = $state<HTMLDetailsElement>();
+  let now = $state(performance.now());
+  const reveal = $derived(motion.reveal && now - motion.reveal.startedAt < motionTiming.revealEnd ? motion.reveal : null);
+  const revealAge = $derived(reveal ? Math.max(0, now - reveal.startedAt) : 0);
+  const conversions = $derived(motion.conversions.filter(effect => now - effect.startedAt < motionTiming.resultEnd));
+  const failures = $derived(motion.failures.filter(effect => now - effect.startedAt < motionTiming.failureEnd));
+  $effect(() => {
+    const influencing = !!activity.outgoing || activity.incoming.length > 0;
+    const deadline = Math.max(
+      motion.reveal ? motion.reveal.startedAt + motionTiming.revealEnd : 0,
+      ...motion.conversions.map(effect => effect.startedAt + motionTiming.resultEnd),
+      ...motion.failures.map(effect => effect.startedAt + motionTiming.failureEnd));
+    now = performance.now();
+    if (!influencing && deadline <= performance.now()) return;
+    const interval = setInterval(() => {
+      now = performance.now();
+      if (!influencing && now >= deadline) clearInterval(interval);
+    }, 16);
+    return () => clearInterval(interval);
+  });
   const fields: [keyof RuleParameters, string, number][] = [
     ["entryRadiusM", "Entry radius (m)", 1], ["retentionRadiusM", "Retention radius (m)", 1],
     ["maxAccuracyM", "Influence uncertainty limit (m)", 1], ["dwellMs", "Conversion time (seconds)", 1000],
@@ -55,6 +75,16 @@
   <strong class="conversion-countdown">{seconds > 0 ? `${seconds} s left` : "Confirming..."}</strong>
 {/snippet}
 
+{#snippet progressBar(progress: number, label: string, faction: PlayerSnapshot["ownFaction"])}
+  <div class="conversion-progress" data-faction={faction ?? undefined}>
+    <progress max="1" value={progress} aria-label={label}></progress>
+    <div class="conversion-progress-track" aria-hidden="true">
+      <div class="conversion-progress-fill" style:transform="scaleX({progress})"></div>
+      <div class="conversion-progress-tip" style:left="{progress * 100}%" style:--motion-age="{now % 1100}ms"></div>
+    </div>
+  </div>
+{/snippet}
+
 {#snippet readout()}
   <div data-influence-display class="hud-influence">
     {#if snapshot.phase === "running" && live}
@@ -63,7 +93,7 @@
         <div class="influence" data-direction="outgoing">
           <p class="conversion-heading" role="status">You are converting {target}</p>
           <span>{@render countdown(activity.outgoing.progress)}<span>{Math.round(activity.outgoing.progress * 100)}%</span></span>
-          <progress max="1" value={activity.outgoing.progress} aria-label="Influencing {target}"></progress>
+          {@render progressBar(activity.outgoing.progress, `Influencing ${target}`, snapshot.ownFaction)}
           <p class="conversion-guidance">Stay in range until confirmed.</p>
         </div>
       {/if}
@@ -72,7 +102,7 @@
         <div class="influence" data-direction="incoming">
           <p class="conversion-heading" role="status">You are being converted by {attacker}</p>
           <span>{@render countdown(attack.progress)}<span>{Math.round(attack.progress * 100)}%</span></span>
-          <progress max="1" value={attack.progress} aria-label="{attacker} is influencing you"></progress>
+          {@render progressBar(attack.progress, `${attacker} is influencing you`, snapshot.roster.find(p => p.id === attack.attackerId)?.faction ?? null)}
           <p class="conversion-guidance">Move out of range to stop conversion.</p>
         </div>
       {/each}
@@ -85,6 +115,12 @@
       <p class="conversion-stopped" role="status">{hud.interruption}</p>
     {/if}
   </div>
+  {#each conversions as effect (effect.eventSeq)}
+    <div class="conversion-result" data-faction={effect.faction} role="status" style:--motion-age="{Math.max(0, now - effect.startedAt)}ms">
+      <img src={symbols[effect.faction]} alt="" aria-hidden="true" />
+      <div><strong>{effect.label} joined {names[effect.faction]}</strong><p>Conversion confirmed. Keep playing.</p></div>
+    </div>
+  {/each}
   {#if hud && snapshot.phase !== "ended"}
     <div class="hud-controls">
       {#if hud.locationLabel}
@@ -125,9 +161,31 @@
   {#if !snapshot.ownFaction}<p class="radar-note">Host view. Join as a player to participate.</p>{/if}
   {#if snapshot.phase !== "lobby" && snapshot.graceMs}<p class="grace-note">Grace: {clock(snapshot.graceMs)}. You cannot attack or be attacked.</p>{/if}
   {#if snapshot.phase !== "ended"}
-    <Radar snapshot={activity} {live} {elapsedMs} {headingDegrees}>{@render readout()}</Radar>
+    <Radar snapshot={activity} {live} {elapsedMs} {headingDegrees} {conversions} {failures} {now}>{@render readout()}</Radar>
   {/if}
 </div>
+
+{#if reveal}
+  {#key reveal.eventSeq}
+    <div class="conversion-takeover" data-faction={reveal.faction} role="status" aria-label="Your faction changed" style:--motion-age="{revealAge}ms">
+      <div class="conversion-bubble" aria-hidden="true"></div>
+      <div class="conversion-reveal">
+        <div class="conversion-impact-ring" aria-hidden="true"></div>
+        <div class="conversion-faction-stamp"><img src={symbols[reveal.faction]} alt="" aria-hidden="true" /></div>
+        <div class="conversion-reveal-copy">
+          <div data-event-seq={reveal.eventSeq}><p>You are now</p><h2>{names[reveal.faction]}</h2><p>New side. New targets. Keep playing.</p></div>
+          {#each conversions as effect (effect.eventSeq)}
+            <p class="conversion-simultaneous" data-event-seq={effect.eventSeq}><strong>{effect.label} joined {names[effect.faction]}</strong></p>
+          {/each}
+        </div>
+      </div>
+      <div class="conversion-hold-countdown" hidden={revealAge < motionTiming.holdAt || revealAge >= motionTiming.exitAt} aria-hidden="true">
+        <svg viewBox="0 0 40 40"><circle class="conversion-countdown-track" cx="20" cy="20" r="18" /><circle class="conversion-countdown-ring" cx="20" cy="20" r="18" pathLength="100" stroke-dasharray="100 100" stroke-dashoffset={Math.max(0, (revealAge - motionTiming.holdAt) / 3000 * 100)} /></svg>
+        <span class="conversion-hold-number">{Math.max(1, Math.ceil((motionTiming.exitAt - revealAge) / 1000))}</span>
+      </div>
+    </div>
+  {/key}
+{/if}
 
 {#if !snapshot.radar}
   <section id="player-roster" aria-labelledby="player-roster-heading">

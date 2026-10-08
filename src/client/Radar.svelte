@@ -4,9 +4,11 @@
   import { gamePreset } from "../shared/protocol";
   import { icons } from "./icons";
   import { attackFor, combatLabel, isCurrentPosition, names, radarLayout, radarRoles, relationship, symbols, targets, updated } from "./views";
+  import type { ConversionEffect, FailedConversionEffect } from "./views";
 
-  let { snapshot, live, elapsedMs, headingDegrees, children }: {
+  let { snapshot, live, elapsedMs, headingDegrees, children, conversions, failures, now }: {
     snapshot: PlayerSnapshot; live: boolean; elapsedMs: number; headingDegrees: number | null; children: Snippet;
+    conversions: ConversionEffect[]; failures: FailedConversionEffect[]; now: number;
   } = $props();
   const radar = $derived(snapshot.radar);
   const reference = $derived(radar?.reference);
@@ -138,7 +140,37 @@
                 </g>
               {/each}
             </g>
+            <g>
+              {#each conversions as effect (effect.eventSeq)}
+                {#if effect.x !== null && effect.y !== null}
+                  {#if now - effect.startedAt < 360}
+                    <circle cx="160" cy="160" r="5" data-faction={effect.faction} class="radar-conversion-signal"
+                      style:--signal-x="{effect.x - 160}px" style:--signal-y="{effect.y - 160}px" style:--motion-age="{Math.max(0, now - effect.startedAt)}ms" />
+                  {/if}
+                  <g transform="translate({effect.x} {effect.y})">
+                    <g data-radar-upright transform="rotate({heading} 0 0)">
+                      <g class="radar-conversion-stamp" data-faction={effect.faction} data-player-id={effect.playerId} style:--motion-age="{Math.max(0, now - effect.startedAt)}ms">
+                        <circle r="24" />
+                        <image href={symbols[effect.faction]} x="-16" y="-16" width="32" height="32" />
+                      </g>
+                    </g>
+                  </g>
+                {/if}
+              {/each}
+              {#each failures as effect (effect.key)}
+                <g transform="translate({effect.x} {effect.y})">
+                  <g class="radar-failure" data-faction={effect.faction} data-player-id={effect.playerId} style:--motion-age="{Math.max(0, now - effect.startedAt)}ms">
+                    <circle r={effect.playerId === snapshot.ownPlayerId ? 14 : 22} pathLength="100" stroke-dasharray="3 3" />
+                  </g>
+                </g>
+              {/each}
+            </g>
           </g>
+          {#each snapshot.incoming as attack (attack.attackerId)}
+            <circle cx="160" cy="160" r="14" pathLength="100" transform="rotate(-90 160 160)"
+              data-faction={snapshot.roster.find(p => p.id === attack.attackerId)?.faction}
+              stroke-dasharray="{attack.progress * 100} 100" class="radar-own-progress" />
+          {/each}
           <circle cx="160" cy="160" r="7" class="radar-center" data-current={String(referenceCurrent)} />
           <text x="160" y="186" text-anchor="middle" class="radar-compass">{reference.playerId === snapshot.ownPlayerId ? "You" : "Reference"}</text>
         </svg>

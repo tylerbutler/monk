@@ -161,8 +161,9 @@ another player. The full-screen stamp holds for three seconds with a small
 circular countdown at the bottom. On interruption, the target ring becomes
 dashed, then expands and fades; reduced motion uses a fade only. Replay
 controls, a timeline, all three factions, half speed, and reduced motion are included.
-Players and positions are
-simulated; the preview does not change live gameplay or request location access.
+Players and positions are simulated; the preview does not request location
+access. The live game uses the same motion for confirmed conversions and
+interrupted influence.
 
 Edit `scripts/generate-mark-animation.mjs`, then run `npm run build:mark` to
 regenerate the five `brand/assets/monk-*.json` files. The regular build
@@ -290,6 +291,18 @@ dwell before **You converted...** appears and the player's faction changes.
 An interruption explains why influence stopped; progress does not continue
 through missing observations.
 
+Conversion progress uses the converting faction's color and a moving tip.
+When the server confirms that you have been converted, a center bubble covers
+the viewport in your new faction color, followed by its hand stamp. The stamp
+holds for three seconds with a small circular countdown, then fades back to
+play. Converting another player sends a pulse to their radar marker, stamps
+their new faction, and shows a short confirmation below the radar. An
+interrupted conversion cracks the target's ring into dashes, then expands and
+fades it without a success stamp. Reduced motion keeps the faction names,
+confirmation, countdown, and fades, but removes expansion and traveling
+effects. Hidden, disconnected, paused, and ended games cancel these effects;
+saved history does not replay them.
+
 Open **Faction changes** for a timestamped log of conversions and host faction
 changes, newest first. Players see only changes involving them; the host sees
 all changes. The server applies this filter before sending events. The log
@@ -364,8 +377,9 @@ in one summary. Export, then select **Discard measurement summary** before
 changing devices, conditions, or parameter candidates.
 
 The host can inspect visible conversion acknowledgements under diagnostics.
-Both intended players acknowledge after the conversion text fits inside its
-notification and visible viewport. Display-delay upper bounds are not one-way
+Both intended players acknowledge after the conversion text is visible and
+fits inside its notification or faction reveal and the viewport.
+Display-delay upper bounds are not one-way
 network latency. Physical accuracy, comprehension, and field feedback targets
 remain unverified.
 

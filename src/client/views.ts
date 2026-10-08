@@ -11,6 +11,7 @@ export type MatchActions = {
   setFaction(playerId: string, faction: Faction): void;
 };
 export type HudState = {
+  events?: EngineEvent[];
   interruption?: string | null;
   locationLabel: string | null;
   sharing: boolean;
@@ -19,6 +20,19 @@ export type HudState = {
   compass: CompassState;
   toggleCompass(): void;
 };
+export type ConversionEffect = {
+  eventSeq: number; faction: Faction; playerId: string; label: string; startedAt: number;
+  x: number | null; y: number | null;
+};
+export type FailedConversionEffect = {
+  key: string; playerId: string; faction: Faction; x: number; y: number; startedAt: number;
+};
+export type GameMotion = {
+  reveal: ConversionEffect | null;
+  conversions: ConversionEffect[];
+  failures: FailedConversionEffect[];
+};
+export const motionTiming = { stampAt: 480, holdAt: 640, exitAt: 3640, revealEnd: 3960, resultEnd: 4000, failureEnd: 650 };
 export const names = { rock: "Rock", paper: "Paper", scissors: "Scissors" };
 export const targets: Record<Faction, Faction> = { rock: "scissors", paper: "rock", scissors: "paper" };
 export const radarRoles = {

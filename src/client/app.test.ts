@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
+import { flushSync } from "svelte";
 import { mountApp } from "./app.svelte";
 import { describeEvent } from "./views";
 import { destroyMatch, renderMatch as updateMatch } from "./match-view.svelte";
@@ -511,6 +512,161 @@ function browserApp(snapshot: ReturnType<typeof snapshotFor>) {
     cleanup(); root.remove(); sessionStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals();
   } };
 }
+
+function conversionFixture() {
+  const initial = pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state;
+  let state = initial;
+  for (const at of [1000, 2000]) state = pulse(state, at, [0, 4]).state;
+  return { initial, confirmed: pulse(state, 3000, [0, 4]) };
+}
+
+it("waits for a confirmed conversion before showing the faction takeover and countdown", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] });
+  const { initial, confirmed } = conversionFixture();
+  const app = browserApp(snapshotFor(initial, "p2", 0));
+  try {
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
+      snapshot: { ...snapshotFor(initial, "p2", 0), incoming: [{ attackerId: "p1", targetId: "p2", progress: 1 }] },
+      trial: null, startChecking: false });
+    expect(app.root.querySelector(".conversion-takeover")).toBeNull();
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 6,
+      snapshot: snapshotFor(confirmed.state, "p2", 3000), events: confirmed.events,
+      trial: null, startChecking: false, outcome: null });
+    const takeover = app.root.querySelector(".conversion-takeover");
+    expect(takeover?.getAttribute("data-faction")).toBe("rock");
+    expect(takeover?.textContent).toContain("You are now");
+    expect(app.root.querySelector(".conversion-hold-countdown")?.hasAttribute("hidden")).toBe(true);
+    for (const [delay, number] of [[650, "3"], [1000, "2"], [1000, "1"]] as const) {
+      vi.advanceTimersByTime(delay); flushSync();
+      expect(app.root.querySelector(".conversion-hold-countdown")?.hasAttribute("hidden")).toBe(false);
+      expect(app.root.querySelector(".conversion-hold-number")?.textContent).toBe(number);
+      expect(app.root.querySelector(".conversion-takeover")).toBe(takeover);
+    }
+    vi.advanceTimersByTime(1350); flushSync();
+    expect(app.root.querySelector(".conversion-takeover")).toBeNull();
+    expect(app.root.querySelector(".own-faction h2")?.textContent).toBe("Rock");
+  } finally { app.cleanup(); vi.useRealTimers(); }
+});
+
+it("keeps outgoing success on the radar and does not replay it on a later snapshot", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] });
+  const { initial, confirmed } = conversionFixture();
+  const app = browserApp(snapshotFor(initial, "p1", 0));
+  try {
+    const snapshot = snapshotFor(confirmed.state, "p1", 3000);
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 5,
+      snapshot, events: confirmed.events, trial: null, startChecking: false, outcome: null });
+    expect(app.root.querySelector(".conversion-takeover")).toBeNull();
+    expect(app.root.querySelector(".radar-conversion-signal")).not.toBeNull();
+    expect(app.root.querySelector(".radar-conversion-stamp")?.getAttribute("data-faction")).toBe("rock");
+    expect(app.root.querySelector(".radar-conversion-stamp")?.closest("[data-radar-player]")).toBeNull();
+    expect(app.root.querySelector(".conversion-result")?.textContent).toContain("Player 2 joined Rock");
+    expect(app.root.querySelector(".radar-failure")).toBeNull();
+    const stamp = app.root.querySelector(".radar-conversion-stamp");
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 6,
+      snapshot, trial: null, startChecking: false });
+    expect(app.root.querySelector(".radar-conversion-stamp")).toBe(stamp);
+    vi.advanceTimersByTime(4500); flushSync();
+    expect(app.root.querySelector(".radar-conversion-stamp")).toBeNull();
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 7,
+      snapshot, events: confirmed.events, trial: null, startChecking: false, outcome: null });
+    expect(app.root.querySelector(".radar-conversion-stamp")).toBeNull();
+  } finally { app.cleanup(); vi.useRealTimers(); }
+});
+
+it.each(["p1", "p2"])("cracks the target ring when %s observes a stopped conversion", viewer => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] });
+  const initial = pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state;
+  const stopped = pulse(initial, 500, [0, 60]);
+  const app = browserApp(snapshotFor(initial, viewer, 0));
+  try {
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 5,
+      snapshot: snapshotFor(stopped.state, viewer, 500), events: stopped.events,
+      trial: null, startChecking: false, outcome: null });
+    const failure = app.root.querySelector(".radar-failure");
+    expect(failure?.getAttribute("data-player-id")).toBe("p2");
+    expect(failure?.querySelector("circle")?.getAttribute("stroke-dasharray")).toBe("3 3");
+    expect(app.root.querySelector(".conversion-takeover")).toBeNull();
+    expect(app.root.querySelector(".radar-conversion-stamp")).toBeNull();
+    vi.advanceTimersByTime(700); flushSync();
+    expect(app.root.querySelector(".radar-failure")).toBeNull();
+  } finally { app.cleanup(); vi.useRealTimers(); }
+});
+
+it("animates local location expiry once without announcing a conversion", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] });
+  const initial = pulse(runningFixture(["rock", "scissors"]), 0, [0, 4]).state;
+  const app = browserApp(snapshotFor(initial, "p1", 0));
+  try {
+    vi.advanceTimersByTime(30000); flushSync();
+    expect(app.root.querySelector(".radar-failure")).not.toBeNull();
+    expect(app.root.querySelector("progress")).toBeNull();
+    expect(app.root.querySelector(".conversion-takeover")).toBeNull();
+    vi.advanceTimersByTime(1000); flushSync();
+    expect(app.root.querySelector(".radar-failure")).toBeNull();
+  } finally { app.cleanup(); vi.useRealTimers(); }
+});
+
+it("cancels the takeover when hidden and does not replay saved conversions on return", () => {
+  const { initial, confirmed } = conversionFixture();
+  const app = browserApp(snapshotFor(initial, "p2", 0));
+  try {
+    const snapshot = snapshotFor(confirmed.state, "p2", 3000);
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 5,
+      snapshot, events: confirmed.events, trial: null, startChecking: false, outcome: null });
+    expect(app.root.querySelector(".conversion-takeover")).not.toBeNull();
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(app.root.querySelector(".conversion-takeover")).toBeNull();
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 6,
+      snapshot, factionHistory: confirmed.events, trial: null, startChecking: false });
+    expect(app.root.querySelector(".conversion-takeover")).toBeNull();
+  } finally {
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    app.cleanup();
+  }
+});
+
+it("shows and acknowledges both confirmed results during simultaneous conversions", () => {
+  let state = pulse(runningFixture(["rock", "scissors", "paper"]), 0, [0, 4, 8]).state;
+  const app = browserApp(snapshotFor(state, "p1", 0));
+  try {
+    for (const at of [1000, 2000]) state = pulse(state, at, [0, 4, 8]).state;
+    const confirmed = pulse(state, 3000, [0, 4, 8]);
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 5,
+      snapshot: snapshotFor(confirmed.state, "p1", 3000), events: confirmed.events,
+      trial: null, startChecking: false, outcome: null });
+    expect(app.root.querySelector(".conversion-takeover")?.textContent).toContain("Player 2 joined Rock");
+    while (app.raf.length) app.raf.shift()?.(16);
+    const acknowledged = app.frames.map(frame => JSON.parse(frame))
+      .filter(frame => frame.type === "feedback_seen").map(frame => frame.eventSeq);
+    const ownEvents = confirmed.events.filter(event => event.type === "conversion" &&
+      (event.targetId === "p1" || event.attackerId === "p1")).map(event => event.eventSeq);
+    expect(acknowledged.sort()).toEqual(ownEvents.sort());
+  } finally { app.cleanup(); }
+});
+
+it("waits for the reveal copy to become visible before acknowledging conversion feedback", () => {
+  const { initial, confirmed } = conversionFixture();
+  const app = browserApp(snapshotFor(initial, "p2", 0));
+  try {
+    const snapshot = snapshotFor(confirmed.state, "p2", 3000);
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 5,
+      snapshot, events: confirmed.events, trial: null, startChecking: false, outcome: null });
+    const copy = app.root.querySelector<HTMLElement>(".conversion-reveal-copy");
+    if (!copy) throw new Error("Missing confirmed faction reveal");
+    copy.style.opacity = "0";
+    while (app.raf.length) app.raf.shift()?.(16);
+    expect(app.frames.map(frame => JSON.parse(frame)).filter(frame => frame.type === "feedback_seen")).toHaveLength(0);
+    copy.style.opacity = "1";
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 6,
+      snapshot, trial: null, startChecking: false });
+    while (app.raf.length) app.raf.shift()?.(32);
+    expect(app.frames.map(frame => JSON.parse(frame)).filter(frame => frame.type === "feedback_seen")).toHaveLength(1);
+  } finally { app.cleanup(); }
+});
 
 it("keeps game-message badges tied to the recorded faction rather than the current roster", () => {
   const state = runningFixture(["rock", "scissors"]);

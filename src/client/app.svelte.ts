@@ -56,6 +56,7 @@ export function mountApp(root: HTMLElement): () => void {
   let consent = false, trialConsent = false, clockReady = false, disposed = false;
   let commandStatus = "", feedback: EngineEvent[] = [];
   let conversionNotices: EngineEvent[] = [];
+  let motionEvents: EngineEvent[] = [];
   let factionHistory: EngineEvent[] = [], historyAvailable = false, historyDirty = true, interruption: string | null = null;
   const pendingCommands = new Map<string, HostCommand>();
   const pendingFeedback = new Set<number>(), acknowledged = new Set<number>();
@@ -209,6 +210,7 @@ export function mountApp(root: HTMLElement): () => void {
     }
     if (message.type === "clock_ready") clockReady = true;
     if (message.type === "snapshot" || message.type === "update") {
+      motionEvents = message.type === "update" ? message.events : [];
       const previousTrial = trial;
       snapshot = message.snapshot; trial = message.trial;
       snapshotReceivedAt = performance.now(); snapshotLive = document.visibilityState === "visible";
@@ -292,8 +294,14 @@ export function mountApp(root: HTMLElement): () => void {
       feedbackFrame = false;
       if (disposed || document.visibilityState !== "visible" || !root.isConnected) return;
       for (const eventSeq of pendingFeedback) {
-        const notice = root.querySelector<HTMLElement>(`.conversion-notice [data-event-seq="${eventSeq}"]`);
+        const takeover = root.querySelector(".conversion-takeover");
+        const notice = (takeover ?? root.querySelector(".conversion-notice"))?.querySelector<HTMLElement>(`[data-event-seq="${eventSeq}"]`);
         if (!notice) continue;
+        let visible = true;
+        for (let ancestor: HTMLElement | null = notice; ancestor && ancestor !== root; ancestor = ancestor.parentElement) {
+          const style = getComputedStyle(ancestor);
+          if (style.visibility === "hidden" || style.opacity === "0" || style.display === "none") { visible = false; break; }
+        }
         const bounds = notice.getBoundingClientRect(), viewport = window.visualViewport;
         const clip = notice.parentElement?.getBoundingClientRect();
         const left = viewport?.offsetLeft ?? 0, top = viewport?.offsetTop ?? 0;
@@ -301,7 +309,7 @@ export function mountApp(root: HTMLElement): () => void {
           bounds.width <= 0 || bounds.height <= 0 || bounds.left < left || bounds.top < top ||
           bounds.right > left + (viewport?.width ?? window.innerWidth) ||
           bounds.bottom > top + (viewport?.height ?? window.innerHeight) ||
-          getComputedStyle(notice).visibility === "hidden") continue;
+          !visible) continue;
         connection?.send({ version: 1, type: "feedback_seen", eventSeq });
         acknowledged.add(eventSeq); pendingFeedback.delete(eventSeq);
         if (typeof navigator.vibrate === "function") navigator.vibrate(60);
@@ -539,10 +547,11 @@ export function mountApp(root: HTMLElement): () => void {
           end: () => sendCommand({ type: "end" }), configure: sendCommand,
           setFaction: (playerId, faction) => sendCommand({ type: "set_faction", playerId, faction }), leave,
         }, connectionStatus.state === "connected" && snapshotLive, Math.max(0, performance.now() - snapshotReceivedAt), {
-          locationLabel, sharing: consent, compass, toggleCompass, interruption,
+          locationLabel, sharing: consent, compass, toggleCompass, interruption, events: motionEvents,
           shareLocation() { error = ""; consent = true; reconcileCollection(); render(); },
           stopSharing() { consent = false; trialConsent = false; cancelPermissionCheck(); stopCollection(); render(); },
         });
+        motionEvents = [];
         applyCompass();
         if (commandStatus) { const notice = text(section, "p", commandStatus, "state-line"); notice.setAttribute("role", "status"); }
         for (const select of section.querySelectorAll<HTMLSelectElement>('[data-action="set-faction"]')) {
