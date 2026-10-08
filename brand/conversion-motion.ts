@@ -46,17 +46,26 @@ const stampIcon = document.querySelector<HTMLImageElement>("#stamp-icon")!;
 const impactRing = document.querySelector<HTMLDivElement>("#impact-ring")!;
 const revealCopy = document.querySelector<HTMLDivElement>("#reveal-copy")!;
 const revealName = document.querySelector<HTMLHeadingElement>("#reveal-name")!;
+const holdCountdown = document.querySelector<HTMLDivElement>("#hold-countdown")!;
+const countdownNumber = document.querySelector<HTMLSpanElement>("#countdown-number")!;
+const countdownRing = document.querySelector<SVGCircleElement>("#countdown-ring")!;
 const sceneTitle = document.querySelector<HTMLHeadingElement>("#scene-title")!;
 const sceneDescription = document.querySelector<HTMLParagraphElement>("#scene-description")!;
+const sceneTiming = document.querySelector<HTMLSpanElement>("#scene-timing")!;
 const sceneButtons = document.querySelectorAll<HTMLButtonElement>("[data-scene]");
 const preference = matchMedia("(prefers-reduced-motion: reduce)");
 const descriptions = {
-  self: ["The change takes over.", "A central bubble fills the screen in your new faction color. The hand stamps into place, with one short impact ring."],
-  other: ["A new player on your side.", "A pulse travels to Alex. Your hand stamps onto their marker, and the confirmation stays below the radar."],
-  stopped: ["No confirmation, no stamp.", "Alex moves out of range before the timer finishes. Progress clears, your faction stays unchanged, and no success effect plays."],
+  self: ["The change takes over.", "A central bubble fills the screen in your new faction color. The hand stamps into place, with one short impact ring.",
+    "480 ms bubble / 160 ms stamp / 3 s hold / 320 ms exit."],
+  other: ["A new player on your side.", "A pulse travels to Alex. Your hand stamps onto their marker, and the confirmation stays below the radar.",
+    "360 ms radar pulse / 160 ms marker stamp."],
+  stopped: ["No confirmation, no stamp.", "Alex moves out of range before the timer finishes. Progress clears, your faction stays unchanged, and no success effect plays.",
+    "Conversion stops before confirmation. No stamp or hold."],
 };
-const dwellMs = 5000, confirmedAt = 5200, stampAt = 5680, endMs = 6500;
+const dwellMs = 5000, confirmedAt = 5200, stampAt = 5680;
+const holdAt = stampAt + 160, holdMs = 3000, exitAt = holdAt + holdMs, endMs = exitAt + 320;
 let scene: Scene = "self";
+let sceneEndMs = endMs;
 let nextFaction: Faction = "paper";
 let position = 2900;
 let playing = false;
@@ -87,7 +96,7 @@ function buildEffects() {
   animate(targetStamp, stampFrames, stampAt, gentler ? 120 : 160, "cubic-bezier(.16, 1, .3, 1)");
   animate(impactRing, [{ transform: "scale(.75)", opacity: .5 }, { transform: "scale(1.4)", opacity: 0 }], stampAt + 60, 400);
   animate(revealCopy, [{ opacity: 0 }, { opacity: 1 }], stampAt + 120, 140);
-  animate(takeover, [{ opacity: 1 }, { opacity: 0 }], 6180, 320);
+  animate(takeover, [{ opacity: 1 }, { opacity: 0 }], exitAt, 320);
   animate(signal, [{ transform: "translate(0, 0)", opacity: 1 }, { transform: "translate(72px, -66px)", opacity: 1 }], confirmedAt, 360, "cubic-bezier(.16, 1, .3, 1)");
   animate(result, [{ opacity: 0 }, { opacity: 1 }], stampAt, gentler ? 120 : 160);
   animate(tip, gentler ? [{ opacity: 1 }, { opacity: 1 }]
@@ -137,6 +146,10 @@ function render() {
     resultDetail.textContent = scene === "other" ? "Conversion confirmed. Keep playing." : "New side. New targets. Keep playing.";
   }
   takeover.hidden = scene !== "self" || !confirmed || position >= endMs;
+  holdCountdown.hidden = scene !== "self" || position < holdAt || position >= exitAt;
+  const holdElapsed = Math.max(0, Math.min(holdMs, position - holdAt));
+  countdownNumber.textContent = String(Math.ceil((holdMs - holdElapsed) / 1000));
+  countdownRing.setAttribute("stroke-dashoffset", String(gentler ? 0 : holdElapsed / holdMs * 100));
   targetStamp.hidden = scene !== "other" || !stamped;
   impactRing.hidden = gentler || scene !== "self" || position < stampAt + 60 || position >= stampAt + 460;
   signal.toggleAttribute("hidden", gentler || scene !== "other" || !confirmed || position >= confirmedAt + 360);
@@ -162,10 +175,10 @@ function pause() {
 }
 
 function tick(now: number) {
-  position = Math.min(endMs, position + (now - lastFrame) * (slow.checked ? .5 : 1));
+  position = Math.min(sceneEndMs, position + (now - lastFrame) * (slow.checked ? .5 : 1));
   lastFrame = now;
   render();
-  if (position >= endMs) {
+  if (position >= sceneEndMs) {
     pause();
     status.textContent = scene === "stopped" ? "Finished. Conversion stopped; no faction change."
       : `Finished. ${resultTitle.textContent}.`;
@@ -195,8 +208,10 @@ function play(from: number) {
 function selectScene() {
   pause();
   position = 2900;
+  sceneEndMs = scene === "self" ? endMs : 6500;
+  timeline.max = String(sceneEndMs);
   for (const button of sceneButtons) button.setAttribute("aria-pressed", String(button.dataset.scene === scene));
-  [sceneTitle.textContent, sceneDescription.textContent] = descriptions[scene];
+  [sceneTitle.textContent, sceneDescription.textContent, sceneTiming.textContent] = descriptions[scene];
   stampReplay.textContent = scene === "stopped" ? "Play interruption" : "Play stamp";
   buildEffects();
   render();

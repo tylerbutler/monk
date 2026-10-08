@@ -67,10 +67,13 @@ system reduced-motion setting cannot be turned off in the preview.
 The sample conversion takes five seconds, followed by a 200 ms confirmation
 wait. On self-conversion, a 480 ms central bubble covers the screen in the new
 faction color. A 160 ms hand stamp and one impact ring mark the change. The
-overlay clears over 320 ms to reveal the updated faction, 1.3 seconds after
-confirmation. Outgoing conversion uses a radar pulse, a smaller marker stamp,
-and a confirmation below the radar. Interruption clears progress without a
-stamp or faction change. Hidden tabs pause playback.
+screen holds for three seconds after the stamp settles. A small circular
+countdown at the bottom drains through 3, 2, and 1; reduced motion keeps the
+ring fixed while the numbers change. The overlay then clears over 320 ms to
+reveal the updated faction, 3.96 seconds after confirmation.
+Outgoing conversion keeps its original timing, with a radar pulse, a smaller
+marker stamp, and a confirmation below the radar. Interruption clears progress
+without a stamp or faction change. Hidden tabs pause playback.
 
 The preview reuses the app's faction names, relationships, and Tabler hand
 icons. CSS and the browser's Web Animations API provide the motion; no new

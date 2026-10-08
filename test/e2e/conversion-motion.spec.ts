@@ -44,10 +44,45 @@ test("reveals the new faction with a screen-covering bubble and a stamp", async 
   await expect(page.locator("#reveal-copy")).toContainText("You are now");
   await expect(page.locator("#impact-ring")).toBeVisible();
 
-  await seek(page, 6500);
+  await seek(page, 9160);
   await expect(page.locator("#takeover")).toBeHidden();
   await expect(page.locator("#own-name")).toHaveText("Paper");
   await expect(page.locator("#result-message")).toContainText("You are now Paper");
+});
+
+test("holds the stamped screen for three seconds with a bottom countdown", async ({ page }) => {
+  await seek(page, 5830);
+  await expect(page.locator("#hold-countdown")).toBeHidden();
+  for (const [at, number, offset] of [
+    [5840, "3", 0], [6840, "2", 33.3333], [7840, "1", 66.6667], [8830, "1", 99.6667],
+  ] as const) {
+    await seek(page, at);
+    await expect(page.locator("#takeover")).toBeVisible();
+    await expect(page.locator("#takeover")).toHaveCSS("opacity", "1");
+    await expect(page.locator("#countdown-number")).toHaveText(number);
+    expect(Number(await page.locator("#countdown-ring").getAttribute("stroke-dashoffset"))).toBeCloseTo(offset, 3);
+  }
+  const location = await page.locator("#hold-countdown").evaluate(element => {
+    const screen = document.querySelector("#game-screen")!;
+    const countdown = element.getBoundingClientRect(), bounds = screen.getBoundingClientRect();
+    return {
+      center: countdown.x + countdown.width / 2,
+      screenCenter: bounds.x + bounds.width / 2,
+      bottomGap: bounds.bottom - countdown.bottom,
+      width: countdown.width,
+    };
+  });
+  expect(location.center).toBeCloseTo(location.screenCenter, 0);
+  expect(location.bottomGap).toBeGreaterThan(0);
+  expect(location.bottomGap).toBeLessThan(40);
+  expect(location.width).toBeLessThanOrEqual(40);
+  await seek(page, 8840);
+  await expect(page.locator("#hold-countdown")).toBeHidden();
+  await seek(page, 9000);
+  await expect(page.locator("#takeover")).toHaveCSS("opacity", "0.5");
+  await seek(page, 9160);
+  await expect(page.locator("#takeover")).toBeHidden();
+  await expect(page.locator("#own-name")).toHaveText("Paper");
 });
 
 for (const faction of [
@@ -57,13 +92,14 @@ for (const faction of [
 ]) {
   test(`finishes and replays the ${faction.name} conversion`, async ({ page }) => {
     await page.getByLabel("Resulting faction").selectOption(faction.id);
-    await seek(page, 6500);
+    await seek(page, 9160);
     await expect(page.locator("#own-name")).toHaveText(faction.name);
     await expect(page.locator("#game-screen")).toHaveCSS("background-color", faction.color);
     await page.getByRole("button", { name: "Play stamp", exact: true }).click();
     await expect(page.locator("#takeover")).toBeVisible();
     await expect(page.locator("#result-message")).toBeVisible();
     await expect(page.locator("#takeover")).toBeHidden();
+    await expect(page.locator("#hold-countdown")).toBeHidden();
     await expect(page.locator("#own-name")).toHaveText(faction.name);
   });
 }
@@ -81,6 +117,8 @@ test("stamps the converted player without taking over your screen", async ({ pag
   await expect(page.locator("#target-stamp")).toBeVisible();
   await expect(page.locator("#result-message")).toContainText("Alex joined Paper");
   await expect(page.locator("#takeover")).toBeHidden();
+  await expect(page.locator("#hold-countdown")).toBeHidden();
+  await expect(page.getByLabel("Sequence position")).toHaveAttribute("max", "6500");
   await expect(page.locator("#own-name")).toHaveText("Paper");
 });
 
@@ -94,6 +132,7 @@ test("interruption clears progress without showing a successful conversion", asy
   await expect(page.locator("#takeover")).toBeHidden();
   await expect(page.locator("#target-stamp")).toBeHidden();
   await expect(page.locator("#result-message")).toBeHidden();
+  await expect(page.locator("#hold-countdown")).toBeHidden();
   await page.getByRole("button", { name: "Replay sequence", exact: true }).click();
   await expect(page.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow", "0");
   await page.getByRole("button", { name: "Pause", exact: true }).click();
@@ -112,7 +151,11 @@ test("reduced motion keeps the result but removes expansion and impact", async (
   await expect(page.locator("#faction-stamp")).toBeVisible();
   await expect(page.locator("#reveal-name")).toHaveText("Paper");
   await expect(page.locator("#impact-ring")).toBeHidden();
-  await seek(page, 6500);
+  await seek(page, 6840);
+  await expect(page.locator("#takeover")).toHaveCSS("opacity", "1");
+  await expect(page.locator("#countdown-number")).toHaveText("2");
+  await expect(page.locator("#countdown-ring")).toHaveAttribute("stroke-dashoffset", "0");
+  await seek(page, 9160);
   await expect(page.locator("#own-name")).toHaveText("Paper");
   await page.getByRole("button", { name: "You convert someone", exact: true }).click();
   await seek(page, 5400);
