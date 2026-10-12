@@ -12,6 +12,8 @@ export type MatchActions = {
 };
 export type HudState = {
   events?: EngineEvent[];
+  stateSource?: "snapshot" | "update";
+  reconnect?(): void;
   interruption?: string | null;
   locationLabel: string | null;
   sharing: boolean;

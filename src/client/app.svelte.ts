@@ -10,7 +10,7 @@ import { addTrialSample, exportTrialSummary, newTrialSummary } from "./trial";
 import { describeEvent, names, symbols } from "./views";
 import { icons } from "./icons";
 import wordmark from "../../brand/assets/wordmark.svg?url";
-import { destroyMatch, renderActivity, renderMatch, setRadarHeading } from "./match-view.svelte";
+import { destroyMatch, renderActivity, renderMatch, setRadarHeading, syncAwardDialog } from "./match-view.svelte";
 import { deviceSchema, isFactionChange, sessionCredentialsSchema } from "../shared/protocol";
 import type { ConnectionStatus, EngineEvent, HostCommand, LocationStatus, MatchConnection, PlayerSnapshot, ServerMessage, SessionCredentials, TrialSample, TrialStatus, TrialSummary } from "../shared/protocol";
 
@@ -57,6 +57,7 @@ export function mountApp(root: HTMLElement): () => void {
   let commandStatus = "", feedback: EngineEvent[] = [];
   let conversionNotices: EngineEvent[] = [];
   let motionEvents: EngineEvent[] = [];
+  let stateSource: "snapshot" | "update" | undefined;
   let factionHistory: EngineEvent[] = [], historyAvailable = false, historyDirty = true, interruption: string | null = null;
   const pendingCommands = new Map<string, HostCommand>();
   const pendingFeedback = new Set<number>(), acknowledged = new Set<number>();
@@ -210,6 +211,7 @@ export function mountApp(root: HTMLElement): () => void {
     }
     if (message.type === "clock_ready") clockReady = true;
     if (message.type === "snapshot" || message.type === "update") {
+      stateSource = message.type;
       motionEvents = message.type === "update" ? message.events : [];
       const previousTrial = trial;
       snapshot = message.snapshot; trial = message.trial;
@@ -547,7 +549,8 @@ export function mountApp(root: HTMLElement): () => void {
           end: () => sendCommand({ type: "end" }), configure: sendCommand,
           setFaction: (playerId, faction) => sendCommand({ type: "set_faction", playerId, faction }), leave,
         }, connectionStatus.state === "connected" && snapshotLive, Math.max(0, performance.now() - snapshotReceivedAt), {
-          locationLabel, sharing: consent, compass, toggleCompass, interruption, events: motionEvents,
+          locationLabel, sharing: consent, compass, toggleCompass, interruption, events: motionEvents, stateSource,
+          reconnect() { if (credentials) connect(credentials); },
           shareLocation() { error = ""; consent = true; reconcileCollection(); render(); },
           stopSharing() { consent = false; trialConsent = false; cancelPermissionCheck(); stopCollection(); render(); },
         });
@@ -612,6 +615,7 @@ export function mountApp(root: HTMLElement): () => void {
     text(help, "summary", "Location and safe play", "", icons.safety).id = "safe-play-toggle";
     text(help, "p", "Agree on a bounded outdoor area and safe routes. No running or touching is needed. You can leave without a gameplay penalty. Keep this app visible and the screen on.");
     text(help, "p", "Share location uses browser permission. Players and the host see approximate direction and distance, not raw opponent coordinates. Last-known positions stay on radar, but influence stops after 30 seconds without a new position. Sharing stops when this app is hidden or disconnected. Locations stay only in temporary server memory, not match records or exports. Rooms and credentials expire within 24 hours.");
+    text(help, "p", "At round end, room members can see player names, conversion totals, and earned trophies.");
     for (const input of root.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-retain]")) {
       const value = retained.get(input.id);
       if (value) { input.value = value.value; if (input instanceof HTMLInputElement) input.checked = value.checked; }
@@ -620,7 +624,8 @@ export function mountApp(root: HTMLElement): () => void {
       if (details.id === "location-trial" && trial) details.open = true;
       else if (disclosures.has(details.id)) details.open = disclosures.get(details.id) === true;
     }
-    if (focused) {
+    syncAwardDialog(root);
+    if (focused && !root.querySelector("#award-ceremony")) {
       const next = root.querySelector<HTMLElement>(`[id="${focused}"]`);
       next?.focus({ preventScroll: true });
       if (selection && next instanceof HTMLInputElement) next.setSelectionRange(selection.start, selection.end, selection.direction ?? undefined);

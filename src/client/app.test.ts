@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
-import { flushSync } from "svelte";
+import { flushSync, tick } from "svelte";
 import { mountApp } from "./app.svelte";
 import { describeEvent } from "./views";
-import { destroyMatch, renderMatch as updateMatch } from "./match-view.svelte";
+import { destroyMatch, renderMatch as updateMatch, syncAwardDialog } from "./match-view.svelte";
 import type { MatchActions } from "./views";
 import { snapshotFor } from "../worker/engine";
 import { command, lobbyFixture, pulse, runningFixture } from "../../test/fixtures";
-import type { EngineEvent, ServerMessage, TrialSample, TrialStatus } from "../shared/protocol";
+import type { EngineEvent, RoundResults, ServerMessage, TrialSample, TrialStatus } from "../shared/protocol";
 
 const actions: MatchActions = {
   pause: vi.fn(), beginResume: vi.fn(), cancelResume: vi.fn(), end: vi.fn(),
@@ -213,14 +213,15 @@ it("shows faction and players without an empty radar or calibration warnings in 
   expect(root.querySelector(".radar-players")?.textContent).toContain("Player 2");
   expect(root.querySelector("#player-roster")).toBeNull();
 });
-it("keeps the ended roster visible without a dropdown when the player table is unavailable", () => {
+it("shows available names and an explicit notice when ended statistics are unavailable", () => {
   const root = document.createElement("section");
   const state = command(runningFixture(["rock", "paper"]), 1000, { type: "end" }).state;
   renderMatch(root, snapshotFor(state, "p1", 1000), actions);
-  const roster = root.querySelector("#player-roster");
+  const roster = root.querySelector(".round-results");
   expect(roster?.tagName).toBe("SECTION");
-  expect(roster?.querySelector(".roster")?.textContent).toContain("Player 1 - rock (you)");
-  expect(roster?.querySelector(".roster")?.textContent).toContain("Player 2 - paper");
+  expect(roster?.textContent).toContain("Player 1 (you)");
+  expect(roster?.textContent).toContain("Player 2");
+  expect(roster?.textContent).toContain("Round statistics are unavailable.");
   expect(roster?.closest("details")).toBeNull();
   expect(root.querySelector("#player-roster-toggle")).toBeNull();
 });
@@ -519,6 +520,149 @@ function conversionFixture() {
   for (const at of [1000, 2000]) state = pulse(state, at, [0, 4]).state;
   return { initial, confirmed: pulse(state, 3000, [0, 4]) };
 }
+
+function trophyFixture() {
+  const running = snapshotFor(runningFixture(["rock", "scissors"]), "p1", 0);
+  const roundResults: RoundResults = { coverage: "complete", players: [
+    { id: "p1", label: "Player 1", rank: 1, conversionsMade: 4 },
+    { id: "p2", label: "Player 2", rank: 2, conversionsMade: 0 },
+  ], awards: [{ id: "conversion_champion", winnerIds: ["p1"], value: 4 }] };
+  return { running, ended: { ...running, phase: "ended" as const, roundResults } };
+}
+
+function trophyApp(snapshot: ReturnType<typeof snapshotFor>) {
+  Object.defineProperties(HTMLDialogElement.prototype, {
+    showModal: { configurable: true, value() { this.open = true; } },
+    close: { configurable: true, value() { this.open = false; } },
+  });
+  const app = browserApp(snapshot);
+  return { ...app, cleanup() {
+    app.cleanup();
+    Reflect.deleteProperty(HTMLDialogElement.prototype, "showModal");
+    Reflect.deleteProperty(HTMLDialogElement.prototype, "close");
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+  } };
+}
+
+it("renders the full saved player list rather than only the ending roster", () => {
+  const root = document.createElement("section"); document.body.append(root);
+  const { ended } = trophyFixture();
+  const players = Array.from({ length: 120 }, (_, i) => ({
+    id: `p${i}`, label: i < 2 ? "<b>Alex</b>" : `Archived ${i}`,
+    rank: i < 2 ? 1 : 3, conversionsMade: i < 2 ? 4 : 0,
+  }));
+  try {
+    renderMatch(root, { ...ended, roundResults: { coverage: "complete", players, awards: [
+      { id: "conversion_champion", winnerIds: ["p0", "p1"], value: 4 },
+    ] } }, actions);
+    expect(root.querySelectorAll("[data-result-player]")).toHaveLength(120);
+    expect(root.textContent).toContain("All players (120)");
+    expect(root.textContent).toContain("Archived 119");
+    expect(root.querySelector('[data-result-player="p1"]')?.textContent).toContain("(you)");
+    expect(root.querySelector('[data-result-player="p0"]')?.textContent).toContain("Conversion Champion");
+    expect(root.querySelector("[data-result-player] b")).toBeNull();
+    expect(root.querySelector(".game-hud, #player-roster")).toBeNull();
+  } finally { root.remove(); }
+});
+
+for (const phase of ["running", "paused"] as const) {
+  it(`announces a live ${phase} end once and preserves age across reparenting`, async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] });
+    const { running, ended } = trophyFixture();
+    const app = trophyApp({ ...running, phase });
+    try {
+      app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 5,
+        snapshot: ended, events: [], outcome: null, trial: null, startChecking: false });
+      expect(app.root.querySelector<HTMLDialogElement>("#award-ceremony")?.open).toBe(true);
+      expect(document.activeElement?.getAttribute("data-action")).toBe("skip-awards");
+      vi.advanceTimersByTime(1500); flushSync();
+      const age = app.root.querySelector<HTMLElement>("[data-award]")?.style.getPropertyValue("--award-age");
+      expect(parseFloat(age ?? "")).toBeGreaterThanOrEqual(992);
+      app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 6,
+        snapshot: ended, events: [], outcome: null, trial: null, startChecking: false });
+      syncAwardDialog(app.root);
+      expect(app.root.querySelector<HTMLElement>("[data-award]")?.style.getPropertyValue("--award-age")).toBe(age);
+      app.root.querySelector<HTMLButtonElement>('[data-action="skip-awards"]')?.click();
+      flushSync(); await tick();
+      expect(app.root.querySelector("#award-ceremony")).toBeNull();
+      expect(document.activeElement?.id).toBe("round-results-heading");
+      expect(app.root.querySelectorAll("[data-result-player]")).toHaveLength(2);
+    } finally { app.cleanup(); vi.useRealTimers(); }
+  });
+}
+
+it("opens saved ended snapshots without autoplay", () => {
+  const app = trophyApp(trophyFixture().ended);
+  try {
+    expect(app.root.querySelector("#award-ceremony")).toBeNull();
+    expect(app.root.querySelectorAll("[data-result-player]")).toHaveLength(2);
+  } finally { app.cleanup(); }
+});
+
+it.each(["snapshot", "disconnect", "hidden"] as const)("stops a current ceremony on %s", cause => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] });
+  const { running, ended } = trophyFixture();
+  const app = trophyApp(running);
+  try {
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 5,
+      snapshot: ended, events: [], outcome: null, trial: null, startChecking: false });
+    expect(app.root.querySelector("#award-ceremony")).not.toBeNull();
+    if (cause === "snapshot") app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 6,
+      snapshot: ended, trial: null, startChecking: false });
+    if (cause === "disconnect") app.socket.dispatchEvent(new Event("error"));
+    if (cause === "hidden") {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+      document.dispatchEvent(new Event("visibilitychange"));
+    }
+    flushSync();
+    expect(app.root.querySelector("#award-ceremony")).toBeNull();
+    app.cleanup();
+    expect(vi.getTimerCount()).toBe(0);
+  } finally { app.cleanup(); vi.useRealTimers(); }
+});
+
+it("finishes at the exact sequence deadline and cancels its timer", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] });
+  const { running, ended } = trophyFixture();
+  const app = trophyApp(running);
+  try {
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 5,
+      snapshot: ended, events: [], outcome: null, trial: null, startChecking: false });
+    vi.advanceTimersByTime(3499); flushSync();
+    expect(app.root.querySelector("#award-ceremony")).not.toBeNull();
+    vi.advanceTimersByTime(1); flushSync(); await tick();
+    expect(app.root.querySelector("#award-ceremony")).toBeNull();
+    expect(document.activeElement?.id).toBe("round-results-heading");
+  } finally { app.cleanup(); vi.useRealTimers(); }
+});
+
+it.each(["complete", "partial"] as const)("does not autoplay empty %s awards or invent missing totals", coverage => {
+  const { running, ended } = trophyFixture();
+  const roundResults: RoundResults = coverage === "complete" ? { ...ended.roundResults, awards: [] } :
+    { coverage, players: ended.roundResults.players.map(p => ({ ...p, rank: null, conversionsMade: null })), awards: [] };
+  const app = trophyApp(running);
+  try {
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 5,
+      snapshot: { ...ended, roundResults }, events: [], outcome: null, trial: null, startChecking: false });
+    expect(app.root.querySelector("#award-ceremony")).toBeNull();
+    if (coverage === "partial") {
+      expect(app.root.textContent).toContain("Round statistics are incomplete.");
+      expect(app.root.querySelector(".result-score, .result-rank")).toBeNull();
+    } else expect(app.root.textContent).toContain("No trophies earned this round.");
+  } finally { app.cleanup(); }
+});
+
+it("offers reconnect for an ended snapshot with missing results", () => {
+  const { roundResults: _results, ...ended } = trophyFixture().ended;
+  const app = trophyApp(ended);
+  try {
+    expect(app.root.textContent).toContain("Round statistics are unavailable.");
+    const reconnect = app.root.querySelector<HTMLButtonElement>('[data-action="reconnect-results"]');
+    expect(reconnect).not.toBeNull();
+    reconnect?.click();
+    expect(app.sockets).toHaveLength(2);
+  } finally { app.cleanup(); }
+});
 
 it("waits for a confirmed conversion before showing the faction takeover and countdown", () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] });

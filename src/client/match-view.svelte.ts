@@ -9,9 +9,28 @@ type ViewProps = {
   snapshot: PlayerSnapshot; actions: MatchActions; live: boolean; elapsedMs: number;
   hud: HudState | null; headingDegrees: number | null;
   motion: GameMotion;
+  ceremonyStartedAt: number | null;
+  finishCeremony(): void;
 };
 type MotionView = { props: ViewProps; activity: PlayerSnapshot; lastEventSeq: number };
 const views = new WeakMap<HTMLElement, MotionView & { component: ReturnType<typeof mount> }>();
+
+function updateCeremony(view: Pick<MotionView, "props">, snapshot: PlayerSnapshot, live: boolean, source?: HudState["stateSource"]) {
+  const previous = view.props.snapshot;
+  if (!live || snapshot.matchId !== previous.matchId || source === "snapshot") view.props.ceremonyStartedAt = null;
+  else if (view.props.live && source === "update" && (previous.phase === "running" || previous.phase === "paused") &&
+    snapshot.phase === "ended" && snapshot.roundResults?.coverage === "complete" && snapshot.roundResults.awards.length) {
+    view.props.ceremonyStartedAt = performance.now();
+  }
+}
+
+export function syncAwardDialog(root: HTMLElement): void {
+  const dialog = root.querySelector<HTMLDialogElement>("#award-ceremony");
+  if (!dialog?.isConnected || dialog.matches(":modal")) return;
+  if (dialog.open) dialog.close();
+  dialog.showModal();
+  dialog.querySelector<HTMLButtonElement>("[data-action='skip-awards']")?.focus();
+}
 
 function updateMotion(view: MotionView, snapshot: PlayerSnapshot, live: boolean, elapsedMs: number, events: EngineEvent[]) {
   const now = performance.now(), previous = view.activity;
@@ -66,13 +85,15 @@ export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions
   const view = views.get(root);
   if (view) {
     flushSync(() => {
+      updateCeremony(view, snapshot, live, hud?.stateSource);
       updateMotion(view, snapshot, live, elapsedMs, hud?.events ?? []);
       Object.assign(view.props, { snapshot, actions, live, elapsedMs, hud });
     });
     return;
   }
   const props: ViewProps = $state({ snapshot, actions, live, elapsedMs, hud, headingDegrees: null,
-    motion: { reveal: null, conversions: [], failures: [] } });
+    motion: { reveal: null, conversions: [], failures: [] }, ceremonyStartedAt: null,
+    finishCeremony() { props.ceremonyStartedAt = null; } });
   const motionView = { props, activity: activitySnapshot(snapshot, live, elapsedMs), lastEventSeq: -1 };
   updateMotion(motionView, snapshot, live, elapsedMs, hud?.events ?? []);
   root.replaceChildren();
@@ -84,6 +105,7 @@ export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions
 export function renderActivity(root: HTMLElement, snapshot: PlayerSnapshot, live: boolean, elapsedMs: number): void {
   const view = views.get(root);
   if (view) flushSync(() => {
+    updateCeremony(view, snapshot, live);
     updateMotion(view, snapshot, live, elapsedMs, []);
     Object.assign(view.props, { snapshot, live, elapsedMs });
   });

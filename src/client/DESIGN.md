@@ -109,6 +109,9 @@ remains the separate game/system concept; [PRODUCT.md](../../PRODUCT.md) remains
 product truth. Visitor mode is **Operate**, not a mode imposed on other surfaces.
 
 **Key Characteristics:**
+- Ended rounds use a complete ranked player list and an ink/yellow award stage.
+- Five category-specific trophy entrances share the existing type, paired arches, and hand symbols; they do not reuse conversion takeovers.
+- Trophy motion uses monotonic sequence age, with a readable reduced-motion alternative and a persistent skip control.
 - Flat yellow entry and invitation fields; an own-faction field during running and paused play.
 - Supplied paired arches remain visible on phones; lettering remains artwork.
 - Named factions and hand SVGs support color; distances and clocks use tabular numerals.

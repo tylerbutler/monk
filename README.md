@@ -219,10 +219,24 @@ available during running and paused rounds.
 
 The host selects **Start game**, next to **Copy invite link**, with at least
 two joined players. The player list stays visible without a separate
-**Players** dropdown. After the round ends, a plain list shows the roster.
+**Players** dropdown. After the round ends, a complete results list shows
+all collected participants, including departed players and zero scores.
 Starting and **Resume round** do not request permission or wait for GPS.
 A player without location does not block another player's encounter.
 The round ends when its timer expires or the host selects **End round**.
+
+Complete rounds award Hat Trick, Comeback Kid, Social Butterfly, Hot Streak,
+and Conversion Champion when players qualify. Ties share trophies, and one
+player can earn several. Each category has its own short entrance animation;
+**Skip to results** opens the full list. Reduced motion keeps the award
+information without large movement. Reconnecting opens saved results
+without replaying the ceremony.
+
+Room members see player names, conversion totals, and earned trophies only
+at round end. Results expire with the room after 24 hours. Legacy rounds
+with incomplete collection show known names with a notice, without
+full-round scores or trophies. Comeback timing excludes pauses, conversion
+grace, and unusable-location time; it does not measure speed or movement.
 
 Select **Share location** when you want to participate in proximity conversion.
 The app uses the browser's first available position, including a cached fix.

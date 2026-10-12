@@ -6,11 +6,13 @@
   import { activitySnapshot, clock, motionTiming, names, symbols } from "./views";
   import { icons } from "./icons";
   import Radar from "./Radar.svelte";
+  import RoundResults from "./RoundResults.svelte";
 
-  let { snapshot, actions, live, elapsedMs, hud, headingDegrees, motion }: {
+  let { snapshot, actions, live, elapsedMs, hud, headingDegrees, motion, ceremonyStartedAt, finishCeremony }: {
     snapshot: PlayerSnapshot; actions: MatchActions; live: boolean; elapsedMs: number;
     hud: HudState | null; headingDegrees: number | null;
     motion: GameMotion;
+    ceremonyStartedAt: number | null; finishCeremony: () => void;
   } = $props();
   const activity = $derived(activitySnapshot(snapshot, live, elapsedMs));
   const parameters = $derived(snapshot.parameters ?? gamePreset);
@@ -143,6 +145,10 @@
   {/if}
 {/snippet}
 
+{#if snapshot.phase === "ended"}
+  <RoundResults results={snapshot.roundResults} roster={snapshot.roster} ownPlayerId={snapshot.ownPlayerId}
+    {ceremonyStartedAt} {finishCeremony} reconnect={hud?.reconnect} />
+{:else}
 <div class="game-hud" data-faction={snapshot.ownFaction ?? undefined} data-phase={snapshot.phase}>
   <header class="hud-heading">
     {#if snapshot.ownFaction}
@@ -160,10 +166,9 @@
   </header>
   {#if !snapshot.ownFaction}<p class="radar-note">Host view. Join as a player to participate.</p>{/if}
   {#if snapshot.phase !== "lobby" && snapshot.graceMs}<p class="grace-note">Grace: {clock(snapshot.graceMs)}. You cannot attack or be attacked.</p>{/if}
-  {#if snapshot.phase !== "ended"}
-    <Radar snapshot={activity} {live} {elapsedMs} {headingDegrees} {conversions} {failures} {now}>{@render readout()}</Radar>
-  {/if}
+  <Radar snapshot={activity} {live} {elapsedMs} {headingDegrees} {conversions} {failures} {now}>{@render readout()}</Radar>
 </div>
+{/if}
 
 {#if reveal}
   {#key reveal.eventSeq}
@@ -187,7 +192,7 @@
   {/key}
 {/if}
 
-{#if !snapshot.radar}
+{#if !snapshot.radar && snapshot.phase !== "ended"}
   <section id="player-roster" aria-labelledby="player-roster-heading">
     <h3 id="player-roster-heading">{@render uiIcon(icons.players)}Players ({snapshot.roster.length})</h3>
     <ul class="roster">
