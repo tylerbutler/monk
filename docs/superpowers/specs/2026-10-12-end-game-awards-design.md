@@ -2,10 +2,13 @@
 
 Date: 2026-10-12
 
-Status: Direction approved. Written specification awaiting user review.
+Status: Written specification approved. Implementation plan awaiting review.
 
 Related design:
 [Player awards and data collection](2026-10-07-player-awards-design.md).
+
+Implementation plan:
+[End-game awards](../plans/2026-10-12-end-game-awards.md).
 
 ## Purpose and approved direction
 
