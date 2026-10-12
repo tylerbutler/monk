@@ -1,8 +1,8 @@
 import { test, expect } from "./fixtures";
 import type { Locator } from "@playwright/test";
 
-async function sampleAnimation(element: Locator, milliseconds: number) {
-  await element.evaluate((node, time) => {
+async function sampleAnimation(element: Locator, milliseconds: number | readonly number[]) {
+  return element.evaluate((node, time) => {
     if (!node.getAnimations().length) throw new Error("Expected a game animation");
     node.setAttribute("data-motion-sample", "");
     let style = document.querySelector<HTMLStyleElement>("#motion-sample");
@@ -11,7 +11,15 @@ async function sampleAnimation(element: Locator, milliseconds: number) {
       style.id = "motion-sample";
       document.head.append(style);
     }
-    style.textContent = `[data-motion-sample] { --motion-age: ${time}ms !important; }`;
+    const times = typeof time === "number" ? [time] : time;
+    return times.map(age => {
+      style.textContent = `[data-motion-sample] { --motion-age: ${age}ms !important; }`;
+      return {
+        width: node.getBoundingClientRect().width,
+        opacity: Number(getComputedStyle(node).opacity),
+        dash: node.querySelector("circle")?.getAttribute("stroke-dasharray"),
+      };
+    });
   }, milliseconds);
 }
 
@@ -77,16 +85,11 @@ for (const reduced of [false, true]) {
     await duel.moveGuest(60);
     const ring = duel.host.locator(".radar-failure");
     await expect(ring).toHaveCount(1);
-    await sampleAnimation(ring, 40);
-    await expect(ring.locator("circle")).toHaveAttribute("stroke-dasharray", "3 3");
-    const before = await ring.evaluate(node => node.getBoundingClientRect().width);
-    await expect(ring).toHaveCSS("opacity", "1");
-    await sampleAnimation(ring, 300);
-    const after = await ring.evaluate(node => ({
-      width: node.getBoundingClientRect().width, opacity: Number(getComputedStyle(node).opacity),
-    }));
-    if (reduced) expect(after.width).toBeCloseTo(before, 1);
-    else expect(after.width).toBeGreaterThan(before);
+    const [before, after] = await sampleAnimation(ring, [40, 300]);
+    expect(before.dash).toBe("3 3");
+    expect(before.opacity).toBe(1);
+    if (reduced) expect(after.width).toBeCloseTo(before.width, 1);
+    else expect(after.width).toBeGreaterThan(before.width);
     expect(after.opacity).toBeGreaterThan(0);
     expect(after.opacity).toBeLessThan(1);
     await expect(duel.host.locator(".conversion-takeover")).toHaveCount(0);
