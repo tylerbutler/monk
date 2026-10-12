@@ -2,7 +2,8 @@
 
 Date: 2026-10-12
 
-Status: Written specification approved. Implementation plan awaiting review.
+Status: Approved and implemented. The live ceremony and production-animation
+demo are committed on main.
 
 Related design:
 [Player awards and data collection](2026-10-07-player-awards-design.md).

@@ -15,6 +15,10 @@ Objects, Vitest, and Playwright. Use installed dependencies.
 
 **Spec:** [End-game awards and trophy announcements](../specs/2026-10-12-end-game-awards-design.md).
 
+**Status:** All five tasks are complete and committed directly on main, as
+requested. The fresh whole-change review findings were resolved with
+regression checks.
+
 ## Global constraints
 
 - Keep gameplay, the Gleam engine, and award collection rules unchanged.
@@ -87,7 +91,7 @@ Use a coverage-discriminated result union: `complete`, `partial`, and
 positive integer rank and nonnegative integer score. Other branches
 require null ranks and scores, with an empty awards array.
 
-- [ ] Write failing selector and schema checks.
+- [x] Write failing selector and schema checks.
 
   Define a local `dataFor(players, coverage = "complete"): AwardData`
   test helper with `createAwardData` and an ended, coordinate-free frame.
@@ -117,19 +121,19 @@ require null ranks and scores, with an empty awards array.
   Reject unknown/duplicate winner IDs, duplicate categories, unsafe or
   invalid measures, scores in partial results, and results before end.
 
-- [ ] Run the red checks:
+- [x] Run the red checks:
 
   `npm run build:rules && npm run test:unit -- src/shared/protocol.test.ts src/worker/round-results.test.ts`
 
   Expect failure because the results exports and selector do not exist.
 
-- [ ] Implement the shared schemas and exported types.
+- [x] Implement the shared schemas and exported types.
 
   Validate results within the optional ended snapshot field. Keep old
   snapshots and authentication messages valid when the fields are absent.
   Bound awards to five, but do not cap retained result rows at 100.
 
-- [ ] Implement `selectRoundResults` without mutating `data`.
+- [x] Implement `selectRoundResults` without mutating `data`.
 
   For complete data, use the saved player dictionary, descending totals,
   competition ranks, and lexical label/ID ordering with direct string
@@ -137,8 +141,8 @@ require null ranks and scores, with an empty awards array.
   union collected and current roster IDs using saved labels for known
   players. For null data, use the current roster and unavailable coverage.
 
-- [ ] Run the task's unit checks and confirm they pass.
-- [ ] Commit as `feat: select end-of-round trophies`.
+- [x] Run the task's unit checks and confirm they pass.
+- [x] Commit as `feat: select end-of-round trophies`.
 
 ### Task 2: Publish authorized results after a committed end
 
@@ -159,7 +163,7 @@ require null ranks and scores, with an empty awards array.
 - Extends the test helper to
   `connect(credentials: SessionCredentials, supportsRoundResults = true)`.
 
-- [ ] Write failing worker and connection checks.
+- [x] Write failing worker and connection checks.
 
   ```ts
   it("publishes results only when the host ends the round", async () => {
@@ -189,7 +193,7 @@ require null ranks and scores, with an empty awards array.
   Reject private collector field names in the projection. Assert that
   the browser connection sends `supportsRoundResults: true`.
 
-- [ ] Run the red checks:
+- [x] Run the red checks:
 
   `npm run test:unit -- src/client/connection.test.ts`
 
@@ -197,7 +201,7 @@ require null ranks and scores, with an empty awards array.
 
   Expect missing capability and results assertions to fail.
 
-- [ ] Extend authority projection and socket capability handling.
+- [x] Extend authority projection and socket capability handling.
 
   `view(actor)` adds results only for an ended committed record and an
   actor who is the host or remains in the current roster. In `send`,
@@ -205,9 +209,9 @@ require null ranks and scores, with an empty awards array.
   the capability. Preserve existing faction-history compatibility.
   Do not put results into the checkpoint or modify authentication rights.
 
-- [ ] Opt the browser connection into round results on authentication.
-- [ ] Run the task's unit and worker checks and confirm they pass.
-- [ ] Commit as `feat: publish committed round results`.
+- [x] Opt the browser connection into round results on authentication.
+- [x] Run the task's unit and worker checks and confirm they pass.
+- [x] Commit as `feat: publish committed round results`.
 
 ### Task 3: Shared award stage and deterministic timeline
 
@@ -233,7 +237,7 @@ require null ranks and scores, with an empty awards array.
 - `AwardAnnouncement` props:
   `{ award: RoundAward; winners: readonly Pick<RoundResultPlayer, "id" | "label">[]; ageMs: number; reducedMotion: boolean }`.
 
-- [ ] Write failing timing, copy, and mounted-stage checks.
+- [x] Write failing timing, copy, and mounted-stage checks.
 
   Use the jsdom annotation and Svelte mounting pattern in `app.test.ts`.
   Mount each category at entrance and hold ages. Assert the category's
@@ -260,18 +264,18 @@ require null ranks and scores, with an empty awards array.
   time. Format comeback milliseconds as seconds with three decimal
   places so the display preserves the selector's precision.
 
-- [ ] Run the red checks:
+- [x] Run the red checks:
 
   `npm run test:unit -- src/client/award-view.test.ts`
 
   Expect missing helper/component imports to fail.
 
-- [ ] Implement copy and timeline exports in `award-view.ts`.
+- [x] Implement copy and timeline exports in `award-view.ts`.
 
   Keep timeline selection pure and reusable for seeking in either
   direction. Callers supply finite, nonnegative elapsed time.
 
-- [ ] Implement the five stage compositions and their CSS/SVG entrances.
+- [x] Implement the five stage compositions and their CSS/SVG entrances.
 
   Use the specification's 0-200, 200-850, 700-1,000, 1,000-2,800,
   and 2,800-3,000 ms phases. Sample paused CSS keyframes with
@@ -285,8 +289,8 @@ require null ranks and scores, with an empty awards array.
   A reduced-motion class replaces travel with opacity reveals; make it
   responsive to browser preference changes supplied by its parent.
 
-- [ ] Run the task's unit checks and confirm they pass.
-- [ ] Commit as `feat: add distinct trophy entrances`.
+- [x] Run the task's unit checks and confirm they pass.
+- [x] Commit as `feat: add distinct trophy entrances`.
 
 ### Task 4: Complete results and the live ceremony lifecycle
 
@@ -313,7 +317,7 @@ require null ranks and scores, with an empty awards array.
 - Exports `syncAwardDialog(root: HTMLElement): void` from the match view
   for app renders that reparent an open native dialog.
 
-- [ ] Write failing mounted-app and live-browser checks.
+- [x] Write failing mounted-app and live-browser checks.
 
   Assert that a complete 120-player result renders 120
   `[data-result-player]` rows, including duplicate/literal-markup names,
@@ -336,13 +340,13 @@ require null ranks and scores, with an empty awards array.
   Reload and confirm results without autoplay. Preserve a visible
   "Round ended" label used by existing fixture cleanup.
 
-- [ ] Run the red client checks:
+- [x] Run the red client checks:
 
   `npm run test:unit -- src/client/app.test.ts`
 
   Expect missing results/dialog behavior to fail.
 
-- [ ] Implement the full list and native modal ceremony.
+- [x] Implement the full list and native modal ceremony.
 
   Keep `[data-result-player]` rows keyed by ID. Render complete,
   partial, unavailable, empty, and no-award states with the exact spec
@@ -357,7 +361,7 @@ require null ranks and scores, with an empty awards array.
   focus goes to skip; completion or skip closes the dialog and focuses
   the results heading. A polite live region changes once per category.
 
-- [ ] Wire source and lifecycle through the persistent match view.
+- [x] Wire source and lifecycle through the persistent match view.
 
   In `receive`, keep the source message type before replacing snapshot
   state. Pass it through the HUD. Start only for a same-match,
@@ -380,14 +384,14 @@ require null ranks and scores, with an empty awards array.
   Isolated component callers can omit reconnect; then show the unavailable
   notice without a nonfunctional button. The live app supplies it.
 
-- [ ] Update shipped results/privacy copy in README, app information,
+- [x] Update shipped results/privacy copy in README, app information,
   and the client design guide.
 
   Add the specification's aggregate-results disclosure. Record the
   award stage and reduced-motion treatment without claiming physical
   playtest evidence.
 
-- [ ] Run client checks, then build and run the live browser checks:
+- [x] Run client checks, then build and run the live browser checks:
 
   `npm run test:unit -- src/client/app.test.ts src/client/award-view.test.ts`
 
@@ -395,7 +399,7 @@ require null ranks and scores, with an empty awards array.
 
   Expect all selected checks to pass in Chromium and WebKit.
 
-- [ ] Commit as `feat: celebrate round winners and show all players`.
+- [x] Commit as `feat: celebrate round winners and show all players`.
 
 ### Task 5: Production-animation demo and its testing controls
 
@@ -418,7 +422,7 @@ require null ranks and scores, with an empty awards array.
 - `AwardFixtureId` values: `normal`, `ties`, `long_names`, `large_group`,
   `large_hat_trick`, `no_awards`, and `partial`.
 
-- [ ] Write failing Playwright checks for the demo route and controls.
+- [x] Write failing Playwright checks for the demo route and controls.
 
   Select each category and seek to 400, 850, 1,500, and 2,900 ms;
   assert the category-specific artwork and hold-state winner names.
@@ -448,13 +452,13 @@ require null ranks and scores, with an empty awards array.
   Observe network and location hooks; assert no room API requests,
   game sockets, or location calls. Check links to the demo.
 
-- [ ] Run the red browser checks:
+- [x] Run the red browser checks:
 
   `npm run build && npm run test:e2e -- test/e2e/award-motion.spec.ts`
 
   Expect the missing built route or preview controls to fail.
 
-- [ ] Implement typed fictional fixtures using the shared schemas.
+- [x] Implement typed fictional fixtures using the shared schemas.
 
   `normal` earns all five awards with a repeat winner. `ties` includes
   shared champion and comeback winners. `long_names` includes an
@@ -464,7 +468,7 @@ require null ranks and scores, with an empty awards array.
   zero scores and no trophies. `partial` has null scores/ranks.
   Do not import the worker selector or collector into the public demo.
 
-- [ ] Implement the demo entry and controlled playback.
+- [x] Implement the demo entry and controlled playback.
 
   The HTML entry imports the existing client styles and mounts
   `AwardDemo`. Register `awardMotion: "brand/award-motion.html"` in
@@ -489,7 +493,7 @@ require null ranks and scores, with an empty awards array.
   page as a fictional testing preview. For an absent category, render
   the specification's fixture notice.
 
-- [ ] Verify the demo and inspect desktop/phone captures in one batch.
+- [x] Verify the demo and inspect desktop/phone captures in one batch.
 
   `npm run typecheck && npm run build`
 
@@ -500,7 +504,7 @@ require null ranks and scores, with an empty awards array.
   further capture round. Expect the compiled demo route and all selected
   browser checks to pass.
 
-- [ ] Commit as `feat: add trophy animation testing demo`.
+- [x] Commit as `feat: add trophy animation testing demo`.
 
 ## Final verification and handoff
 
@@ -514,3 +518,17 @@ Focus conditions. Keep the demo and live stage identical, complete player
 results persistent through recovery, and collector internals private.
 Do not claim the animations or demo shipped until the implemented behavior
 and compiled route have fresh verification evidence.
+
+### Completion evidence
+
+- 220 selected protocol, selector, collector, connection, stage, and client
+  unit checks passed.
+- 34 selected worker results and collection checks passed.
+- Type checking and the production build passed.
+- All 54 selected Chromium/WebKit checks passed, including the compiled
+  demo, distinct motion paths, live results, and conversion regressions.
+- Desktop and 320 px phone captures were inspected. Playback controls were
+  moved beside the preview after an offscreen-playback regression was found.
+- Ended legacy rounds without a collector remain unavailable; incomplete
+  player lists use coverage-specific headings.
+- No physical-device or outdoor playtest claim is made.
