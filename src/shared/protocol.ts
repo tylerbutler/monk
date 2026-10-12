@@ -86,6 +86,33 @@ export const feedbackSummarySchema = z.strictObject({
   p95UpperMs: z.number().nonnegative().nullable(),
 });
 export type FeedbackSummary = z.infer<typeof feedbackSummarySchema>;
+export const awardIdSchema = z.enum(["hat_trick", "comeback_kid", "social_butterfly", "hot_streak", "conversion_champion"]);
+export type AwardId = z.infer<typeof awardIdSchema>;
+const winnerIds = z.array(id).nonempty().refine(ids => new Set(ids).size === ids.length, "Duplicate winners.");
+export const roundAwardSchema = z.discriminatedUnion("id", [
+  z.strictObject({ id: z.literal("hat_trick"), winnerIds, value: z.null() }),
+  z.strictObject({ id: z.literal("comeback_kid"), winnerIds, value: time }),
+  z.strictObject({ id: z.literal("social_butterfly"), winnerIds, value: time.min(1) }),
+  z.strictObject({ id: z.literal("hot_streak"), winnerIds, value: time.min(2) }),
+  z.strictObject({ id: z.literal("conversion_champion"), winnerIds, value: time.min(1) }),
+]);
+export type RoundAward = z.infer<typeof roundAwardSchema>;
+const resultIdentity = { id, label: z.string().max(80) };
+const incompletePlayers = z.array(z.strictObject({ ...resultIdentity, rank: z.null(), conversionsMade: z.null() }));
+export const roundResultsSchema = z.discriminatedUnion("coverage", [
+  z.strictObject({ coverage: z.literal("complete"),
+    players: z.array(z.strictObject({ ...resultIdentity, rank: time.min(1), conversionsMade: time })),
+    awards: z.array(roundAwardSchema).max(5) }),
+  z.strictObject({ coverage: z.literal("partial"), players: incompletePlayers, awards: z.tuple([]) }),
+  z.strictObject({ coverage: z.literal("unavailable"), players: incompletePlayers, awards: z.tuple([]) }),
+]).refine(result => {
+  const players = new Set(result.players.map(p => p.id));
+  return players.size === result.players.length &&
+    new Set(result.awards.map(a => a.id)).size === result.awards.length &&
+    result.awards.every(a => a.winnerIds.every(id => players.has(id)));
+}, "Inconsistent round results.");
+export type RoundResults = z.infer<typeof roundResultsSchema>;
+export type RoundResultPlayer = RoundResults["players"][number];
 const radarQualitySchema = z.strictObject({ ageMs: time.nullable(), accuracyM: positive.int(), active: z.boolean() });
 const radarSchema = z.strictObject({
   reference: radarQualitySchema.extend({ playerId: id }).nullable(),
@@ -110,7 +137,8 @@ export const snapshotSchema = z.strictObject({
   resumeChecking: z.boolean(), canHost: z.boolean(),
   radar: radarSchema.nullable(),
   feedback: feedbackSummarySchema.optional(),
-});
+  roundResults: roundResultsSchema.optional(),
+}).refine(s => s.roundResults === undefined || s.phase === "ended", "Results require an ended round.");
 export type PlayerSnapshot = z.infer<typeof snapshotSchema>;
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -139,7 +167,7 @@ export type TrialSample = z.infer<typeof trialSampleSchema>;
 const envelope = { version: z.literal(1) };
 export const clientMessageSchema = z.discriminatedUnion("type", [
   z.strictObject({ ...envelope, type: z.literal("authenticate"), hostToken: token.nullable(), playerToken: token.nullable(),
-    supportsFactionHistory: z.boolean().optional() }),
+    supportsFactionHistory: z.boolean().optional(), supportsRoundResults: z.boolean().optional() }),
   z.strictObject({ ...envelope, type: z.literal("clock_probe"), nonce: id, clientSendMs: time }),
   z.strictObject({ ...envelope, type: z.literal("clock_confirm"), nonce: id, clientReceiveMs: time }),
   z.strictObject({ ...envelope, type: z.literal("position"), report: positionSchema }),
