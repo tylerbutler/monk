@@ -248,6 +248,58 @@ progress::-moz-progress-bar { background: var(--accent); }
 .conversion-impact-ring { animation-delay: calc(540ms - var(--motion-age, 0ms)); }
 .conversion-reveal-copy { animation-delay: calc(600ms - var(--motion-age, 0ms)); }
 .radar-center[data-current="false"] { fill: var(--surface); stroke: var(--ink); stroke-dasharray: 2 2; }
+.award-stage { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; width: 100%; min-width: 0; min-height: 28rem; padding: 1.5rem; background: var(--ink); color: #fff; overflow: hidden; text-align: center; animation: award-exit 200ms linear both paused; animation-delay: calc(2800ms - var(--award-age, 1500ms)); }
+.award-stage ::selection { color: var(--ink); background: var(--faction-paper); }
+.award-title { margin: 0; font-size: clamp(1.4rem, 5vw, 2.25rem); font-weight: 650; }
+.award-artwork { display: block; flex: 0 1 auto; width: min(100%, 23rem); height: clamp(8rem, 27dvh, 15rem); overflow: hidden; color: var(--faction-paper); }
+.award-winner-copy { width: 100%; min-width: 0; }
+.award-winners { list-style: none; padding: 0; margin: 0; max-height: 8rem; overflow-y: auto; scrollbar-color: var(--faction-paper) var(--ink); font-size: clamp(1.8rem, 8vw, 3.5rem); font-weight: 750; line-height: 1.1; letter-spacing: -.035em; }
+.award-winners li + li { margin-top: .5rem; }
+.award-stage[data-many-winners="true"] .award-winners { font-size: 1.4rem; line-height: 1.3; }
+.award-achievement { margin: 1rem auto 0; font-size: 1.1rem; text-wrap: balance; }
+.award-time-note { margin: .5rem auto 0; font-size: .8rem; max-width: 42ch; color: #fff; }
+.award-stage [data-award-motion] { animation-duration: 650ms; animation-timing-function: cubic-bezier(.16, 1, .3, 1); animation-fill-mode: both; animation-play-state: paused; animation-delay: calc(200ms - var(--award-age, 1500ms)); }
+.award-hand { animation-name: award-hand-left; }
+.award-hand[data-hand="paper"] { animation-name: award-hand-top; }
+.award-hand[data-hand="scissors"] { animation-name: award-hand-right; }
+.award-stage[data-award="comeback_kid"] .award-trophy { animation-name: award-comeback; }
+.award-turnaround { stroke-dasharray: 100; animation-name: award-path; }
+.award-turnaround-arrow { animation-name: award-soft-reveal; }
+.award-arch[data-arch="left"] { animation-name: award-arch-left; }
+.award-arch[data-arch="right"] { animation-name: award-arch-right; }
+.award-stage[data-award="social_butterfly"] .award-trophy { animation-name: award-soft-reveal; animation-delay: calc(550ms - var(--award-age, 1500ms)); animation-duration: 300ms; }
+.award-streak { stroke-dasharray: 100; animation-name: award-streak; animation-duration: 200ms; }
+.award-streak[data-streak="1"] { animation-delay: calc(350ms - var(--award-age, 1500ms)); }
+.award-streak[data-streak="2"] { animation-delay: calc(500ms - var(--award-age, 1500ms)); }
+.award-stage[data-award="hot_streak"] .award-trophy { animation-name: award-streak-trophy; animation-delay: calc(600ms - var(--award-age, 1500ms)); animation-duration: 250ms; }
+.award-curtain[data-curtain="left"] { animation-name: award-curtain-left; }
+.award-curtain[data-curtain="right"] { animation-name: award-curtain-right; }
+.award-stage[data-award="conversion_champion"] .award-trophy { animation-name: award-champion; }
+.award-podium { animation-name: award-soft-reveal; }
+.award-stage .award-winner-copy { animation-name: award-name; animation-delay: calc(700ms - var(--award-age, 1500ms)); animation-duration: 300ms; }
+@keyframes award-hand-left { from { transform: translate(-110px, 80px) rotate(-28deg); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes award-hand-top { from { transform: translateY(-130px) rotate(20deg); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes award-hand-right { from { transform: translate(110px, 80px) rotate(28deg); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes award-comeback { 0% { transform: translate(-100px, 45px) rotate(-18deg); opacity: 0; } 35% { transform: translate(-40px, 95px) rotate(-6deg); opacity: 1; } 100% { transform: none; opacity: 1; } }
+@keyframes award-path { from { stroke-dashoffset: 100; opacity: 0; } to { stroke-dashoffset: 0; opacity: .45; } }
+@keyframes award-arch-left { from { transform: translateX(-140px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes award-arch-right { from { transform: translateX(140px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes award-streak { from { stroke-dashoffset: 100; opacity: 0; } to { stroke-dashoffset: 0; opacity: .25; } }
+@keyframes award-streak-trophy { from { transform: translateX(-180px) skewX(-12deg); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes award-curtain-left { from { transform: none; } to { transform: translateX(-181px); } }
+@keyframes award-curtain-right { from { transform: none; } to { transform: translateX(181px); } }
+@keyframes award-champion { from { transform: translateY(130px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes award-soft-reveal { from { opacity: 0; } to { opacity: 1; } }
+@keyframes award-name { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes award-exit { from { opacity: 1; } to { opacity: 0; } }
+.award-stage.is-reduced [data-award-motion] { animation-name: award-soft-reveal; animation-duration: 150ms; transform: none; }
+.award-stage.is-reduced .award-curtain { display: none; }
+.award-stage.is-reduced .award-turnaround { stroke-dasharray: none; }
+@media (prefers-reduced-motion: reduce) {
+  .award-stage [data-award-motion] { animation-name: award-soft-reveal; animation-duration: 150ms; transform: none; }
+  .award-stage .award-curtain { display: none; }
+  .award-stage .award-turnaround { stroke-dasharray: none; }
+}
 .location-sharing { font-weight: 650; }
 .host-controls > details { margin: 0; }
 .radar-link { stroke: var(--accent); stroke-width: 3; }
