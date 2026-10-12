@@ -34,7 +34,7 @@ it("authenticates in the first frame and never puts credentials in its URL", () 
   const socket = instances[0]; socket.open();
   expect(String(socket.url)).not.toContain(credentials.hostToken);
   expect(JSON.parse(socket.frames[0])).toMatchObject({
-    type: "authenticate", hostToken: credentials.hostToken, supportsFactionHistory: true,
+    type: "authenticate", hostToken: credentials.hostToken, supportsFactionHistory: true, supportsRoundResults: true,
   });
   connection.close();
 });

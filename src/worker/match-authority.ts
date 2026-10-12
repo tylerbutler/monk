@@ -11,11 +11,13 @@ import { estimateClock, normalizeObservation } from "../shared/clock";
 import { gameObservation } from "./locations";
 import type { KnownPosition } from "./locations";
 import { advanceAwardData, createAwardData, recoverAwardData } from "./award-data";
+import { selectRoundResults } from "./round-results";
 
 const attachmentSchema = z.strictObject({
   actor: actorSchema.nullable(), streamId: z.string(), streamSeq: z.number().int().nonnegative(),
   authDeadlineMs: z.number(), expiresAtMs: z.number(),
   supportsFactionHistory: z.boolean().optional(),
+  supportsRoundResults: z.boolean().optional(),
 });
 type Connection = z.infer<typeof attachmentSchema>;
 type ClockSession = { probe: (Omit<ClockProbeSample, "clientReceiveMs"> & { nonce: string }) | null;
@@ -73,6 +75,10 @@ export class MatchAuthority extends DurableObject<Env> {
     if (body.type === "update" && !connection.supportsFactionHistory) {
       body = { ...body, events: body.events.map(({ attackerLabel, targetLabel, ...event }) => event) };
     }
+    if ((body.type === "snapshot" || body.type === "update") && !connection.supportsRoundResults) {
+      const { roundResults: _results, ...snapshot } = body.snapshot;
+      body = { ...body, snapshot };
+    }
     const streamSeq = connection.streamSeq + 1;
     socket.serializeAttachment({ ...connection, streamSeq });
     if (socket.readyState === WebSocket.OPEN) {
@@ -84,8 +90,12 @@ export class MatchAuthority extends DurableObject<Env> {
     this.send(socket, { type: "error", code, reason, commandId });
   }
   private view(actor: VerifiedActor) {
-    if (!this.engine) throw new Error("Match engine is unavailable.");
-    return { ...snapshotFor(this.engine, actor.playerId, Date.now(), actor.host, this.lastKnownPositions), feedback: this.feedbackSummary() };
+    if (!this.engine || !this.record) throw new Error("Match engine is unavailable.");
+    const snapshot = snapshotFor(this.engine, actor.playerId, Date.now(), actor.host, this.lastKnownPositions);
+    const canReadResults = actor.host || snapshot.roster.some(p => p.id === actor.playerId);
+    return { ...snapshot, feedback: this.feedbackSummary(),
+      ...(snapshot.phase === "ended" && canReadResults ?
+        { roundResults: selectRoundResults(this.record.awardData, snapshot.roster) } : {}) };
   }
   private feedbackSummary(): FeedbackSummary {
     const records = this.record?.feedback ?? [];
@@ -312,7 +322,8 @@ export class MatchAuthority extends DurableObject<Env> {
         const authTimer = this.authTimers.get(socket);
         if (authTimer !== undefined) clearTimeout(authTimer);
         this.authTimers.delete(socket);
-        socket.serializeAttachment({ ...connection, actor, supportsFactionHistory: message.supportsFactionHistory === true });
+        socket.serializeAttachment({ ...connection, actor, supportsFactionHistory: message.supportsFactionHistory === true,
+          supportsRoundResults: message.supportsRoundResults === true });
         this.send(socket, { type: "authenticated", playerId: actor.playerId, canHost: actor.host, expiresAtMs: this.record.expiresAtMs });
         this.snapshot(socket); return;
       }
