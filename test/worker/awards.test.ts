@@ -210,7 +210,7 @@ it("recovers collected rounds without outage credit", async () => {
   expect((await match.read()).awardData!.players[match.ids[0]].eligibleMs).toBe(saved.players[match.ids[0]].eligibleMs + 1000);
 });
 
-it.each(["lobby", "running", "paused", "ended"] as const)("starts legacy %s collection with honest coverage", async phase => {
+it.each(["lobby", "running", "paused", "ended"] as const)("recovers legacy %s records with honest coverage", async phase => {
   const credentials = await createMatch();
   await joinMatch(credentials.matchCode);
   const stub = env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode));
@@ -234,12 +234,15 @@ it.each(["lobby", "running", "paused", "ended"] as const)("starts legacy %s coll
   await evictDurableObject(stub);
   await connect(credentials);
   const record = await runInDurableObject(stub, (_, state) => loadRecord(state.storage));
-  expect(record?.awardData).toMatchObject({ coverage: phase === "lobby" ? "complete" : "partial",
-    startedAfterEventSeq: original.checkpoint.eventSeq, lastProcessedEventSeq: original.checkpoint.eventSeq,
-    lastFrame: { phase: phase === "running" ? "paused" : phase }, lastConversionBatch: null, openEncounters: {} });
-  expect(Object.values(record!.awardData!.players).every(p =>
-    p.conversionsMade === 0 && p.conversionsReceived === 0 && p.eligibleMs === 0 &&
-    p.incomingEncounters === 0 && p.fastestComebackEligibleMs === null)).toBe(true);
+  if (phase === "ended") expect(record?.awardData).toBeNull();
+  else {
+    expect(record?.awardData).toMatchObject({ coverage: phase === "lobby" ? "complete" : "partial",
+      startedAfterEventSeq: original.checkpoint.eventSeq, lastProcessedEventSeq: original.checkpoint.eventSeq,
+      lastFrame: { phase: phase === "running" ? "paused" : phase }, lastConversionBatch: null, openEncounters: {} });
+    expect(Object.values(record!.awardData!.players).every(p =>
+      p.conversionsMade === 0 && p.conversionsReceived === 0 && p.eligibleMs === 0 &&
+      p.incomingEncounters === 0 && p.fastestComebackEligibleMs === null)).toBe(true);
+  }
   expect(record?.sessions).toEqual(original.sessions);
   expect(record?.events).toEqual(original.events);
   expect(record?.checkpoint.parameters).toEqual(original.checkpoint.parameters);

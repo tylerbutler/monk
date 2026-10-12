@@ -108,6 +108,34 @@ it("shows partial legacy coverage without ranks, scores, or trophies", async () 
   expect(ended.snapshot.roundResults?.players.every(p => p.rank === null && p.conversionsMade === null)).toBe(true);
 });
 
+it("keeps ended legacy records without a collector unavailable across recovery", async () => {
+  const match = await runningMatch();
+  await hostCommand(match.host, { type: "end" });
+  await closeSockets();
+  const stub = env.MATCHES.get(env.MATCHES.idFromName(match.credentials.matchCode));
+  await runInDurableObject(stub, async (instance, state) => {
+    const timer: ReturnType<typeof setTimeout> | null = Reflect.get(instance, "timer");
+    if (timer !== null) clearTimeout(timer);
+    await state.storage.deleteAlarm();
+    const record = await loadRecord(state.storage);
+    if (!record) throw new Error("Missing ended legacy fixture.");
+    expect(record.checkpoint.phase).toBe("ended");
+    await state.storage.put("record", { ...record, awardData: null });
+    expect((await loadRecord(state.storage))?.awardData).toBeNull();
+  });
+  for (let recovery = 0; recovery < 2; recovery++) {
+    await evictDurableObject(stub);
+    const client = await connect(match.credentials);
+    client.send({ version: 1, type: "snapshot_request" });
+    const results = (await client.next("snapshot")).snapshot.roundResults;
+    expect(results).toMatchObject({ coverage: "unavailable", awards: [] });
+    expect(results?.players).toHaveLength(2);
+    expect(results?.players.every(p => p.rank === null && p.conversionsMade === null)).toBe(true);
+    expect((await runInDurableObject(stub, (_, state) => loadRecord(state.storage)))?.awardData).toBeNull();
+    await closeSockets();
+  }
+});
+
 it("expires results with the room", async () => {
   const match = await runningMatch();
   await hostCommand(match.host, { type: "end" });

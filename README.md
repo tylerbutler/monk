@@ -155,15 +155,6 @@ and pauses when hidden.
 The gameplay app does not load these animations.
 
 Open `/brand/conversion-motion.html` for a separate gameplay motion mockup.
-
-Open `/brand/award-motion.html` to test the production trophy animations.
-Choose a category or play the full ceremony, pause/resume, and seek to an
-exact millisecond. The preview starts paused on Conversion Champion.
-Fixtures include shared ties, repeat winners, long/duplicate names,
-120-player results, 120 Hat Trick winners, no awards, and incomplete
-collection. Inspect each fixture's full results and switch between system
-and forced reduced motion. This fictional demo does not create a room,
-open game sockets, or request location.
 It previews conversion progress, a screen-covering faction-color bubble and
 hand stamp when you change sides, and a smaller radar stamp when you convert
 another player. The full-screen stamp holds for three seconds with a small
@@ -173,6 +164,15 @@ controls, a timeline, all three factions, half speed, and reduced motion are inc
 Players and positions are simulated; the preview does not request location
 access. The live game uses the same motion for confirmed conversions and
 interrupted influence.
+
+Open `/brand/award-motion.html` to test the production trophy animations.
+Choose a category or play the full ceremony, pause/resume, and seek to an
+exact millisecond. The preview starts paused on Conversion Champion.
+Fixtures include shared ties, repeat winners, long/duplicate names,
+120-player results, 120 Hat Trick winners, no awards, and incomplete
+collection. Inspect each fixture's full results and switch between system
+and forced reduced motion. This fictional demo does not create a room,
+open game sockets, or request location.
 
 Edit `scripts/generate-mark-animation.mjs`, then run `npm run build:mark` to
 regenerate the five `brand/assets/monk-*.json` files. The regular build
@@ -246,6 +246,8 @@ at round end. Results expire with the room after 24 hours. Legacy rounds
 with incomplete collection show known names with a notice, without
 full-round scores or trophies. Comeback timing excludes pauses, conversion
 grace, and unusable-location time; it does not measure speed or movement.
+An ended legacy round with no saved statistics shows only its available
+roster and an unavailable-statistics notice, not a complete player list.
 
 Select **Share location** when you want to participate in proximity conversion.
 The app uses the browser's first available position, including a cached fix.

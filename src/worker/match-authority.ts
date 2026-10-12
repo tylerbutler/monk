@@ -48,7 +48,8 @@ export class MatchAuthority extends DurableObject<Env> {
         const frame = awardFrameFor(engine);
         const record = { ...this.record, checkpoint: checkpointEngine(engine, engine.last_at),
           awardData: this.record.awardData === null
-            ? createAwardData(frame, this.record.checkpoint.phase === "lobby" ? "complete" : "partial")
+            ? this.record.checkpoint.phase === "ended" ? null :
+              createAwardData(frame, this.record.checkpoint.phase === "lobby" ? "complete" : "partial")
             : recoverAwardData(this.record.awardData, frame) };
         await commitRecord(ctx.storage, record, []);
         this.record = record;

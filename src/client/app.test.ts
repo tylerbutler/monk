@@ -647,6 +647,7 @@ it.each(["complete", "partial"] as const)("does not autoplay empty %s awards or 
     expect(app.root.querySelector("#award-ceremony")).toBeNull();
     if (coverage === "partial") {
       expect(app.root.textContent).toContain("Round statistics are incomplete.");
+      expect(app.root.querySelector(".round-results h3")?.textContent).toBe("Known players (2)");
       expect(app.root.querySelector(".result-score, .result-rank")).toBeNull();
     } else expect(app.root.textContent).toContain("No trophies earned this round.");
   } finally { app.cleanup(); }
@@ -657,10 +658,22 @@ it("offers reconnect for an ended snapshot with missing results", () => {
   const app = trophyApp(ended);
   try {
     expect(app.root.textContent).toContain("Round statistics are unavailable.");
+    expect(app.root.querySelector(".round-results h3")?.textContent).toBe("Available roster (2)");
     const reconnect = app.root.querySelector<HTMLButtonElement>('[data-action="reconnect-results"]');
     expect(reconnect).not.toBeNull();
     reconnect?.click();
     expect(app.sockets).toHaveLength(2);
+  } finally { app.cleanup(); }
+});
+
+it("labels an unavailable legacy result list without claiming all participants", () => {
+  const { ended } = trophyFixture();
+  const app = trophyApp({ ...ended, roundResults: { coverage: "unavailable",
+    players: ended.roundResults.players.map(p => ({ ...p, rank: null, conversionsMade: null })), awards: [] } });
+  try {
+    expect(app.root.querySelector(".round-results h3")?.textContent).toBe("Available roster (2)");
+    expect(app.root.textContent).toContain("Round statistics are unavailable.");
+    expect(app.root.querySelector(".result-rank, .result-score, #award-ceremony")).toBeNull();
   } finally { app.cleanup(); }
 });
 

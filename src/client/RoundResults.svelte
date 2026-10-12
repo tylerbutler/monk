@@ -12,6 +12,8 @@
   let dialog = $state<HTMLDialogElement>();
   let heading = $state<HTMLHeadingElement>();
   const players = $derived(results?.players ?? roster.map(p => ({ id: p.id, label: p.label, rank: null, conversionsMade: null })));
+  const playerListHeading = $derived(!results || results.coverage === "unavailable" ? "Available roster" :
+    results.coverage === "partial" ? "Known players" : "All players");
   const awards = $derived(results?.coverage === "complete" ? results.awards : []);
   const sequence = $derived(ceremonyStartedAt === null ? { kind: "results" as const } :
     awardSequenceAt(awards, Math.max(0, now - ceremonyStartedAt)));
@@ -65,8 +67,8 @@
   {:else if !awards.length}
     <p>No trophies earned this round.</p>
   {/if}
-  <h3>All players ({players.length})</h3>
-  <ol class="round-results-list" aria-label="All players">
+  <h3>{playerListHeading} ({players.length})</h3>
+  <ol class="round-results-list" aria-label={playerListHeading}>
     {#each players as player (player.id)}
       <li data-result-player={player.id} value={player.rank ?? undefined}>
         {#if player.rank !== null}<span class="result-rank" aria-label="Rank {player.rank}">{player.rank}</span>{/if}
