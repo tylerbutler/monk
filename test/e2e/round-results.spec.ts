@@ -6,7 +6,7 @@ test("ends with unique trophy announcements and persistent full-player results",
   const end = duel.host.getByRole("button", { name: "End round", exact: true });
   if (!await end.isVisible()) await duel.host.locator("#host-tools-toggle").click();
   await end.click();
-  for (const page of [duel.host, duel.guest]) {
+  await Promise.all([duel.host, duel.guest].map(async page => {
     const dialog = page.locator("#award-ceremony");
     await expect(dialog).toBeVisible();
     await expect(dialog).toHaveJSProperty("open", true);
@@ -18,7 +18,7 @@ test("ends with unique trophy announcements and persistent full-player results",
     await expect(page.locator(".round-results")).toContainText("Test Scissors");
     await expect(page.locator(".round-results")).toContainText("Conversion Champion");
     await expect(page.locator(".conversion-takeover, #player-roster")).toHaveCount(0);
-  }
+  }));
   await duel.guest.reload();
   await expect(duel.guest.locator("[data-result-player]")).toHaveCount(2);
   await expect(duel.guest.locator("#award-ceremony")).toHaveCount(0);

@@ -319,7 +319,7 @@ progress::-moz-progress-bar { background: var(--accent); }
 .award-stage.is-reduced .award-curtain { display: none; }
 .award-stage.is-reduced .award-turnaround { stroke-dasharray: none; }
 @media (prefers-reduced-motion: reduce) {
-  .award-stage [data-award-motion] { animation-name: award-soft-reveal; animation-duration: 150ms; transform: none; }
+  .award-stage[data-award] [data-award-motion] { animation-name: award-soft-reveal; animation-duration: 150ms; transform: none; }
   .award-stage .award-curtain { display: none; }
   .award-stage .award-turnaround { stroke-dasharray: none; }
 }

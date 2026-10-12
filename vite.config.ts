@@ -25,7 +25,8 @@ export default defineConfig({
   build: {
     target: "es2022",
     rolldownOptions: {
-      input: { app: "index.html", motion: "brand/motion.html", conversionMotion: "brand/conversion-motion.html" },
+      input: { app: "index.html", motion: "brand/motion.html", conversionMotion: "brand/conversion-motion.html",
+        awardMotion: "brand/award-motion.html" },
     },
   },
 });

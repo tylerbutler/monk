@@ -155,6 +155,15 @@ and pauses when hidden.
 The gameplay app does not load these animations.
 
 Open `/brand/conversion-motion.html` for a separate gameplay motion mockup.
+
+Open `/brand/award-motion.html` to test the production trophy animations.
+Choose a category or play the full ceremony, pause/resume, and seek to an
+exact millisecond. The preview starts paused on Conversion Champion.
+Fixtures include shared ties, repeat winners, long/duplicate names,
+120-player results, 120 Hat Trick winners, no awards, and incomplete
+collection. Inspect each fixture's full results and switch between system
+and forced reduced motion. This fictional demo does not create a room,
+open game sockets, or request location.
 It previews conversion progress, a screen-covering faction-color bubble and
 hand stamp when you change sides, and a smaller radar stamp when you convert
 another player. The full-screen stamp holds for three seconds with a small
