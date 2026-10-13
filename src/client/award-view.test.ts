@@ -30,19 +30,28 @@ it("uses exact intro, announcement, and final-results boundaries", () => {
 });
 
 it("describes the actual measure without losing comeback precision", () => {
-  expect(awardAchievement(awards[0])).toBe("Converted as Rock, Paper, and Scissors.");
-  expect(awardAchievement(awards[1])).toContain("1.201 s");
-  expect(awardAchievement(awards[1])).toContain("eligible play");
-  expect(awardAchievement({ ...awards[1], id: "comeback_kid", value: 0 })).toContain("0.000 s");
-  expect(awardAchievement(awards[2])).toBe("2 distinct conversion counterparts.");
-  expect(awardAchievement({ id: "social_butterfly", winnerIds: ["p1"], value: 1 })).toBe("1 distinct conversion counterpart.");
-  expect(awardAchievement(awards[3])).toBe("3 conversions in one streak.");
-  expect(awardAchievement(awards[4])).toBe("4 conversions made.");
+  expect(awardAchievement(awards[0])).toEqual({ value: "Rock, Paper, Scissors", label: "All three factions" });
+  expect(awardAchievement(awards[1])).toEqual({ value: "1.201", label: "seconds of eligible play" });
+  expect(awardAchievement({ ...awards[1], id: "comeback_kid", value: 0 })).toEqual({
+    value: "0.000", label: "seconds of eligible play",
+  });
+  expect(awardAchievement(awards[2])).toEqual({ value: "2", label: "different players" });
+  expect(awardAchievement({ id: "social_butterfly", winnerIds: ["p1"], value: 1 })).toEqual({
+    value: "1", label: "different player",
+  });
+  expect(awardAchievement(awards[3])).toEqual({ value: "3", label: "conversions in one streak" });
+  expect(awardAchievement(awards[4])).toEqual({ value: "4", label: "conversions made" });
+  expect(awardAchievement({ id: "conversion_champion", winnerIds: ["p1"], value: 1 })).toEqual({
+    value: "1", label: "conversion made",
+  });
 });
 
-for (const [index, artwork] of [
-  [0, ".award-hand"], [1, ".award-turnaround"], [2, ".award-arch"],
-  [3, ".award-streak"], [4, ".award-curtain"],
+for (const [index, artwork, description, value, label] of [
+  [0, ".award-hand", "Convert at least one player as each faction.", "Rock, Paper, Scissors", "All three factions"],
+  [1, ".award-turnaround", "Fastest conversion after being converted.", "1.201", "seconds of eligible play"],
+  [2, ".award-arch", "Most different players involved in conversions, in either direction.", "2", "different players"],
+  [3, ".award-streak", "Most conversions in a row without being converted (at least two).", "3", "conversions in one streak"],
+  [4, ".award-curtain", "Most conversions made this round.", "4", "conversions made"],
 ] as const) {
   it(`renders ${awards[index].id} artwork and shared winners as literal text`, () => {
     const root = document.createElement("div"); document.body.append(root);
@@ -55,6 +64,12 @@ for (const [index, artwork] of [
     expect(root.querySelector("[data-award]")?.getAttribute("data-award")).toBe(awards[index].id);
     expect(root.querySelectorAll(artwork).length).toBeGreaterThan(0);
     expect(root.querySelectorAll("[data-award-winner]")).toHaveLength(2);
+    expect(root.querySelector(".award-description")?.textContent).toBe(description);
+    expect(root.querySelector(".award-value")?.textContent).toBe(value);
+    expect(root.querySelector(".award-measure")?.textContent).toBe(label);
+    if (index === 1) expect(root.querySelector(".award-time-note")?.textContent).toContain(
+      "Excludes pauses, conversion grace, and unusable-location time.",
+    );
     expect(root.textContent).toContain("<img src=x onerror=alert(1)>");
     expect(root.querySelector("[onerror]")).toBeNull();
     expect(root.querySelector("[data-award]")?.classList.contains("is-reduced")).toBe(true);

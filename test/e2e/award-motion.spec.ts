@@ -38,6 +38,33 @@ test("opens a paused production champion preview without game services", async (
   expect(sockets).toEqual([]);
 });
 
+test("explains trophy criteria and makes the champion conversion total prominent", async ({ page }) => {
+  await expect(page.locator(".award-description")).toHaveText("Most conversions made this round.");
+  await expect(page.locator(".award-value")).toHaveText("8");
+  await expect(page.locator(".award-measure")).toHaveText("conversions made");
+  const sizes = await page.locator(".award-achievement").evaluate(element => {
+    const value = element.querySelector(".award-value"), label = element.querySelector(".award-measure");
+    if (!value || !label) throw new Error("Missing trophy measure");
+    return { value: parseFloat(getComputedStyle(value).fontSize), label: parseFloat(getComputedStyle(label).fontSize),
+      weight: Number(getComputedStyle(value).fontWeight), color: getComputedStyle(value).color };
+  });
+  expect(sizes.value).toBeGreaterThanOrEqual(sizes.label * 2);
+  expect(sizes.weight).toBeGreaterThanOrEqual(700);
+  expect(sizes.color).toBe("rgb(242, 207, 69)");
+
+  for (const [category, value, label] of [
+    ["hat_trick", "Rock, Paper, Scissors", "All three factions"],
+    ["comeback_kid", "1.201", "seconds of eligible play"],
+    ["social_butterfly", "3", "different players"],
+    ["hot_streak", "5", "conversions in one streak"],
+  ]) {
+    await page.getByLabel("Award category").selectOption(category);
+    await expect(page.locator(".award-description")).not.toBeEmpty();
+    await expect(page.locator(".award-value")).toHaveText(value);
+    await expect(page.locator(".award-measure")).toHaveText(label);
+  }
+});
+
 test("renders all five compositions at entrance, settle, hold, and exit", async ({ page }) => {
   const categories = ["hat_trick", "comeback_kid", "social_butterfly", "hot_streak", "conversion_champion"];
   for (const category of categories) {
@@ -229,7 +256,16 @@ test("fits phone, landscape, and desktop widths with enlarged text and reachable
   for (const viewport of [{ width: 320, height: 568 }, { width: 568, height: 320 }, { width: 1280, height: 900 }]) {
     await page.setViewportSize(viewport);
     await page.getByLabel("Fixture", { exact: true }).selectOption("long_names");
-    await page.addStyleTag({ content: "html { font-size: 150%; }" });
+    await page.addStyleTag({ content: "html { font-size: 200%; }" });
+    for (const category of ["hat_trick", "comeback_kid", "social_butterfly", "hot_streak", "conversion_champion"]) {
+      await page.getByLabel("Award category").selectOption(category);
+      await expect(page.locator(".award-description")).toBeVisible();
+      await expect(page.locator(".award-value")).toBeVisible();
+      expect(await page.locator(".award-achievement").evaluate(element => {
+        const bounds = element.getBoundingClientRect(), stage = element.closest(".award-stage")?.getBoundingClientRect();
+        return !!stage && bounds.left >= stage.left && bounds.right <= stage.right && element.scrollWidth <= element.clientWidth;
+      })).toBe(true);
+    }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await expect(page.getByRole("button", { name: "Replay award", exact: true })).toBeEnabled();
     await page.getByLabel("Fixture", { exact: true }).selectOption("large_group");

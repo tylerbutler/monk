@@ -578,10 +578,15 @@ for (const phase of ["running", "paused"] as const) {
       vi.advanceTimersByTime(1500); flushSync();
       const age = app.root.querySelector<HTMLElement>("[data-award]")?.style.getPropertyValue("--award-age");
       expect(parseFloat(age ?? "")).toBeGreaterThanOrEqual(992);
+      const announcement = app.root.querySelector(".award-live-status")?.textContent;
+      expect(announcement).toContain("Most conversions made this round.");
+      expect(announcement).toContain("Player 1");
+      expect(announcement).toContain("4 conversions made.");
       app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 6,
         snapshot: ended, events: [], outcome: null, trial: null, startChecking: false });
       syncAwardDialog(app.root);
       expect(app.root.querySelector<HTMLElement>("[data-award]")?.style.getPropertyValue("--award-age")).toBe(age);
+      expect(app.root.querySelector(".award-live-status")?.textContent).toBe(announcement);
       app.root.querySelector<HTMLButtonElement>('[data-action="skip-awards"]')?.click();
       flushSync(); await tick();
       expect(app.root.querySelector("#award-ceremony")).toBeNull();

@@ -1,7 +1,8 @@
 <script lang="ts">
   import { tick } from "svelte";
   import type { PlayerSnapshot, RoundResults as Results } from "../shared/protocol";
-  import { awardAchievement, awardSequenceAt, awardSequenceDuration, awardTiming, awardTitles } from "./award-view";
+  import { awardAchievement, awardDescriptions, awardSequenceAt, awardSequenceDuration, awardTiming, awardTitles,
+    comebackTimingNote } from "./award-view";
   import AwardAnnouncement from "./AwardAnnouncement.svelte";
 
   let { results, roster, ownPlayerId, ceremonyStartedAt, finishCeremony, reconnect }: {
@@ -20,9 +21,12 @@
     awardSequenceAt(awards, Math.max(0, (pausedAt ?? now) - ceremonyStartedAt - pausedMs)));
   const currentWinners = $derived(sequence.kind === "award" ?
     players.filter(p => sequence.award.winnerIds.includes(p.id)) : []);
-  const announcement = $derived(sequence.kind === "award" ?
-    `${awardTitles[sequence.award.id]}. ${currentWinners.map(p => p.label).join(", ")}. ${awardAchievement(sequence.award)}` :
-    sequence.kind === "intro" ? "Round complete." : "");
+  const announcement = $derived.by(() => {
+    if (sequence.kind !== "award") return sequence.kind === "intro" ? "Round complete." : "";
+    const award = sequence.award, achievement = awardAchievement(award);
+    return `${awardTitles[award.id]}. ${awardDescriptions[award.id]} ${currentWinners.map(p => p.label).join(", ")}. ` +
+      `${achievement.value} ${achievement.label}.` + (award.id === "comeback_kid" ? ` ${comebackTimingNote}` : "");
+  });
 
   function finish() {
     dialog?.close();

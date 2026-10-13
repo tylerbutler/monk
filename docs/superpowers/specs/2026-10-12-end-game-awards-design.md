@@ -70,9 +70,9 @@ Use these five categories in this announcement order:
 
 | Category | Qualifying condition | Winners | Displayed achievement |
 | --- | --- | --- | --- |
-| Hat Trick | At least one accepted conversion made as each faction. | All qualifying players. | "Converted as Rock, Paper, and Scissors." |
+| Hat Trick | At least one accepted conversion made as each faction. | All qualifying players. | Highlighted Rock, Paper, and Scissors names, labeled "All three factions". |
 | Comeback Kid | A non-null fastest completed comeback in the collector. | Lowest eligible milliseconds, including a valid zero. | Fastest comeback duration, labeled as eligible play time. |
-| Social Butterfly | At least one distinct conversion counterpart. | Highest counterpart count. | Number of distinct conversion counterparts. |
+| Social Butterfly | At least one distinct conversion counterpart. | Highest counterpart count. | Number of different players involved in conversions, in either direction. |
 | Hot Streak | At least two conversions in the longest outgoing streak. | Highest qualifying streak count. | Number of conversions in that streak. |
 | Conversion Champion | At least one conversion made. | Highest conversion count. | Total conversions made. |
 
@@ -96,6 +96,13 @@ Comeback copy must explain that eligible play time excludes pauses,
 conversion grace, and unusable-location time. Social Butterfly counts
 conversion counterparts in either direction; do not describe it as
 outgoing conversions or all nearby players.
+
+Show a short criteria description below every trophy title. Give the winning
+count or comeback time a large yellow value with a separate measure label
+below the winner names. Hat Trick highlights faction names instead of a
+numeric value. Conversion Champion shows the total conversions made, not a
+unique-player count. Share these descriptions and measures between the live
+ceremony, demo, and screen-reader announcements.
 
 ## Ceremony
 

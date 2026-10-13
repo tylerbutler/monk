@@ -1,12 +1,13 @@
 <script lang="ts">
   import type { RoundAward, RoundResultPlayer } from "../shared/protocol";
-  import { awardAchievement, awardTiming, awardTitles } from "./award-view";
-  import { names, symbols } from "./views";
+  import { awardAchievement, awardDescriptions, awardTiming, awardTitles, comebackTimingNote } from "./award-view";
+  import { symbols } from "./views";
 
   let { award, winners, ageMs, reducedMotion, paused = false, togglePlayback }: {
     award: RoundAward; winners: readonly Pick<RoundResultPlayer, "id" | "label">[];
     ageMs: number; reducedMotion: boolean; paused?: boolean; togglePlayback?: () => void;
   } = $props();
+  const achievement = $derived(awardAchievement(award));
 
   function playbackKey(event: KeyboardEvent) {
     if (event.target !== event.currentTarget || event.key !== " " && event.key !== "Enter") return;
@@ -26,7 +27,10 @@
 {#snippet announcement()}
 <article class="award-stage" class:is-reduced={reducedMotion} data-award={award.id}
   data-many-winners={winners.length > 3} style:--award-age="{ageMs}ms" style:--award-duration="{awardTiming.announcementMs}ms">
-  <h2 class="award-title">{awardTitles[award.id]}</h2>
+  <header class="award-heading">
+    <h2 class="award-title">{awardTitles[award.id]}</h2>
+    <p class="award-description">{awardDescriptions[award.id]}</p>
+  </header>
   <svg class="award-artwork" viewBox="0 0 360 240" aria-hidden="true">
     {#if award.id === "hat_trick"}
       {#each ["rock", "paper", "scissors"] as const as faction, index}
@@ -71,11 +75,13 @@
     <ul class="award-winners">
       {#each winners as winner (winner.id)}<li data-award-winner={winner.id}>{winner.label}</li>{/each}
     </ul>
-    <p class="award-achievement">{awardAchievement(award)}</p>
+    <p class="award-achievement">
+      <strong class="award-value">{achievement.value}</strong>
+      <span class="award-measure">{achievement.label}</span>
+    </p>
     {#if award.id === "comeback_kid"}
-      <p class="award-time-note">Excludes pauses, conversion grace, and unusable-location time.</p>
+      <p class="award-time-note">{comebackTimingNote}</p>
     {/if}
-    {#if award.id === "hat_trick"}<p class="award-time-note">{names.rock}, {names.paper}, {names.scissors}. All three sides.</p>{/if}
   </div>
 </article>
 {/snippet}
