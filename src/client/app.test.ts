@@ -599,7 +599,10 @@ it("opens saved ended snapshots without autoplay", () => {
   } finally { app.cleanup(); }
 });
 
-it.each(["snapshot", "disconnect", "hidden"] as const)("stops a current ceremony on %s", cause => {
+it.each([
+  ["snapshot", false], ["disconnect", false], ["hidden", false],
+  ["snapshot", true], ["disconnect", true], ["hidden", true],
+] as const)("stops a current ceremony on %s (paused: %s)", (cause, paused) => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] });
   const { running, ended } = trophyFixture();
   const app = trophyApp(running);
@@ -607,6 +610,12 @@ it.each(["snapshot", "disconnect", "hidden"] as const)("stops a current ceremony
     app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 5,
       snapshot: ended, events: [], outcome: null, trial: null, startChecking: false });
     expect(app.root.querySelector("#award-ceremony")).not.toBeNull();
+    if (paused) {
+      vi.advanceTimersByTime(1500); flushSync();
+      app.root.querySelector<HTMLButtonElement>('[data-action="pause-awards"]')?.click();
+      flushSync();
+      expect(app.root.querySelector('[data-action="pause-awards"]')?.getAttribute("aria-pressed")).toBe("true");
+    }
     if (cause === "snapshot") app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 6,
       snapshot: ended, trial: null, startChecking: false });
     if (cause === "disconnect") app.socket.dispatchEvent(new Event("error"));
@@ -621,14 +630,104 @@ it.each(["snapshot", "disconnect", "hidden"] as const)("stops a current ceremony
   } finally { app.cleanup(); vi.useRealTimers(); }
 });
 
-it("finishes at the exact sequence deadline and cancels its timer", async () => {
+it("holds an award for six seconds before finishing and focusing results", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] });
   const { running, ended } = trophyFixture();
   const app = trophyApp(running);
   try {
     app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 5,
       snapshot: ended, events: [], outcome: null, trial: null, startChecking: false });
-    vi.advanceTimersByTime(3499); flushSync();
+    vi.advanceTimersByTime(6499); flushSync();
+    expect(app.root.querySelector("#award-ceremony")).not.toBeNull();
+    vi.advanceTimersByTime(1); flushSync(); await tick();
+    expect(app.root.querySelector("#award-ceremony")).toBeNull();
+    expect(document.activeElement?.id).toBe("round-results-heading");
+  } finally { app.cleanup(); vi.useRealTimers(); }
+});
+
+it.each(["stage", "control", "keyboard"] as const)("pauses awards from the %s and resumes without losing time", async target => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] });
+  const { running, ended } = trophyFixture();
+  const app = trophyApp(running);
+  try {
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 5,
+      snapshot: ended, events: [], outcome: null, trial: null, startChecking: false });
+    vi.advanceTimersByTime(950); flushSync();
+    const selector = target === "control" ? '[data-action="pause-awards"]' : '[data-action="toggle-award-playback"]';
+    const toggle = app.root.querySelector<HTMLElement>(selector);
+    expect(toggle).not.toBeNull();
+    expect(app.root.textContent).toContain("Tap to pause");
+    if (target === "keyboard") toggle?.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true }));
+    else toggle?.click();
+    flushSync();
+    const age = app.root.querySelector<HTMLElement>("[data-award]")?.style.getPropertyValue("--award-age");
+    expect(age).toBe("450ms");
+    expect(app.root.querySelector(selector)?.getAttribute("aria-pressed")).toBe("true");
+    expect(app.root.textContent).toContain("Paused. Tap to resume");
+    vi.advanceTimersByTime(15000); flushSync();
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 6,
+      snapshot: ended, events: [], outcome: null, trial: null, startChecking: false });
+    syncAwardDialog(app.root);
+    expect(app.root.querySelector<HTMLElement>("[data-award]")?.style.getPropertyValue("--award-age")).toBe(age);
+    expect(app.root.querySelector(selector)?.getAttribute("aria-pressed")).toBe("true");
+    const resume = app.root.querySelector<HTMLElement>(selector);
+    if (target === "keyboard") resume?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    else resume?.click();
+    flushSync();
+    expect(app.root.querySelector(selector)?.getAttribute("aria-pressed")).toBe("false");
+    vi.advanceTimersByTime(5549); flushSync();
+    expect(app.root.querySelector("#award-ceremony")).not.toBeNull();
+    vi.advanceTimersByTime(1); flushSync(); await tick();
+    expect(app.root.querySelector("#award-ceremony")).toBeNull();
+    expect(document.activeElement?.id).toBe("round-results-heading");
+  } finally { app.cleanup(); vi.useRealTimers(); }
+});
+
+it("can skip a paused ceremony and cancels its timers", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] });
+  const { running, ended } = trophyFixture();
+  const app = trophyApp(running);
+  try {
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 5,
+      snapshot: ended, events: [], outcome: null, trial: null, startChecking: false });
+    vi.advanceTimersByTime(1500); flushSync();
+    const pause = app.root.querySelector<HTMLButtonElement>('[data-action="pause-awards"]');
+    expect(pause).not.toBeNull();
+    pause?.click(); flushSync();
+    app.root.querySelector<HTMLButtonElement>('[data-action="skip-awards"]')?.click();
+    flushSync(); await tick();
+    expect(app.root.querySelector("#award-ceremony")).toBeNull();
+    expect(document.activeElement?.id).toBe("round-results-heading");
+    app.cleanup();
+    expect(vi.getTimerCount()).toBe(0);
+  } finally { app.cleanup(); vi.useRealTimers(); }
+});
+
+it("keeps every later award at full duration after repeated pauses", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] });
+  const { running, ended } = trophyFixture();
+  const snapshot = { ...ended, roundResults: { ...ended.roundResults, awards: [
+    { id: "social_butterfly" as const, winnerIds: ["p1"], value: 1 },
+    ...ended.roundResults.awards,
+  ] } };
+  const app = trophyApp(running);
+  const toggle = () => { app.root.querySelector<HTMLButtonElement>('[data-action="pause-awards"]')?.click(); flushSync(); };
+  try {
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 5,
+      snapshot, events: [], outcome: null, trial: null, startChecking: false });
+    vi.advanceTimersByTime(1500); flushSync();
+    toggle();
+    vi.advanceTimersByTime(5000); flushSync();
+    expect(app.root.querySelector("[data-award]")?.getAttribute("data-award")).toBe("social_butterfly");
+    toggle();
+    vi.advanceTimersByTime(5000); flushSync();
+    expect(app.root.querySelector("[data-award]")?.getAttribute("data-award")).toBe("conversion_champion");
+    expect(app.root.querySelector<HTMLElement>("[data-award]")?.style.getPropertyValue("--award-age")).toBe("0ms");
+    vi.advanceTimersByTime(1000); flushSync();
+    toggle();
+    vi.advanceTimersByTime(2000); flushSync();
+    toggle();
+    vi.advanceTimersByTime(4999); flushSync();
     expect(app.root.querySelector("#award-ceremony")).not.toBeNull();
     vi.advanceTimersByTime(1); flushSync(); await tick();
     expect(app.root.querySelector("#award-ceremony")).toBeNull();

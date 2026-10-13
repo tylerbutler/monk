@@ -9,6 +9,7 @@
     ceremonyStartedAt: number | null; finishCeremony: () => void; reconnect?: () => void;
   } = $props();
   let now = $state(performance.now());
+  let pausedAt = $state<number | null>(null), pausedMs = $state(0);
   let dialog = $state<HTMLDialogElement>();
   let heading = $state<HTMLHeadingElement>();
   const players = $derived(results?.players ?? roster.map(p => ({ id: p.id, label: p.label, rank: null, conversionsMade: null })));
@@ -16,7 +17,7 @@
     results.coverage === "partial" ? "Known players" : "All players");
   const awards = $derived(results?.coverage === "complete" ? results.awards : []);
   const sequence = $derived(ceremonyStartedAt === null ? { kind: "results" as const } :
-    awardSequenceAt(awards, Math.max(0, now - ceremonyStartedAt)));
+    awardSequenceAt(awards, Math.max(0, (pausedAt ?? now) - ceremonyStartedAt - pausedMs)));
   const currentWinners = $derived(sequence.kind === "award" ?
     players.filter(p => sequence.award.winnerIds.includes(p.id)) : []);
   const announcement = $derived(sequence.kind === "award" ?
@@ -28,12 +29,25 @@
     finishCeremony();
     void tick().then(() => heading?.focus({ preventScroll: true }));
   }
+  function togglePlayback() {
+    const time = performance.now();
+    now = time;
+    if (pausedAt === null) {
+      if (ceremonyStartedAt === null) return;
+      if (time - ceremonyStartedAt - pausedMs >= awardSequenceDuration(awards)) { finish(); return; }
+      pausedAt = time;
+    } else {
+      pausedMs += time - pausedAt;
+      pausedAt = null;
+    }
+  }
   $effect(() => {
     const started = ceremonyStartedAt, entries = awards, duration = awardSequenceDuration(entries);
-    if (started === null || !duration) return;
+    const paused = pausedAt, heldMs = pausedMs;
+    if (started === null || !duration || paused !== null) return;
     let timer: ReturnType<typeof setTimeout>;
     const frame = () => {
-      const time = performance.now(), age = Math.max(0, time - started);
+      const time = performance.now(), age = Math.max(0, time - started - heldMs);
       now = time;
       if (age >= duration) { finish(); return; }
       const phase = awardSequenceAt(entries, age);
@@ -101,7 +115,8 @@
     {#if sequence.kind === "intro"}
       <div class="award-stage award-introduction"><h2>Round complete</h2></div>
     {:else}
-      <AwardAnnouncement award={sequence.award} winners={currentWinners} ageMs={sequence.ageMs} reducedMotion={false} />
+      <AwardAnnouncement award={sequence.award} winners={currentWinners} ageMs={sequence.ageMs} reducedMotion={false}
+        paused={pausedAt !== null} {togglePlayback} />
     {/if}
   </dialog>
 {/if}

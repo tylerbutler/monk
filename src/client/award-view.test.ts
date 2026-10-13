@@ -18,13 +18,14 @@ afterEach(() => { flushSync(() => { for (const view of mounted.splice(0)) void u
 it("uses exact intro, announcement, and final-results boundaries", () => {
   expect(awardSequenceAt(awards, 499)).toEqual({ kind: "intro" });
   expect(awardSequenceAt(awards, 500)).toEqual({ kind: "award", award: awards[0], index: 0, ageMs: 0 });
-  expect(awardSequenceAt(awards, 3500)).toEqual({ kind: "award", award: awards[1], index: 1, ageMs: 0 });
-  expect(awardSequenceAt(awards, 15499)).toEqual({ kind: "award", award: awards[4], index: 4, ageMs: 2999 });
-  expect(awardSequenceAt(awards, 15500)).toEqual({ kind: "results" });
+  expect(awardSequenceAt(awards, 6499)).toEqual({ kind: "award", award: awards[0], index: 0, ageMs: 5999 });
+  expect(awardSequenceAt(awards, 6500)).toEqual({ kind: "award", award: awards[1], index: 1, ageMs: 0 });
+  expect(awardSequenceAt(awards, 30499)).toEqual({ kind: "award", award: awards[4], index: 4, ageMs: 5999 });
+  expect(awardSequenceAt(awards, 30500)).toEqual({ kind: "results" });
   expect(awardSequenceAt([], 0)).toEqual({ kind: "results" });
   expect(awardSequenceDuration([])).toBe(0);
-  expect(awardSequenceDuration([awards[0]])).toBe(3500);
-  expect(awardSequenceDuration(awards)).toBe(15500);
+  expect(awardSequenceDuration([awards[0]])).toBe(6500);
+  expect(awardSequenceDuration(awards)).toBe(30500);
   expect(awardSequenceAt(awards, 500)).toEqual({ kind: "award", award: awards[0], index: 0, ageMs: 0 });
 });
 

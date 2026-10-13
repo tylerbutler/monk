@@ -81,7 +81,8 @@
         {:else if mode === "full" && sequence.kind === "intro"}
           <div class="award-stage award-introduction"><h2>Round complete</h2></div>
         {:else if currentAward}
-          <AwardAnnouncement award={currentAward} {winners} ageMs={currentAge} reducedMotion={preference === "reduced" || systemReduced} />
+          <AwardAnnouncement award={currentAward} {winners} ageMs={currentAge} reducedMotion={preference === "reduced" || systemReduced}
+            paused={!playing} togglePlayback={togglePlayback} />
         {:else}
           <p class="unearned">This trophy was not earned in this fixture</p>
         {/if}
@@ -108,7 +109,7 @@
       <label for="award-preference">Motion preference</label>
         <select id="award-preference" bind:value={preference} onchange={showPreview}><option value="system">System preference</option><option value="reduced">Reduced motion</option></select>
       {#if systemReduced}<p class="preview-note">System reduced motion is on. Travel is off in both modes.</p>{/if}
-      <p class="preview-note">500 ms introduction, then 3,000 ms per earned award. No game connection, location, or sound.</p>
+      <p class="preview-note">500 ms introduction, then 6,000 ms per earned award. Tap the stage to pause or resume. No game connection, location, or sound.</p>
     </aside>
   </div>
 </main>

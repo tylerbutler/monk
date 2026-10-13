@@ -125,17 +125,24 @@ Avoid conversion bubbles, faction-colored screen takeovers, hand stamps,
 and countdown rings. Keep the trophy finale specific to the champion
 category, even when the champion won an earlier award.
 
-The introduction lasts 500 ms. Each announcement lasts 3,000 ms:
+The introduction lasts 500 ms. Each announcement lasts 6,000 ms of playback.
+The user approved this longer duration and tap-to-pause/resume after the
+initial implementation:
 
 | Announcement age | Action |
 | --- | --- |
 | 0-200 ms | Show the category title and its still stage composition. |
 | 200-850 ms | Run the category entrance. |
 | 700-1,000 ms | Reveal winner names and the achievement. |
-| 1,000-2,800 ms | Hold the composition still for reading. |
-| 2,800-3,000 ms | Exit into the next announcement or the results. |
+| 1,000-5,800 ms | Hold the composition still for reading. |
+| 5,800-6,000 ms | Exit into the next announcement or the results. |
 
-Five earned categories take 15.5 seconds including the introduction.
+Five earned categories take 30.5 seconds of playback including the introduction.
+Show a small "Tap to pause" control below each award. Tapping the award
+stage or the control freezes both motion and sequence age. Show
+"Paused. Tap to resume" while paused; another tap resumes from that age.
+Support Enter and Space on the stage and native keyboard activation on
+the control. Pauses extend the ceremony without shortening later awards.
 Avoid bouncing, looping, screen shake, and flashes. This feature does
 not add audio or alter the existing sound preferences.
 
@@ -322,8 +329,10 @@ messages free of results.
 Client checks must cover skip and focus, reduced motion, shared-winner
 names, all-player rows, duplicate updates, HUD reparenting, hidden tabs,
 disconnects, initial ended snapshots, refreshes, and room changes.
-Use controlled clocks to check the 500 ms introduction, 3,000 ms
-announcements, and 15,500 ms maximum normal sequence.
+Use controlled clocks to check the 500 ms introduction, 6,000 ms
+announcements, and 30,500 ms normal sequence, excluding user pauses.
+Check pause/resume from the stage, its hint control, and the keyboard;
+preserve paused age across duplicate updates and HUD reparenting.
 
 Inspect phone and desktop captures together, including long names and
 large ties. Confirm that each category has its own entrance and that

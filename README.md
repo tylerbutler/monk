@@ -236,8 +236,10 @@ The round ends when its timer expires or the host selects **End round**.
 
 Complete rounds award Hat Trick, Comeback Kid, Social Butterfly, Hot Streak,
 and Conversion Champion when players qualify. Ties share trophies, and one
-player can earn several. Each category has its own short entrance animation;
-**Skip to results** opens the full list. Reduced motion keeps the award
+player can earn several. Each category has its own short entrance animation
+and stays on screen for six seconds. Tap the award or **Tap to pause** to
+freeze its animation and timer; tap again to resume from the same point.
+**Skip to results** opens the full list, even while paused. Reduced motion keeps the award
 information without large movement. Reconnecting opens saved results
 without replaying the ceremony.
 

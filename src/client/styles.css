@@ -248,8 +248,14 @@ progress::-moz-progress-bar { background: var(--accent); }
 .conversion-impact-ring { animation-delay: calc(540ms - var(--motion-age, 0ms)); }
 .conversion-reveal-copy { animation-delay: calc(600ms - var(--motion-age, 0ms)); }
 .radar-center[data-current="false"] { fill: var(--surface); stroke: var(--ink); stroke-dasharray: 2 2; }
-.award-stage { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; width: 100%; min-width: 0; min-height: 28rem; padding: 1.5rem; background: var(--ink); color: #fff; overflow: hidden; text-align: center; animation: award-exit 200ms linear both paused; animation-delay: calc(2800ms - var(--award-age, 1500ms)); }
+.award-stage { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; width: 100%; min-width: 0; min-height: 28rem; padding: 1.5rem; background: var(--ink); color: #fff; overflow: hidden; text-align: center; animation: award-exit 200ms linear both paused; animation-delay: calc(var(--award-duration) - 200ms - var(--award-age, 1500ms)); }
 .award-stage ::selection { color: var(--ink); background: var(--faction-paper); }
+.award-playback { width: 100%; max-width: 50rem; margin: auto; background: var(--ink); color: #fff; }
+.award-tap-target { cursor: pointer; }
+.award-tap-target:focus-visible { outline: 3px solid var(--faction-paper); outline-offset: -3px; }
+.award-playback-hint { display: block; min-height: 2.75rem; margin: .5rem auto 0; padding: .5rem .75rem; border-color: transparent; background: transparent; color: #fff; font-size: .85rem; }
+.award-playback-hint:hover, .award-playback-hint[aria-pressed="true"] { background: transparent; color: var(--faction-paper); }
+.award-playback-hint:focus-visible { outline: 3px solid var(--faction-paper); outline-offset: 3px; }
 .award-title { margin: 0; font-size: clamp(1.4rem, 5vw, 2.25rem); font-weight: 650; }
 .award-artwork { display: block; flex: 0 1 auto; width: min(100%, 23rem); height: clamp(8rem, 27dvh, 15rem); overflow: hidden; color: var(--faction-paper); }
 .award-winner-copy { width: 100%; min-width: 0; }
@@ -283,7 +289,7 @@ progress::-moz-progress-bar { background: var(--accent); }
 .award-dialog-controls button { background: #fff; color: var(--ink); margin: 0; }
 .award-dialog-controls button:hover { background: var(--faction-paper); }
 .award-dialog-controls button:focus-visible { outline: 3px solid var(--faction-paper); outline-offset: 4px; }
-.award-dialog .award-stage { min-height: calc(100dvh - 7rem); max-width: 50rem; margin: auto; }
+.award-dialog .award-stage { min-height: calc(100dvh - 11rem); max-width: 50rem; margin: auto; }
 .award-introduction { animation: none; }
 .award-introduction h2 { font-size: clamp(2rem, 9vw, 4rem); }
 .award-live-status { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

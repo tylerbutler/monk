@@ -4,7 +4,7 @@ export const awardTitles: Record<AwardId, string> = {
   hat_trick: "Hat Trick", comeback_kid: "Comeback Kid", social_butterfly: "Social Butterfly",
   hot_streak: "Hot Streak", conversion_champion: "Conversion Champion",
 };
-export const awardTiming = { introMs: 500, announcementMs: 3000 };
+export const awardTiming = { introMs: 500, announcementMs: 6000 };
 export type AwardSequence = { kind: "intro" } |
   { kind: "award"; award: RoundAward; index: number; ageMs: number } | { kind: "results" };
 

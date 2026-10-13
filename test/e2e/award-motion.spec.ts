@@ -42,13 +42,14 @@ test("renders all five compositions at entrance, settle, hold, and exit", async 
   const categories = ["hat_trick", "comeback_kid", "social_butterfly", "hot_streak", "conversion_champion"];
   for (const category of categories) {
     await page.getByLabel("Award category").selectOption(category);
-    for (const age of [400, 850, 1500, 2900]) {
+    for (const age of [400, 850, 1500, 2900, 5800, 5900]) {
       await seek(page, age);
       await expect(page.locator("[data-award]")).toHaveAttribute("data-award", category);
       await expect(page.locator(".award-artwork")).toHaveCount(1);
       await expect(page.locator("[data-award-winner]")).not.toHaveCount(0);
       if (age === 1500) await expect(page.locator(".award-winner-copy")).toHaveCSS("opacity", "1");
-      if (age === 2900) await expect(page.locator("[data-award]")).toHaveCSS("opacity", "0.5");
+      if (age === 2900 || age === 5800) await expect(page.locator("[data-award]")).toHaveCSS("opacity", "1");
+      if (age === 5900) await expect(page.locator("[data-award]")).toHaveCSS("opacity", "0.5");
     }
   }
   await expect(page.locator(".conversion-takeover, .conversion-bubble, .conversion-hold-countdown")).toHaveCount(0);
@@ -122,6 +123,25 @@ test("replays, pauses, resumes, and seeks backwards without stale effects", asyn
   await expect(page.locator(".award-winner-copy")).toHaveCSS("opacity", "0");
 });
 
+test("pauses the stage on tap or keyboard and resumes with a visible hint", async ({ page }) => {
+  await page.clock.install();
+  await page.clock.pauseAt(new Date());
+  await page.getByRole("button", { name: "Replay award", exact: true }).click();
+  await page.clock.runFor(400);
+  await page.locator(".award-artwork").click();
+  const paused = await page.getByLabel("Sequence position").inputValue();
+  const trophy = await motion(page, ".award-trophy");
+  await expect(page.getByRole("button", { name: "Paused. Tap to resume", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.clock.runFor(10000);
+  await expect(page.getByLabel("Sequence position")).toHaveValue(paused);
+  expect(await motion(page, ".award-trophy")).toEqual(trophy);
+  await page.getByRole("button", { name: "Resume award animation", exact: true }).focus();
+  await page.keyboard.press("Space");
+  await expect(page.getByRole("button", { name: "Tap to pause", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await page.clock.runFor(100);
+  expect(Number(await page.getByLabel("Sequence position").inputValue())).toBeGreaterThan(Number(paused));
+});
+
 test("system and forced reduced motion remove travel mid-preview without changing names or age", async ({ page }) => {
   for (const category of ["hat_trick", "comeback_kid", "social_butterfly", "hot_streak", "conversion_champion"]) {
     await page.emulateMedia({ reducedMotion: "no-preference" });
@@ -157,9 +177,9 @@ test("plays the exact full ceremony into lasting results and stops on fixture ch
   await page.clock.pauseAt(new Date());
   await page.getByRole("button", { name: "Play full ceremony", exact: true }).click();
   await expect(page.locator(".award-introduction")).toBeVisible();
-  await expect(page.getByLabel("Sequence position")).toHaveAttribute("max", "15500");
-  await page.clock.runFor(15520);
-  await expect(page.getByLabel("Sequence position")).toHaveValue("15500");
+  await expect(page.getByLabel("Sequence position")).toHaveAttribute("max", "30500");
+  await page.clock.runFor(30520);
+  await expect(page.getByLabel("Sequence position")).toHaveValue("30500");
   await expect(page.locator("[data-result-player]")).toHaveCount(4);
   await expect(page.locator("[data-award]")).toHaveCount(0);
   await page.getByRole("button", { name: "Play full ceremony", exact: true }).click();

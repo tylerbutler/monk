@@ -1,12 +1,18 @@
 <script lang="ts">
   import type { RoundAward, RoundResultPlayer } from "../shared/protocol";
-  import { awardAchievement, awardTitles } from "./award-view";
+  import { awardAchievement, awardTiming, awardTitles } from "./award-view";
   import { names, symbols } from "./views";
 
-  let { award, winners, ageMs, reducedMotion }: {
+  let { award, winners, ageMs, reducedMotion, paused = false, togglePlayback }: {
     award: RoundAward; winners: readonly Pick<RoundResultPlayer, "id" | "label">[];
-    ageMs: number; reducedMotion: boolean;
+    ageMs: number; reducedMotion: boolean; paused?: boolean; togglePlayback?: () => void;
   } = $props();
+
+  function playbackKey(event: KeyboardEvent) {
+    if (event.target !== event.currentTarget || event.key !== " " && event.key !== "Enter") return;
+    event.preventDefault();
+    if (!event.repeat) togglePlayback?.();
+  }
 </script>
 
 {#snippet trophy()}
@@ -17,8 +23,9 @@
   <path d="M-20-33H-11V-15C-11-5-8 2-3 6" fill="none" stroke="#171719" stroke-width="5" />
 {/snippet}
 
+{#snippet announcement()}
 <article class="award-stage" class:is-reduced={reducedMotion} data-award={award.id}
-  data-many-winners={winners.length > 3} style:--award-age="{ageMs}ms">
+  data-many-winners={winners.length > 3} style:--award-age="{ageMs}ms" style:--award-duration="{awardTiming.announcementMs}ms">
   <h2 class="award-title">{awardTitles[award.id]}</h2>
   <svg class="award-artwork" viewBox="0 0 360 240" aria-hidden="true">
     {#if award.id === "hat_trick"}
@@ -71,3 +78,19 @@
     {#if award.id === "hat_trick"}<p class="award-time-note">{names.rock}, {names.paper}, {names.scissors}. All three sides.</p>{/if}
   </div>
 </article>
+{/snippet}
+
+{#if togglePlayback}
+  <div class="award-playback">
+    <div class="award-tap-target" role="button" tabindex="0" data-action="toggle-award-playback"
+      aria-label={paused ? "Resume award animation" : "Pause award animation"} aria-pressed={paused}
+      onclick={togglePlayback} onkeydown={playbackKey}>
+      {@render announcement()}
+    </div>
+    <button type="button" class="award-playback-hint" data-action="pause-awards" aria-pressed={paused} onclick={togglePlayback}>
+      {paused ? "Paused. Tap to resume" : "Tap to pause"}
+    </button>
+  </div>
+{:else}
+  {@render announcement()}
+{/if}
