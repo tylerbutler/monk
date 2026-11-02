@@ -7,3 +7,6 @@ typescript_declarations = true
 
 [dependencies]
 gleam_stdlib = ">= 0.70.0 and < 2.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+beryl_protocol = { git = "https://github.com/tylerbutler/beryl.git", ref = "0a778cafec53dfff0725de8b53e2da20d58da032", path = "packages/beryl_protocol" }
+roost = { git = "https://github.com/tylerbutler/roost.git", ref = "17a2db06b147c82a77fc76cbbc21fee6fe043c7e" }
