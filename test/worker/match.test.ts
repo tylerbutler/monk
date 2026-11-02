@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { SELF, reset, runInDurableObject } from "cloudflare:test";
 import { loadRecord } from "../../src/worker/storage";
 import { closeSockets, connect, createMatch, hostCommand, joinMatch, probe, runningMatch } from "./helpers";
+import { receivePush } from "./phoenix-transport";
 import { parameters } from "../fixtures";
 
 afterEach(async () => {
@@ -182,8 +183,9 @@ it("expires both influence roles at thirty seconds and keeps last-known points a
   snapshot = (await host.next("snapshot")).snapshot;
   expect(snapshot.outgoing).toBeNull();
   expect(snapshot.radar?.reference).toMatchObject({ playerId: ids[0], active: false });
-  host.send({ version: 1, type: "position", report: { seq: 5, capturedAtMs: now,
-    latitude: 0, longitude: 0, accuracyM: 1, reportedAgeMs: 0 } });
+  host.socket.send(JSON.stringify([null, "freshness-heartbeat", "phoenix", "heartbeat", {}]));
+  await receivePush(host.channel.push("position", { version: 1, type: "position", report: { seq: 5, capturedAtMs: now,
+    latitude: 0, longitude: 0, accuracyM: 1, reportedAgeMs: 0 } }));
   now += 30000;
   host.send({ version: 1, type: "snapshot_request" });
   expect((await host.next("snapshot")).snapshot.radar?.reference).toMatchObject({ ageMs: 30000, active: false });

@@ -431,13 +431,19 @@ export class MatchAuthority extends DurableObject<Env> {
         this.connections.delete(socket); this.protocols.delete(socket);
         socket.close(1009, "Frame too large"); return;
       }
-      const result = channels.receive_text(this.protocols.get(socket)!, frame, Date.now());
-      if (result instanceof GleamError) {
-        if (!channels.HostError$isDecode(result[0])) await this.failConnection(socket);
-        return;
-      }
-      try { await this.applyChannel(socket, unwrap(result)); }
-      catch { await this.failConnection(socket); }
+      try {
+        const deadline = channels.next_deadline(this.protocols.get(socket)!);
+        if (deadline >= 0 && Date.now() >= deadline) {
+          await this.applyChannel(socket, unwrap(channels.expire(this.protocols.get(socket)!, Date.now())));
+          if (!this.connections.has(socket)) return;
+        }
+        const result = channels.receive_text(this.protocols.get(socket)!, frame, Date.now());
+        if (result instanceof GleamError) {
+          if (!channels.HostError$isDecode(result[0])) await this.failConnection(socket);
+          return;
+        }
+        await this.applyChannel(socket, unwrap(result));
+      } catch { await this.failConnection(socket); }
     });
   }
   private async dispatchMessage(socket: WebSocket, actor: VerifiedActor, message: ClientMessage,

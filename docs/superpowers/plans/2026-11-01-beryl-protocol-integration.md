@@ -463,8 +463,12 @@ handoff. Report software checks separately from physical phone testing.
 Update the spec/plan status after implementation, not before.
 No implementation or runtime verification has occurred during plan authoring.
 
-Implementation verification passed: 332 unit tests, 117 Workers-runtime tests,
+Implementation verification passed: 332 unit tests, 120 Workers-runtime tests,
 and 188 Chromium/WebKit browser tests. Type checks, production build, bundle
 dry run, bridge formatting, and `git diff --check` passed. The bundle includes
 the portable protocol and Roost modules and excludes the BEAM runtime.
+Whole-change code review found one deadline defect. A late heartbeat could
+renew an expired connection before a delayed alarm; the host now checks
+expiry before receiving a frame. Deadline-boundary regression tests and the
+complete checks passed after the fix. No minor findings remain deferred.
 No deployment or physical phone test was performed.

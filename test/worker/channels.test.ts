@@ -101,6 +101,32 @@ it("valid position traffic cannot keep a heartbeat-dead connection alive", async
   expect(await runInDurableObject(stub, instance => (Reflect.get(instance, "protocols") as Map<unknown, unknown>).size)).toBe(0);
   expect((await runInDurableObject(stub, (_, state) => loadRecord(state.storage)))?.checkpoint.players).toHaveLength(1);
 });
+it.each([
+  { elapsed: 60_000, expected: "reply" },
+  { elapsed: 60_001, expected: "closed" },
+  { elapsed: 80_000, expected: "closed" },
+])("checks the heartbeat deadline before a frame at +$elapsed ms, even with a delayed alarm", async ({ elapsed, expected }) => {
+  let now = Date.now();
+  vi.spyOn(Date, "now").mockImplementation(() => now);
+  const started = now, credentials = await createMatch(), client = await connect(credentials);
+  const observed = new Promise<string>(resolve => {
+    client.socket.addEventListener("close", () => resolve("closed"), { once: true });
+    client.socket.addEventListener("message", event => {
+      const frame = JSON.parse(event.data as string);
+      if (frame[1] === "deadline-heartbeat" && frame[3] === "phx_reply") resolve("reply");
+    });
+  });
+  now = started + elapsed;
+  client.socket.send(JSON.stringify([null, "deadline-heartbeat", "phoenix", "heartbeat", {}]));
+  expect(await observed).toBe(expected);
+  const stub = env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode));
+  await runDurableObjectAlarm(stub);
+  expect(await runInDurableObject(stub, instance => (Reflect.get(instance, "protocols") as Map<unknown, unknown>).size))
+    .toBe(expected === "closed" ? 0 : 1);
+  const record = await runInDurableObject(stub, (_, state) => loadRecord(state.storage));
+  expect(record?.checkpoint.players).toHaveLength(1);
+  expect(record?.outcomes).toEqual([]);
+});
 it("eviction preserves membership but resets authority to paused", async () => {
   const { credentials, host, ids } = await runningMatch();
   const stub = env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode));
