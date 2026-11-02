@@ -2,7 +2,7 @@ import { SELF } from "cloudflare:test";
 import { Socket } from "phoenix";
 import type { Channel, Push } from "phoenix";
 import { joinReplySchema, parseServerMessage } from "../../src/shared/protocol";
-import type { ClientMessage, ServerMessage, SessionCredentials } from "../../src/shared/protocol";
+import type { ClientMessage, JoinReply, ServerMessage, SessionCredentials } from "../../src/shared/protocol";
 
 export const transports = new Set<WorkerTransport>();
 export class WorkerTransport {
@@ -77,6 +77,7 @@ export async function openChannel(credentials: SessionCredentials, topic = `matc
   const socket = new Socket(`wss://monk.test/api/matches/${credentials.matchCode}/socket`, {
     transport: Transport as unknown as typeof WebSocket,
     heartbeatIntervalMs: 25_000,
+    rejoinAfterMs: () => 0,
   });
   clients.add(socket);
   socket.connect();
@@ -91,8 +92,13 @@ export async function openChannel(credentials: SessionCredentials, topic = `matc
     for (const wake of waiters) wake();
   };
   for (const event of ["snapshot", "update", "clock_reply", "clock_ready", "trial_sample", "error"]) channel.on(event, accept);
-  let joined;
-  try { joined = joinReplySchema.parse(await receivePush(channel.join())); }
+  let joined: JoinReply, joinCount = 0;
+  const join = channel.join();
+  join.receive("ok", raw => {
+    joined = joinReplySchema.parse(raw);
+    if (joinCount++ > 0) accept(joined.state);
+  });
+  try { await receivePush(join); }
   catch (error) { socket.disconnect(); clients.delete(socket); throw error; }
   async function next<T extends ServerMessage["type"]>(type: T): Promise<Extract<ServerMessage, { type: T }>> {
     for (;;) {
@@ -109,7 +115,7 @@ export async function openChannel(credentials: SessionCredentials, topic = `matc
     channel.push(message.type, message, 5000).receive("ok", accept).receive("error", accept);
   }
   return { get socket() { return transport.worker!; }, get transport() { return transport; },
-    phoenix: socket, channel, joined, messages, next, send };
+    phoenix: socket, channel, get joined() { return joined; }, messages, next, send };
 }
 export function closeChannels() {
   for (const socket of clients) socket.disconnect();

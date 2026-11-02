@@ -80,7 +80,7 @@ export class MatchAuthority extends DurableObject<Env> {
             if (this.joined(socket)) await this.snapshot(socket);
             else if (this.connections.has(socket)) {
               this.attachment(socket).actor = null;
-              this.attachment(socket).authDeadlineMs = now + 5000;
+              if (connection.actor) this.attachment(socket).authDeadlineMs = now + 5000;
               this.checkpointConnection(socket);
             }
           } catch { await this.failConnection(socket); }
