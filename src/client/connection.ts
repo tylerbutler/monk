@@ -1,144 +1,213 @@
-import { parseClientMessage, parseServerMessage } from "../shared/protocol";
+import { Socket } from "phoenix";
+import type { Channel, Push } from "phoenix";
+import { joinReplySchema, parseClientMessage, parseServerMessage } from "../shared/protocol";
 import type { ClientMessage, ConnectionHandlers, MatchConnection, SessionCredentials } from "../shared/protocol";
 
+type CancellablePush = Push & { cancelTimeout(): void; cancelRefEvent(): void };
+
 export function connectMatch(credentials: SessionCredentials, handlers: ConnectionHandlers): MatchConnection {
-  let socket: WebSocket, stopped = false, authenticated = false, needsSnapshot = true;
+  const socket = new Socket(`/api/matches/${credentials.matchCode}/socket`, {
+    transport: WebSocket, heartbeatIntervalMs: 25_000, timeout: 5000,
+  });
+  let channel: Channel, stopped = false, baseline = false, generation = 0, restarting = false;
   let streamId: string | null = null, cursor = 0;
-  let reconnect: ReturnType<typeof setTimeout> | null = null;
-  let backoff = 1000;
+  let snapshotRequest: object | null = null;
   let clockProbe: { nonce: string; wallMs: number; monotonicMs: number } | null = null;
   let probeTimeout: ReturnType<typeof setTimeout> | null = null;
-  const pending = new Map<string, { message: Extract<ClientMessage, { type: "host_command" }>; attempts: number }>();
-  function status(state: "connecting" | "connected" | "reconnecting" | "failed", reason: string | null) {
+  const attempts = new Map<string, number>();
+  const requests = new Map<string, object>();
+  const unconfirmed = new Set<string>();
+  const activePushes = new Set<CancellablePush>();
+
+  function status(state: "connecting" | "connected" | "reconnecting" | "failed", reason: string | null = null) {
     if (!stopped) handlers.onStatus({ state, reason });
   }
-  function rawSend(message: ClientMessage) {
-    if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
-  }
-  function requestProbe() {
-    if (!authenticated || stopped) return;
+  function ready() { return !stopped && baseline && socket.isConnected() && channel.state === "joined"; }
+  function clearProbe() {
+    clockProbe = null;
     if (probeTimeout !== null) clearTimeout(probeTimeout);
-    clockProbe = { nonce: crypto.randomUUID(), wallMs: Date.now(), monotonicMs: performance.now() };
-    status("connected", "Checking the phone clock.");
-    rawSend({ version: 1, type: "clock_probe", nonce: clockProbe.nonce, clientSendMs: clockProbe.wallMs });
-    probeTimeout = setTimeout(() => {
-      clockProbe = null; probeTimeout = null;
-      status("connected", "Diagnostic clock check timed out. Location sharing is still available.");
-    }, 5000);
+    probeTimeout = null;
   }
-  function open() {
-    if (stopped) return;
-    authenticated = false; needsSnapshot = true; streamId = null; cursor = 0;
-    status(backoff > 1000 ? "reconnecting" : "connecting", null);
-    const url = new URL(`/api/matches/${credentials.matchCode}/socket`, window.location.origin);
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    socket = new WebSocket(url);
-    socket.addEventListener("open", () => rawSend({
-      version: 1, type: "authenticate", hostToken: credentials.hostToken, playerToken: credentials.playerToken,
-      supportsFactionHistory: true, supportsRoundResults: true,
-    }));
-    socket.addEventListener("message", event => {
-      if (stopped) return;
-      let raw: unknown;
-      try { raw = JSON.parse(String(event.data)); } catch { status("failed", "Server sent invalid JSON. Reconnect."); return; }
-      const parsed = parseServerMessage(raw);
-      if (!parsed.ok) { status("failed", parsed.error); return; }
-      const message = parsed.value;
-      const changed = streamId !== message.streamId;
-      if (changed) { streamId = message.streamId; cursor = 0; needsSnapshot = true; }
-      if (message.type === "snapshot") {
-        if (message.streamSeq <= cursor) return;
-        cursor = message.streamSeq; needsSnapshot = false;
-        if (message.startChecking) {
-          for (const command of pending.values()) if (command.message.command.type === "start") command.attempts = 1;
-        }
-        handlers.onMessage(message);
-        return;
-      }
-      if (message.type !== "authenticated" && (needsSnapshot || message.streamSeq !== cursor + 1)) {
-        rawSend({ version: 1, type: "snapshot_request" });
-        if (message.type === "error" && !authenticated) {
-          handlers.onMessage(message); status("failed", message.reason);
-        }
-        return;
-      }
-      cursor = message.streamSeq;
-      if (message.type === "authenticated") {
-        authenticated = true; backoff = 1000; status("connected", null);
-        for (const { message: command } of pending.values()) rawSend(command);
-      }
-      if (message.type === "clock_reply") {
-        if (!clockProbe || message.nonce !== clockProbe.nonce || message.clientSendMs !== clockProbe.wallMs ||
-          Math.abs((Date.now() - clockProbe.wallMs) - (performance.now() - clockProbe.monotonicMs)) > 100) {
-          clockProbe = null;
-          if (probeTimeout !== null) clearTimeout(probeTimeout);
-          probeTimeout = null;
-          status("connected", "Diagnostic clock reply is invalid. Retry the measurement clock check."); return;
-        }
-        rawSend({ version: 1, type: "clock_confirm", nonce: message.nonce, clientReceiveMs: Date.now() });
-      }
-      if (message.type === "clock_ready") {
-        clockProbe = null;
-        if (probeTimeout !== null) clearTimeout(probeTimeout);
-        probeTimeout = null; status("connected", null);
-      }
-      if (message.type === "update") {
-        if (message.outcome) pending.delete(message.outcome.commandId);
-        if (message.startChecking) {
-          for (const command of pending.values()) if (command.message.command.type === "start") command.attempts = 1;
-        }
-      }
-      if (message.type === "error") {
-        if (message.code === "clock_invalid") {
-          clockProbe = null;
-          if (probeTimeout !== null) clearTimeout(probeTimeout);
-          probeTimeout = null;
-          status("connected", `Diagnostic clock: ${message.reason}`);
-        }
-        if (message.code === "expired" || message.code === "unauthorized" || message.code === "auth_timeout") {
-          status("failed", message.reason); handlers.onMessage(message); close(); return;
-        }
-      }
-      handlers.onMessage(message);
-    });
-    socket.addEventListener("error", () => status("reconnecting", "Connection failed. Location collection is stopped."));
-    socket.addEventListener("close", event => {
-      authenticated = false;
-      clockProbe = null;
-      if (probeTimeout !== null) clearTimeout(probeTimeout);
-      probeTimeout = null;
-      if (stopped) return;
-      if (event.code === 1008) { status("failed", "Session ended or credentials expired."); close(); return; }
-      status("reconnecting", "Connection lost. Waiting to reconnect.");
-      reconnect = setTimeout(open, backoff); backoff = Math.min(10000, backoff * 2);
-    });
+  function track(push: Push): Push {
+    const request = push as CancellablePush;
+    activePushes.add(request);
+    for (const result of ["ok", "error", "timeout"] as const) push.receive(result, () => activePushes.delete(request));
+    return push;
+  }
+  function cancelRequests() {
+    // Phoenix 1.8 has no public per-push cancellation API.
+    for (const push of activePushes) { push.cancelTimeout(); push.cancelRefEvent(); }
+    activePushes.clear();
+  }
+  function invalidate() {
+    generation += 1; baseline = false; snapshotRequest = null; requests.clear(); clearProbe(); cancelRequests();
+    status("reconnecting", "Connection lost. Location sharing is stopped.");
   }
   function close() {
-    stopped = true;
-    clearInterval(retryInterval);
-    if (reconnect !== null) clearTimeout(reconnect);
-    if (probeTimeout !== null) clearTimeout(probeTimeout);
-    pending.clear(); socket.close();
+    if (stopped) return;
+    stopped = true; generation += 1; baseline = false;
+    requests.clear(); attempts.clear(); unconfirmed.clear(); snapshotRequest = null; clearProbe(); cancelRequests();
+    channel.leave(); socket.disconnect();
   }
-  const retryInterval = setInterval(() => {
-    if (!authenticated || stopped) return;
-    for (const command of pending.values()) {
-      if (command.attempts >= 5) { status("failed", "Command reply is missing. Reconnect to retry its existing ID."); continue; }
-      command.attempts += 1; rawSend(command.message);
+  function fail(reason: string) { status("failed", reason); close(); }
+  function reconnect() {
+    if (stopped || restarting) return;
+    restarting = true; invalidate();
+    socket.disconnect(() => {
+      restarting = false;
+      if (stopped) return;
+      if (channel.state === "closed") createChannel();
+      socket.connect();
+    });
+  }
+  function becameReady() {
+    if (stopped) return;
+    baseline = true; snapshotRequest = null;
+    status("connected"); handlers.onReady();
+  }
+  function accept(raw: unknown) {
+    if (stopped || channel.state !== "joined" || !socket.isConnected()) return;
+    if (raw && typeof raw === "object" && Object.keys(raw).length === 0) return;
+    const parsed = parseServerMessage(raw);
+    if (!parsed.ok) { fail(parsed.error); return; }
+    const message = parsed.value;
+    if (message.type === "error" && ["expired", "unauthorized", "auth_timeout"].includes(message.code)) {
+      handlers.onMessage(message); fail(message.reason); return;
     }
-  }, 1500);
-  open();
+    if (message.type === "snapshot") {
+      if (message.streamId === streamId && message.streamSeq <= cursor) return;
+      const recovering = !baseline;
+      streamId = message.streamId; cursor = message.streamSeq;
+      handlers.onMessage(message);
+      if (recovering) becameReady();
+      return;
+    }
+    if (message.streamId === streamId && message.streamSeq <= cursor) return;
+    if (!baseline || message.streamId !== streamId || message.streamSeq !== cursor + 1) {
+      requestSnapshot(); return;
+    }
+    cursor = message.streamSeq;
+    if (message.type === "update" && message.outcome) {
+      requests.delete(message.outcome.commandId); attempts.delete(message.outcome.commandId); unconfirmed.delete(message.outcome.commandId);
+    }
+    if (message.type === "error" && message.commandId && message.code !== "storage_failed") {
+      requests.delete(message.commandId); attempts.delete(message.commandId); unconfirmed.delete(message.commandId);
+    }
+    if (message.type === "clock_reply") {
+      if (!clockProbe || message.nonce !== clockProbe.nonce || message.clientSendMs !== clockProbe.wallMs ||
+        Math.abs((Date.now() - clockProbe.wallMs) - (performance.now() - clockProbe.monotonicMs)) > 100) {
+        clearProbe(); status("connected", "Diagnostic clock reply is invalid. Retry the measurement clock check."); return;
+      }
+      push({ version: 1, type: "clock_confirm", nonce: message.nonce, clientReceiveMs: Date.now() });
+    }
+    if (message.type === "clock_ready") { clearProbe(); status("connected"); }
+    if (message.type === "error" && message.code === "clock_invalid") {
+      clearProbe(); status("connected", `Diagnostic clock: ${message.reason}`);
+    }
+    handlers.onMessage(message);
+  }
+  function requestSnapshot() {
+    if (stopped || snapshotRequest || !socket.isConnected() || channel.state !== "joined") return;
+    baseline = false;
+    status("reconnecting", "Recovering private match state. Location sharing is stopped.");
+    const ticket = {}, current = generation;
+    snapshotRequest = ticket;
+    const valid = () => !stopped && current === generation && snapshotRequest === ticket;
+    track(channel.push("snapshot_request", { version: 1, type: "snapshot_request" }, 5000))
+      .receive("ok", raw => {
+        if (!valid()) return;
+        const parsed = parseServerMessage(raw);
+        if (!parsed.ok || parsed.value.type !== "snapshot") { reconnect(); return; }
+        accept(parsed.value);
+        if (snapshotRequest === ticket) reconnect();
+      })
+      .receive("error", () => { if (valid()) reconnect(); })
+      .receive("timeout", () => { if (valid()) reconnect(); });
+  }
+  function command(message: Extract<ClientMessage, { type: "host_command" }>) {
+    if (!ready() || requests.has(message.commandId)) return;
+    const count = attempts.get(message.commandId) ?? 0;
+    if (count >= 5) {
+      if (!unconfirmed.has(message.commandId)) {
+        unconfirmed.add(message.commandId); handlers.onCommandUnconfirmed(message.commandId);
+      }
+      return;
+    }
+    const ticket = {}, current = generation;
+    attempts.set(message.commandId, count + 1); requests.set(message.commandId, ticket);
+    const valid = () => !stopped && generation === current && requests.get(message.commandId) === ticket;
+    const retry = () => {
+      if (!valid()) return;
+      requests.delete(message.commandId);
+      if (ready()) command(message);
+    };
+    const response = (raw: unknown) => {
+      if (!valid()) return;
+      requests.delete(message.commandId);
+      accept(raw);
+      const parsed = parseServerMessage(raw);
+      if (parsed.ok && parsed.value.type === "error" && parsed.value.code === "storage_failed" && ready()) command(message);
+    };
+    track(channel.push(message.type, message, 5000)).receive("ok", response).receive("error", response).receive("timeout", retry);
+  }
+  function push(message: ClientMessage) {
+    if (!ready()) return;
+    const current = generation;
+    const response = (raw: unknown) => { if (!stopped && current === generation) accept(raw); };
+    track(channel.push(message.type, message, 5000)).receive("ok", response).receive("error", response);
+  }
+  function requestProbe() {
+    if (!ready()) return;
+    clearProbe();
+    clockProbe = { nonce: crypto.randomUUID(), wallMs: Date.now(), monotonicMs: performance.now() };
+    push({ version: 1, type: "clock_probe", nonce: clockProbe.nonce, clientSendMs: clockProbe.wallMs });
+    probeTimeout = setTimeout(() => {
+      clearProbe();
+      if (ready()) status("connected", "Diagnostic clock check timed out. Location sharing is still available.");
+    }, 5000);
+  }
+  function createChannel() {
+    const currentChannel = socket.channel(`match:${credentials.matchCode}`, {
+      hostToken: credentials.hostToken, playerToken: credentials.playerToken,
+    });
+    channel = currentChannel;
+    for (const event of ["snapshot", "update", "clock_reply", "clock_ready", "trial_sample", "error"]) {
+      currentChannel.on(event, raw => { if (currentChannel === channel) accept(raw); });
+    }
+    currentChannel.onError(() => { if (!stopped && currentChannel === channel) invalidate(); });
+    currentChannel.onClose(() => { if (!stopped && currentChannel === channel) reconnect(); });
+    currentChannel.join(5000).receive("ok", raw => {
+      if (stopped || currentChannel !== channel || !socket.isConnected()) return;
+      const parsed = joinReplySchema.safeParse(raw);
+      if (!parsed.success) { fail("Join response is invalid. Reconnect to this match."); return; }
+      generation += 1; attempts.clear(); requests.clear(); unconfirmed.clear();
+      streamId = parsed.data.state.streamId; cursor = parsed.data.state.streamSeq;
+      handlers.onMessage(parsed.data.state); becameReady();
+    }).receive("error", raw => {
+      if (stopped || currentChannel !== channel) return;
+      if (raw?.code === "unauthorized" || raw?.code === "expired") fail(raw.reason);
+      else invalidate();
+    }).receive("timeout", () => { if (!stopped && currentChannel === channel) invalidate(); });
+  }
+  socket.onClose(event => {
+    if (stopped) return;
+    if (event.code === 1008) { fail("Session ended or credentials expired."); return; }
+    invalidate();
+  });
+  socket.onError(() => { if (!stopped) invalidate(); });
+  status("connecting");
+  createChannel(); socket.connect();
   return {
     send(message) {
+      if (stopped) return;
       const parsed = parseClientMessage(message);
       if (!parsed.ok) { status("failed", parsed.error); return; }
-      if (message.type === "host_command") pending.set(message.commandId, { message, attempts: 1 });
-      if (message.type === "clock_probe") { requestProbe(); return; }
-      if (!authenticated) {
-        if (message.type !== "host_command") status("failed", "Connection is not ready. Location was not sent.");
-        return;
-      }
-      rawSend(message);
+      if (message.type === "host_command") {
+        if (unconfirmed.delete(message.commandId)) attempts.delete(message.commandId);
+        command(message);
+      } else if (message.type === "snapshot_request") requestSnapshot();
+      else if (message.type === "clock_probe") requestProbe();
+      else push(message);
     },
     close,
   };

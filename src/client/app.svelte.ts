@@ -59,7 +59,7 @@ export function mountApp(root: HTMLElement): () => void {
   let motionEvents: EngineEvent[] = [];
   let stateSource: "snapshot" | "update" | undefined;
   let factionHistory: EngineEvent[] = [], historyAvailable = false, historyDirty = true, interruption: string | null = null;
-  const pendingCommands = new Map<string, HostCommand>();
+  const pendingCommands = new Map<string, { command: HostCommand; unconfirmed: boolean }>();
   const pendingFeedback = new Set<number>(), acknowledged = new Set<number>();
   let feedbackFrame = false, audio: AudioContext | null = null;
   let stopLocation: (() => void) | null = null;
@@ -206,9 +206,6 @@ export function mountApp(root: HTMLElement): () => void {
   }
   function receive(message: ServerMessage) {
     if (disposed) return;
-    if (message.type === "authenticated") {
-      for (const [commandId, command] of pendingCommands) connection?.send({ version: 1, type: "host_command", commandId, command });
-    }
     if (message.type === "clock_ready") clockReady = true;
     if (message.type === "snapshot" || message.type === "update") {
       stateSource = message.type;
@@ -224,8 +221,7 @@ export function mountApp(root: HTMLElement): () => void {
         cancelPermissionCheck(); trialConsent = false;
       }
       if (message.type === "update") {
-        if (message.outcome) {
-          pendingCommands.delete(message.outcome.commandId);
+        if (message.outcome && pendingCommands.delete(message.outcome.commandId)) {
           commandStatus = message.outcome.reason;
           if (!message.outcome.accepted) error = message.outcome.reason;
         }
@@ -247,6 +243,7 @@ export function mountApp(root: HTMLElement): () => void {
       }
     }
     if (message.type === "error") {
+      if (message.commandId && message.code !== "storage_failed") pendingCommands.delete(message.commandId);
       if (message.code.startsWith("diagnostic_") || message.code === "clock_invalid") diagnosticStatus = message.reason;
       else error = message.reason;
       if (message.code === "expired") { cancelPermissionCheck(); consent = false; trialConsent = false; clockReady = false; stopCollection(); }
@@ -271,6 +268,18 @@ export function mountApp(root: HTMLElement): () => void {
     catch { throw new Error("Session storage is unavailable. Allow storage to keep private credentials."); }
     connection = connectMatch(next, {
       onMessage: receive,
+      onReady() {
+        for (const [commandId, pending] of pendingCommands) {
+          if (!pending.unconfirmed) connection?.send({ version: 1, type: "host_command", commandId, command: pending.command });
+        }
+      },
+      onCommandUnconfirmed(commandId) {
+        const pending = pendingCommands.get(commandId);
+        if (!pending) return;
+        pending.unconfirmed = true;
+        commandStatus = "Command not confirmed. Retry uses the same command ID.";
+        if (!disposed) render();
+      },
       onStatus(status) {
         connectionStatus = status;
         if (status.state === "connected" && status.reason) { clockReady = false; diagnosticStatus = status.reason; }
@@ -283,9 +292,10 @@ export function mountApp(root: HTMLElement): () => void {
     render();
   }
   function sendCommand(command: HostCommand) {
-    const pending = command.type === "start" ? [...pendingCommands].find(([, value]) => value.type === "start") : undefined;
+    if (command.type === "set_faction" && [...pendingCommands.values()].some(p => p.command.type === "set_faction")) return;
+    const pending = command.type === "start" ? [...pendingCommands].find(([, value]) => value.command.type === "start") : undefined;
     const commandId = pending?.[0] ?? crypto.randomUUID();
-    pendingCommands.set(commandId, command); commandStatus = "Waiting for the authority response.";
+    pendingCommands.set(commandId, { command, unconfirmed: false }); commandStatus = "Waiting for the authority response.";
     connection?.send({ version: 1, type: "host_command", commandId, command });
     render();
   }
@@ -557,8 +567,16 @@ export function mountApp(root: HTMLElement): () => void {
         motionEvents = [];
         applyCompass();
         if (commandStatus) { const notice = text(section, "p", commandStatus, "state-line"); notice.setAttribute("role", "status"); }
+        const unconfirmed = [...pendingCommands].filter(([, pending]) => pending.unconfirmed);
+        if (unconfirmed.length) button(section, unconfirmed.length === 1 ? "Retry unconfirmed command" : "Retry unconfirmed commands", () => {
+          for (const [commandId, pending] of unconfirmed) {
+            pending.unconfirmed = false;
+            connection?.send({ version: 1, type: "host_command", commandId, command: pending.command });
+          }
+          commandStatus = "Waiting for the authority response."; render();
+        }, "retry-command", "secondary", icons.refresh).disabled = connectionStatus.state !== "connected";
         for (const select of section.querySelectorAll<HTMLSelectElement>('[data-action="set-faction"]')) {
-          select.disabled = [...pendingCommands.values()].some(c => c.type === "set_faction");
+          select.disabled = [...pendingCommands.values()].some(p => p.command.type === "set_faction");
         }
         if (snapshot.ownPlayerId && typeof AudioContext !== "undefined" && !audio) {
           button(tools, "Enable sound cues", async () => {

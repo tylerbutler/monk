@@ -8,6 +8,7 @@ import type { MatchActions } from "./views";
 import { snapshotFor } from "../worker/engine";
 import { command, lobbyFixture, pulse, runningFixture } from "../../test/fixtures";
 import type { EngineEvent, RoundResults, ServerMessage, TrialSample, TrialStatus } from "../shared/protocol";
+import { TestSocket, joinReply } from "../../test/phoenix-socket";
 
 const actions: MatchActions = {
   pause: vi.fn(), beginResume: vi.fn(), cancelResume: vi.fn(), end: vi.fn(),
@@ -479,13 +480,13 @@ function browserApp(snapshot: ReturnType<typeof snapshotFor>) {
   let socket: Socket;
   const sockets: Socket[] = [];
   const frames: string[] = [], raf: FrameRequestCallback[] = [];
-  class Socket extends EventTarget {
-    static OPEN = 1;
-    readyState = 0;
-    constructor() { super(); socket = this; sockets.push(this); }
-    send(frame: string) { frames.push(frame); }
-    close() { this.readyState = 3; }
-    receive(message: ServerMessage) { this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(message) })); }
+  class Socket extends TestSocket {
+    constructor(url: string | URL) { super(url); socket = this; sockets.push(this); }
+    override send(frame: string) {
+      super.send(frame);
+      const payload: unknown = JSON.parse(frame)[4];
+      if (payload && typeof payload === "object" && "type" in payload) frames.push(JSON.stringify(payload));
+    }
   }
   vi.stubGlobal("WebSocket", Socket);
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { raf.push(callback); return raf.length; });
@@ -499,12 +500,11 @@ function browserApp(snapshot: ReturnType<typeof snapshotFor>) {
   const root = document.createElement("main"); document.body.append(root);
   const cleanup = mountApp(root);
   function authenticate(current: Socket, streamId = "app-stream") {
-    current.readyState = 1; current.dispatchEvent(new Event("open"));
-    current.receive({ version: 1, type: "authenticated", streamId, streamSeq: 1,
-      playerId: snapshot.ownPlayerId, canHost: snapshot.canHost, expiresAtMs: Date.now() + 86400000 });
-    current.receive({ version: 1, type: "snapshot", streamId, streamSeq: 2,
-      snapshot, trial: null, startChecking: false });
-    for (const streamSeq of [3, 4]) current.receive({ version: 1, type: "snapshot", streamId, streamSeq,
+    current.open();
+    current.reply(current.decoded().findLast(frame => frame[3] === "phx_join")!, joinReply({
+      version: 1, type: "snapshot", streamId, streamSeq: 1, snapshot, trial: null, startChecking: false,
+    }));
+    for (const streamSeq of [2, 3, 4]) current.receive({ version: 1, type: "snapshot", streamId, streamSeq,
       snapshot, trial: null, startChecking: false });
   }
   const current = socket!;
@@ -1491,10 +1491,8 @@ it("reconnects unresolved host changes with their original ID and releases contr
     if (!select) throw new Error("Host faction control missing");
     select.value = "paper"; select.dispatchEvent(new Event("change", { bubbles: true }));
     const original = app.frames.map(f => JSON.parse(f)).find(m => m.type === "host_command");
-    vi.advanceTimersByTime(7500);
-    const reconnect = app.root.querySelector<HTMLButtonElement>('[data-action="reconnect"]');
-    expect(reconnect).not.toBeNull();
-    reconnect?.click();
+    app.socket.close(1006);
+    vi.advanceTimersByTime(10);
     const replacement = app.sockets.at(-1);
     if (!replacement || replacement === app.socket) throw new Error("Replacement connection missing");
     const before = app.frames.length;
@@ -1505,6 +1503,64 @@ it("reconnects unresolved host changes with their original ID and releases contr
       snapshot, trial: null, startChecking: false, events: [],
       outcome: { commandId: original.commandId, accepted: true, reason: "Original change accepted." } });
     expect(app.root.querySelector<HTMLSelectElement>('[data-action="set-faction"]')?.disabled).toBe(false);
+  } finally { app.cleanup(); vi.useRealTimers(); }
+});
+it("unconfirmed retry keeps its ID and does not unlock faction controls", () => {
+  vi.useFakeTimers();
+  const snapshot = { ...snapshotFor(runningFixture(["rock", "scissors"]), "p1", 0), canHost: true };
+  const app = browserApp(snapshot);
+  try {
+    const select = app.root.querySelector<HTMLSelectElement>('[data-action="set-faction"]')!;
+    select.value = "paper"; select.dispatchEvent(new Event("change", { bubbles: true }));
+    const original = JSON.parse(app.frames[0]);
+    vi.advanceTimersByTime(25_000);
+    expect(app.root.textContent).toContain("Connection: connected");
+    const retry = app.root.querySelector<HTMLButtonElement>('[data-action="retry-command"]');
+    expect(retry).not.toBeNull();
+    expect(select.disabled).toBe(true);
+    retry?.click();
+    const commands = app.frames.map(frame => JSON.parse(frame)).filter(frame => frame.type === "host_command");
+    expect(commands).toHaveLength(6);
+    expect(commands.every(frame => frame.commandId === original.commandId)).toBe(true);
+  } finally { app.cleanup(); vi.useRealTimers(); }
+});
+it("late old-connection replies do not unlock faction controls", () => {
+  vi.useFakeTimers();
+  const snapshot = { ...snapshotFor(runningFixture(["rock", "scissors"]), "p1", 0), canHost: true };
+  const app = browserApp(snapshot);
+  try {
+    const select = app.root.querySelector<HTMLSelectElement>('[data-action="set-faction"]')!;
+    select.value = "paper"; select.dispatchEvent(new Event("change", { bubbles: true }));
+    const original = app.frames.map(frame => JSON.parse(frame)).find(frame => frame.type === "host_command");
+    app.socket.close(1006); vi.advanceTimersByTime(10);
+    const replacement = app.sockets.at(-1)!;
+    app.authenticate(replacement, "new-stream");
+    app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 5,
+      snapshot, trial: null, startChecking: false, events: [],
+      outcome: { commandId: original.commandId, accepted: true, reason: "Late" } });
+    expect(app.root.querySelector<HTMLSelectElement>('[data-action="set-faction"]')?.disabled).toBe(true);
+  } finally { app.cleanup(); vi.useRealTimers(); }
+});
+it("hidden recovery does not restart collection or replay awards", () => {
+  vi.useFakeTimers();
+  const browser = permissionBrowser(), { running, ended } = trophyFixture();
+  const app = trophyApp(running);
+  try {
+    app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]')?.click();
+    browser.fix();
+    app.socket.close(1006); vi.advanceTimersByTime(10);
+    const replacement = app.sockets.at(-1)!;
+    expect(replacement).not.toBe(app.socket);
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    replacement.open();
+    replacement.reply(replacement.decoded().findLast(frame => frame[3] === "phx_join")!, joinReply({
+      version: 1, type: "snapshot", streamId: "recovered", streamSeq: 1,
+      snapshot: ended, trial: null, startChecking: false,
+    }));
+    browser.fix();
+    expect(replacement.positionFrames()).toHaveLength(0);
+    expect(app.root.querySelector("#award-ceremony")).toBeNull();
   } finally { app.cleanup(); vi.useRealTimers(); }
 });
 
