@@ -2,8 +2,10 @@
 
 Date: 2026-11-01
 
-Status: Architecture and recovery rules approved in conversation. This written
-specification awaits review.
+Status: Written specification approved. Implementation has not started.
+
+Implementation plan:
+[Beryl protocol integration](../plans/2026-11-01-beryl-protocol-integration.md).
 
 ## Purpose
 
