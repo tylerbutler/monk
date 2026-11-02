@@ -2,9 +2,10 @@ import { expect, it } from "vitest";
 import * as bridge from "../../rules/build/dev/javascript/monk_rules/monk_rules/channels.mjs";
 import { Some } from "../../rules/build/dev/javascript/gleam_stdlib/gleam/option.mjs";
 import type { Result } from "../../rules/build/dev/javascript/monk_rules/gleam.mjs";
+import { Ok } from "../../rules/build/dev/javascript/monk_rules/gleam.mjs";
 
 function unwrap<T, E>(result: Result<T, E>): T {
-  if (!result.isOk()) throw new Error(JSON.stringify(result[0]));
+  if (!(result instanceof Ok)) throw new Error("Channel transition failed");
   return result[0];
 }
 function frames(transition: bridge.Transition$) {

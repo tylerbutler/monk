@@ -5,7 +5,7 @@ import { advanceEngine, checkpointEngine, restoreEngine } from "../../src/worker
 import { loadRecord, recordSchema } from "../../src/worker/storage";
 import { advanceAwardData } from "../../src/worker/award-data";
 import type { PositionReport } from "../../src/shared/protocol";
-import { closeSockets, connect, createMatch, hostCommand, joinMatch, openSocket, runningMatch } from "./helpers";
+import { closeSockets, connect, createMatch, hostCommand, joinMatch, runningMatch } from "./helpers";
 
 afterEach(async () => { await closeSockets(); vi.restoreAllMocks(); await reset(); });
 
@@ -154,19 +154,16 @@ it.each(["suspend", "close", "unknown age", "inaccurate"] as const)(
 it("does not disclose collection through messages", async () => {
   const match = await preparedConversion();
   const outsider = await connect(await joinMatch(match.credentials.matchCode));
-  const legacy = await openSocket(match.credentials.matchCode);
-  legacy.send({ version: 1, type: "authenticate", hostToken: null, playerToken: match.credentials.playerToken });
-  await legacy.next("authenticated"); const initial = await legacy.next("snapshot");
+  const second = await connect({ ...match.credentials, hostToken: null });
+  const initial = second.joined.state;
   const converted = await match.convert();
   outsider.send({ version: 1, type: "snapshot_request" });
   const privateSnapshot = await outsider.next("snapshot");
   expect(privateSnapshot.factionHistory).toEqual([]);
-  const legacyUpdate = await legacy.next("update");
-  for (const message of [initial, converted, privateSnapshot, legacyUpdate]) {
+  const secondUpdate = await second.next("update");
+  for (const message of [initial, converted, privateSnapshot, secondUpdate]) {
     expect(JSON.stringify(message)).not.toMatch(/awardData|conversionPeerIds|influencePeerIds|openEncounters|pendingComeback|lastFrame/);
   }
-  expect(initial).not.toHaveProperty("factionHistory");
-  expect(legacyUpdate.events[0]).not.toHaveProperty("attackerLabel");
 });
 
 it("stores only coordinate-free award data", async () => {

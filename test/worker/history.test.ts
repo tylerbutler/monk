@@ -2,27 +2,9 @@ import { afterEach, expect, it } from "vitest";
 import { env } from "cloudflare:workers";
 import { evictDurableObject, reset, runInDurableObject } from "cloudflare:test";
 import { loadRecord } from "../../src/worker/storage";
-import { closeSockets, connect, createMatch, hostCommand, joinMatch, openSocket, runningMatch } from "./helpers";
+import { closeSockets, connect, createMatch, hostCommand, joinMatch, runningMatch } from "./helpers";
 
 afterEach(async () => { await closeSockets(); await reset(); });
-
-it("keeps snapshot and live event fields compatible with clients that do not opt into history", async () => {
-  const credentials = await createMatch("Host");
-  const host = await connect(credentials);
-  const legacy = await openSocket(credentials.matchCode);
-  legacy.send({ version: 1, type: "authenticate", hostToken: credentials.hostToken, playerToken: credentials.playerToken });
-  const authenticated = await legacy.next("authenticated");
-  expect(await legacy.next("snapshot")).not.toHaveProperty("factionHistory");
-  const changed = await hostCommand(host, { type: "set_faction", playerId: authenticated.playerId!, faction: "paper" });
-  expect(changed.events[0]).toHaveProperty("targetLabel", "Host");
-  const update = await legacy.next("update");
-  expect(update.events).toHaveLength(1);
-  expect(update.events[0]).toMatchObject({ type: "manual_faction_change", faction: "paper" });
-  expect(update.events[0]).not.toHaveProperty("attackerLabel");
-  expect(update.events[0]).not.toHaveProperty("targetLabel");
-  legacy.send({ version: 1, type: "snapshot_request" });
-  expect(await legacy.next("snapshot")).not.toHaveProperty("factionHistory");
-});
 
 it("restores saved faction changes with names and filters history for each player", async () => {
   const credentials = await createMatch("Host");

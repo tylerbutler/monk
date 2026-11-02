@@ -238,7 +238,7 @@ it("deletes data and closes clients at the 24-hour deadline; alarm retry is idem
   await runDurableObjectAlarm(stub);
   expect(await client.next("error")).toMatchObject({ code: "expired" });
   expect(await runInDurableObject(stub, (_, state) => loadRecord(state.storage))).toBeNull();
-  const expired = await SELF.fetch(`https://monk.test/api/matches/${credentials.matchCode}/socket`, {
+  const expired = await SELF.fetch(`https://monk.test/api/matches/${credentials.matchCode}/socket/websocket?vsn=2.0.0`, {
     headers: { Upgrade: "websocket", Origin: "https://monk.test" },
   });
   expect(expired.status).not.toBe(101);

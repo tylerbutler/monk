@@ -143,6 +143,8 @@ export type PlayerSnapshot = z.infer<typeof snapshotSchema>;
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
 const token = z.string().min(32).max(128);
+export const channelJoinSchema = z.strictObject({ hostToken: token.nullable(), playerToken: token.nullable() });
+export type ChannelJoin = z.infer<typeof channelJoinSchema>;
 export const sessionCredentialsSchema = z.strictObject({
   matchCode: z.string().regex(/^[A-Z2-9]{8}$/), hostToken: token.nullable(), playerToken: token.nullable(),
 });
@@ -166,8 +168,6 @@ export const trialSampleSchema = z.strictObject({
 export type TrialSample = z.infer<typeof trialSampleSchema>;
 const envelope = { version: z.literal(1) };
 export const clientMessageSchema = z.discriminatedUnion("type", [
-  z.strictObject({ ...envelope, type: z.literal("authenticate"), hostToken: token.nullable(), playerToken: token.nullable(),
-    supportsFactionHistory: z.boolean().optional(), supportsRoundResults: z.boolean().optional() }),
   z.strictObject({ ...envelope, type: z.literal("clock_probe"), nonce: id, clientSendMs: time }),
   z.strictObject({ ...envelope, type: z.literal("clock_confirm"), nonce: id, clientReceiveMs: time }),
   z.strictObject({ ...envelope, type: z.literal("position"), report: positionSchema }),
@@ -187,16 +187,23 @@ const stream = { ...envelope, streamId: id, streamSeq: time };
 const stateMessage = {
   snapshot: snapshotSchema, trial: trialStatusSchema.nullable(), startChecking: z.boolean(),
 };
+const snapshotMessageSchema = z.strictObject({
+  ...stream, type: z.literal("snapshot"), ...stateMessage, factionHistory: z.array(eventSchema).optional(),
+});
 export const serverMessageSchema = z.discriminatedUnion("type", [
-  z.strictObject({ ...stream, type: z.literal("authenticated"), playerId: id.nullable(), canHost: z.boolean(), expiresAtMs: time }),
   z.strictObject({ ...stream, type: z.literal("clock_reply"), nonce: id, clientSendMs: time, serverReceiveMs: time, serverSendMs: time }),
   z.strictObject({ ...stream, type: z.literal("clock_ready"), clock: clockSchema }),
-  z.strictObject({ ...stream, type: z.literal("snapshot"), ...stateMessage, factionHistory: z.array(eventSchema).optional() }),
+  snapshotMessageSchema,
   z.strictObject({ ...stream, type: z.literal("update"), ...stateMessage, events: z.array(eventSchema), outcome: outcomeSchema.nullable() }),
   z.strictObject({ ...stream, type: z.literal("trial_sample"), sample: trialSampleSchema }),
   z.strictObject({ ...stream, type: z.literal("error"), code: id, reason: z.string(), commandId: id.nullable() }),
 ]);
 export type ServerMessage = z.infer<typeof serverMessageSchema>;
+export const joinReplySchema = z.strictObject({
+  identity: z.strictObject({ playerId: id.nullable(), canHost: z.boolean(), expiresAtMs: time }),
+  state: snapshotMessageSchema,
+});
+export type JoinReply = z.infer<typeof joinReplySchema>;
 export type ServerBody = ServerMessage extends infer M ? M extends ServerMessage ? Omit<M, "version" | "streamId" | "streamSeq"> : never : never;
 export function parseClientMessage(input: unknown): ParseResult<ClientMessage> {
   const parsed = clientMessageSchema.safeParse(input);
@@ -207,7 +214,10 @@ export function parseServerMessage(input: unknown): ParseResult<ServerMessage> {
   return parsed.success ? { ok: true, value: parsed.data } : { ok: false, error: "Invalid server message. Reconnect to this match." };
 }
 export type ConnectionStatus = { state: "connecting" | "connected" | "reconnecting" | "failed"; reason: string | null };
-export type ConnectionHandlers = { onMessage(message: ServerMessage): void; onStatus(status: ConnectionStatus): void };
+export type ConnectionHandlers = {
+  onMessage(message: ServerMessage): void; onStatus(status: ConnectionStatus): void;
+  onReady(): void; onCommandUnconfirmed(commandId: string): void;
+};
 export type MatchConnection = { send(message: ClientMessage): void; close(): void };
 export type LocationStatus = {
   collecting: boolean; permission: "unknown" | "granted" | "denied";

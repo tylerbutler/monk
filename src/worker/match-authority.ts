@@ -5,21 +5,34 @@ import type { EngineState, EngineTransition } from "./engine";
 import { issueToken, verifyToken } from "./auth";
 import { commitRecord, loadRecord } from "./storage";
 import type { MatchRecord } from "./storage";
-import { actorSchema, gamePreset, isFactionChange, locationInactivityMs, parseClientMessage, serverMessageSchema } from "../shared/protocol";
-import type { ClockEstimate, ClockProbeSample, CommandOutcome, EngineEvent, FeedbackSummary, Observation, ServerBody, TrialStatus, VerifiedActor } from "../shared/protocol";
+import { actorSchema, channelJoinSchema, joinReplySchema, gamePreset, isFactionChange, locationInactivityMs, parseClientMessage, serverMessageSchema } from "../shared/protocol";
+import type { ClientMessage, ClockEstimate, ClockProbeSample, CommandOutcome, EngineEvent, FeedbackSummary, Observation, ServerBody, TrialStatus, VerifiedActor } from "../shared/protocol";
 import { estimateClock, normalizeObservation } from "../shared/clock";
 import { gameObservation } from "./locations";
 import type { KnownPosition } from "./locations";
 import { advanceAwardData, createAwardData, recoverAwardData } from "./award-data";
 import { selectRoundResults } from "./round-results";
+import * as channels from "../../rules/build/dev/javascript/monk_rules/monk_rules/channels.mjs";
+import * as core from "../../rules/build/dev/javascript/beryl_protocol/beryl_protocol.mjs";
+import { None, Some } from "../../rules/build/dev/javascript/gleam_stdlib/gleam/option.mjs";
+import type { Result } from "../../rules/build/dev/javascript/monk_rules/gleam.mjs";
+import { Ok, Error as GleamError } from "../../rules/build/dev/javascript/monk_rules/gleam.mjs";
 
+type ProtocolState = core.State$;
+type ChannelTransition = channels.Transition$;
+type ReplyOperation = None | Some<core.Operation$>;
+const none = new None();
+const wallTime = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const attachmentSchema = z.strictObject({
+  version: z.literal(1), protocol: z.string(), savedAtMs: wallTime,
   actor: actorSchema.nullable(), streamId: z.string(), streamSeq: z.number().int().nonnegative(),
-  authDeadlineMs: z.number(), expiresAtMs: z.number(),
-  supportsFactionHistory: z.boolean().optional(),
-  supportsRoundResults: z.boolean().optional(),
+  authDeadlineMs: wallTime, expiresAtMs: wallTime,
 });
 type Connection = z.infer<typeof attachmentSchema>;
+function unwrap<T, E>(result: Result<T, E>): T {
+  if (!(result instanceof Ok)) throw new Error("Channel transition failed.");
+  return result[0];
+}
 type ClockSession = { probe: (Omit<ClockProbeSample, "clientReceiveMs"> & { nonce: string }) | null;
   clock: ClockEstimate | null; wallMs: number; monotonicMs: number };
 type Measurement = { observation: Observation; receivedAtMs: number; updateGapMs: number; clock: ClockEstimate };
@@ -29,7 +42,8 @@ export class MatchAuthority extends DurableObject<Env> {
   private record: MatchRecord | null = null;
   private engine: EngineState | null = null;
   private queue: Promise<void> = Promise.resolve();
-  private authTimers = new Map<WebSocket, ReturnType<typeof setTimeout>>();
+  private protocols = new Map<WebSocket, ProtocolState>();
+  private connections = new Map<WebSocket, Connection>();
   private clocks = new Map<WebSocket, ClockSession>();
   private reports = new Map<string, { seq: number; capturedAtMs: number }>();
   private lastKnownPositions = new Map<string, KnownPosition>();
@@ -55,11 +69,25 @@ export class MatchAuthority extends DurableObject<Env> {
         this.record = record;
         this.engine = engine;
         for (const socket of ctx.getWebSockets()) {
-          const connection = this.attachment(socket);
-          socket.serializeAttachment({ ...connection, streamId: crypto.randomUUID(), streamSeq: 0 });
-          if (connection.actor) this.snapshot(socket);
+          try {
+            const raw: unknown = socket.deserializeAttachment();
+            if (new TextEncoder().encode(JSON.stringify(raw)).byteLength > 16_000) throw new Error("Attachment too large.");
+            const connection = attachmentSchema.parse(raw), now = Date.now();
+            if (connection.savedAtMs > now || connection.expiresAtMs !== record.expiresAtMs ||
+              connection.actor && !this.validActor(connection.actor)) throw new Error("Invalid restored authority.");
+            this.connections.set(socket, { ...connection, streamId: crypto.randomUUID(), streamSeq: 0 });
+            await this.applyChannel(socket, unwrap(channels.restore(connection.protocol, now, now - connection.savedAtMs)));
+            if (this.joined(socket)) await this.snapshot(socket);
+            else if (this.connections.has(socket)) {
+              this.attachment(socket).actor = null;
+              this.attachment(socket).authDeadlineMs = now + 5000;
+              this.checkpointConnection(socket);
+            }
+          } catch { await this.failConnection(socket); }
         }
         await this.scheduleAlarm();
+      } else {
+        for (const socket of ctx.getWebSockets()) socket.close(1011, "Match unavailable");
       }
     });
   }
@@ -69,26 +97,102 @@ export class MatchAuthority extends DurableObject<Env> {
     return result;
   }
   private attachment(socket: WebSocket): Connection {
-    return attachmentSchema.parse(socket.deserializeAttachment());
+    const connection = this.connections.get(socket);
+    if (!connection) throw new Error("Connection is unavailable.");
+    return connection;
   }
-  private send(socket: WebSocket, body: ServerBody): void {
+  private validActor(actor: VerifiedActor): boolean {
+    return !!this.record && (actor.host ? this.record.sessions.some(s => s.host && s.id === actor.id) :
+      this.record.sessions.some(s => !s.host && s.id === actor.id)) &&
+      (actor.playerId === null || this.record.checkpoint.players.some(p => p.id === actor.playerId) &&
+        this.record.sessions.some(s => s.playerId === actor.playerId));
+  }
+  private joined(socket: WebSocket): boolean {
+    const state = this.protocols.get(socket);
+    return !!state && !!this.connections.get(socket)?.actor && !!this.record &&
+      core.channel(state, `match:${this.record.matchCode}`).isOk();
+  }
+  private checkpointConnection(socket: WebSocket): void {
     const connection = this.attachment(socket);
-    if (body.type === "update" && !connection.supportsFactionHistory) {
-      body = { ...body, events: body.events.map(({ attackerLabel, targetLabel, ...event }) => event) };
-    }
-    if ((body.type === "snapshot" || body.type === "update") && !connection.supportsRoundResults) {
-      const { roundResults: _results, ...snapshot } = body.snapshot;
-      body = { ...body, snapshot };
-    }
-    const streamSeq = connection.streamSeq + 1;
-    socket.serializeAttachment({ ...connection, streamSeq });
-    if (socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify(serverMessageSchema.parse({ ...body, version: 1, streamId: connection.streamId, streamSeq })));
-    }
+    const now = Date.now();
+    const attachment = attachmentSchema.parse({ ...connection,
+      protocol: unwrap(channels.snapshot(this.protocols.get(socket)!, now)), savedAtMs: now });
+    if (new TextEncoder().encode(JSON.stringify(attachment)).byteLength > 16_000) throw new Error("Attachment too large.");
+    socket.serializeAttachment(attachment);
+    this.connections.set(socket, attachment);
   }
-  private error(socket: WebSocket, code: string, reason: string, commandId: string | null = null): void {
+  private envelope(socket: WebSocket, body: ServerBody) {
+    const connection = this.attachment(socket);
+    connection.streamSeq += 1;
+    return serverMessageSchema.parse({ ...body, version: 1, streamId: connection.streamId, streamSeq: connection.streamSeq });
+  }
+  private async send(socket: WebSocket, body: ServerBody, operation: ReplyOperation = none): Promise<void> {
+    if (!this.joined(socket)) return;
+    const message = this.envelope(socket, body), state = this.protocols.get(socket)!;
+    await this.applyChannel(socket, unwrap(operation instanceof Some ?
+      channels.reply(state, operation, JSON.stringify(message), body.type !== "error", Date.now()) :
+      channels.push(state, `match:${this.record!.matchCode}`, body.type, JSON.stringify(message), Date.now())));
+  }
+  private async error(socket: WebSocket, code: string, reason: string, commandId: string | null = null,
+    operation: ReplyOperation = none): Promise<void> {
     console.warn("monk", code);
-    this.send(socket, { type: "error", code, reason, commandId });
+    await this.send(socket, { type: "error", code, reason, commandId }, operation);
+  }
+  private async applyChannel(socket: WebSocket, transition: ChannelTransition): Promise<void> {
+    if (!this.connections.has(socket)) return;
+    this.protocols.set(socket, transition.state);
+    this.checkpointConnection(socket);
+    for (const action of transition.actions.toArray()) {
+      if (!this.connections.has(socket)) break;
+      if (action instanceof channels.Authorize) {
+        const input = channelJoinSchema.safeParse(action.payload);
+        const host = input.success && input.data.hostToken ? await this.verify(input.data.hostToken, true) : null;
+        const player = input.success && input.data.playerToken ? await this.verify(input.data.playerToken, false) : null;
+        const connection = this.attachment(socket);
+        if (!input.success || action.topic !== `match:${this.record!.matchCode}` ||
+          Date.now() >= connection.authDeadlineMs && !connection.actor ||
+          input.data.hostToken && !host || input.data.playerToken && !player || !host && !player) {
+          await this.applyChannel(socket, unwrap(channels.join_rejected(this.protocols.get(socket)!, action.operation,
+            JSON.stringify({ code: "unauthorized", reason: "Session credentials or topic are invalid for this match." }), Date.now())));
+          continue;
+        }
+        connection.actor = { id: host?.id ?? player!.id, host: !!host, playerId: player?.playerId ?? null };
+        connection.streamId = crypto.randomUUID(); connection.streamSeq = 0;
+        const reply = joinReplySchema.parse({
+          identity: { playerId: connection.actor.playerId, canHost: connection.actor.host, expiresAtMs: this.record!.expiresAtMs },
+          state: this.envelope(socket, this.snapshotBody(connection.actor)),
+        });
+        await this.applyChannel(socket, unwrap(channels.join_accepted(this.protocols.get(socket)!, action.operation, JSON.stringify(reply), Date.now())));
+      } else if (action instanceof channels.Deliver) {
+        const actor = this.attachment(socket).actor, parsed = parseClientMessage(action.payload);
+        if (!actor || action.topic !== `match:${this.record!.matchCode}`) continue;
+        if (!parsed.ok || parsed.value.type !== action.event) {
+          const commandId = typeof action.payload === "object" && action.payload !== null &&
+            "commandId" in action.payload && typeof action.payload.commandId === "string" ? action.payload.commandId : null;
+          await this.error(socket, "invalid_message", "Invalid application message.", commandId, action.operation);
+        } else {
+          await this.dispatchMessage(socket, actor, parsed.value, action.operation);
+        }
+        if (this.protocols.has(socket)) await this.applyChannel(socket, unwrap(channels.reply(this.protocols.get(socket)!,
+          action.operation, "{}", true, Date.now())));
+      } else if (action instanceof channels.Cleanup) {
+        await this.cleanupConnection(socket);
+        await this.applyChannel(socket, unwrap(channels.cleaned_up(this.protocols.get(socket)!, action.operation, Date.now())));
+      } else if (action instanceof channels.SendText) {
+        this.checkpointConnection(socket);
+        if (socket.readyState === WebSocket.OPEN) socket.send(action.data);
+      } else if (action instanceof channels.Disconnect) {
+        this.connections.delete(socket); this.protocols.delete(socket);
+        socket.close(1000, action.reason);
+      }
+    }
+    await this.scheduleAlarm();
+  }
+  private async failConnection(socket: WebSocket): Promise<void> {
+    try { await this.cleanupConnection(socket); } finally {
+      this.connections.delete(socket); this.protocols.delete(socket); this.clocks.delete(socket);
+      socket.close(1011, "Channel recovery required");
+    }
   }
   private view(actor: VerifiedActor) {
     if (!this.engine || !this.record) throw new Error("Match engine is unavailable.");
@@ -113,26 +217,30 @@ export class MatchAuthority extends DurableObject<Env> {
       p95UpperMs: delays.length && delays.length === recipients.length ? delays[Math.ceil(delays.length * .95) - 1] : null,
     };
   }
-  private snapshot(socket: WebSocket): void {
-    const connection = this.attachment(socket), actor = connection.actor;
-    if (actor) {
-      if (!this.record) throw new Error("Match record is unavailable.");
-      this.send(socket, { type: "snapshot", snapshot: this.view(actor), trial: this.trialFor(actor), startChecking: false,
-        ...(connection.supportsFactionHistory ?
-          { factionHistory: this.eventsFor(actor, this.record.events.filter(isFactionChange)) } : {}) });
-    }
+  private snapshotBody(actor: VerifiedActor): Extract<ServerBody, { type: "snapshot" }> {
+    if (!this.record) throw new Error("Match record is unavailable.");
+    return { type: "snapshot", snapshot: this.view(actor), trial: this.trialFor(actor), startChecking: false,
+      factionHistory: this.eventsFor(actor, this.record.events.filter(isFactionChange)) };
+  }
+  private async snapshot(socket: WebSocket, operation: ReplyOperation = none): Promise<void> {
+    const actor = this.attachment(socket).actor;
+    if (actor) await this.send(socket, this.snapshotBody(actor), operation);
   }
   private eventsFor(actor: VerifiedActor, events: EngineEvent[]): EngineEvent[] {
     return events.filter(e => actor.host || e.type === "lifecycle" || actor.playerId !== null &&
       (e.attackerId === actor.playerId || e.targetId === actor.playerId));
   }
-  private broadcast(events: EngineEvent[], outcome: CommandOutcome | null = null, caller?: WebSocket): void {
+  private async broadcast(events: EngineEvent[], outcome: CommandOutcome | null = null, caller?: WebSocket,
+    operation: ReplyOperation = none): Promise<void> {
     for (const socket of this.ctx.getWebSockets()) {
-      const actor = this.attachment(socket).actor;
-      if (!actor) continue;
+      const actor = this.connections.get(socket)?.actor;
+      if (!actor || !this.joined(socket)) continue;
       const privateEvents = this.eventsFor(actor, events);
-      this.send(socket, { type: "update", snapshot: this.view(actor), events: privateEvents,
-        outcome: socket === caller ? outcome : null, trial: this.trialFor(actor), startChecking: false });
+      try {
+        await this.send(socket, { type: "update", snapshot: this.view(actor), events: privateEvents,
+          outcome: socket === caller ? outcome : null, trial: this.trialFor(actor), startChecking: false },
+          socket === caller ? operation : none);
+      } catch { await this.failConnection(socket); }
     }
   }
   private async accept(next: EngineTransition, outcome: CommandOutcome | null = null, sessions?: MatchRecord["sessions"],
@@ -174,7 +282,17 @@ export class MatchAuthority extends DurableObject<Env> {
     if (!this.record) return;
     const phase = this.record.checkpoint.phase;
     const recovering = phase === "running" || this.engine && snapshotFor(this.engine, null, Date.now()).resumeChecking;
-    await this.ctx.storage.setAlarm(Math.min(this.record.expiresAtMs, recovering ? Date.now() + 1000 : this.record.expiresAtMs));
+    const deadlines = [this.record.expiresAtMs];
+    if (recovering) deadlines.push(Date.now() + 1000);
+    for (const [socket, connection] of this.connections) {
+      if (!connection.actor) deadlines.push(connection.authDeadlineMs);
+      const state = this.protocols.get(socket);
+      if (state) {
+        const deadline = channels.next_deadline(state);
+        if (deadline >= 0) deadlines.push(deadline);
+      }
+    }
+    await this.ctx.storage.setAlarm(Math.min(...deadlines));
   }
   private scheduleTick(): void {
     if (this.timer !== null || !this.engine) return;
@@ -182,9 +300,11 @@ export class MatchAuthority extends DurableObject<Env> {
     if (snapshot.phase !== "running" && !snapshot.resumeChecking && !this.trial?.collecting) return;
     this.timer = setTimeout(() => {
       this.timer = null;
-      this.ctx.waitUntil(this.serialize(() => this.tick()).catch(() => {
-        for (const socket of this.ctx.getWebSockets()) this.error(socket, "storage_failed", "Authority update failed. Play is not confirmed.");
+      this.ctx.waitUntil(this.serialize(async () => {
+        try { await this.tick(); } catch {
+        for (const socket of this.connections.keys()) await this.error(socket, "storage_failed", "Authority update failed. Play is not confirmed.");
         this.scheduleTick();
+        }
       }));
     }, 250);
   }
@@ -196,7 +316,7 @@ export class MatchAuthority extends DurableObject<Env> {
     }
     const next = advanceEngine(this.engine, { nowMs: Date.now(), actor: null, commands: [], observations: [] });
     await this.accept(next);
-    this.broadcast(next.events);
+    await this.broadcast(next.events);
   }
   async fetch(request: Request): Promise<Response> {
     return this.serialize(async () => {
@@ -270,19 +390,18 @@ export class MatchAuthority extends DurableObject<Env> {
         if (next.rejections.length) return Response.json({ error: next.rejections[0].reason }, { status: 409 });
         await this.accept(next, null, [...this.record.sessions,
           { id: playerId, host: false, playerId, verifier: credential.verifier }]);
-        this.broadcast(next.events);
+        await this.broadcast(next.events);
         return Response.json({ matchCode: code, hostToken: null, playerToken: credential.token }, { status: 201, headers: { "Cache-Control": "no-store" } });
       }
       if (action === "socket" && request.headers.get("Upgrade")?.toLowerCase() === "websocket") {
         const pair = new WebSocketPair(), client = pair[0], server = pair[1];
         const deadline = Date.now() + 5000;
-        server.serializeAttachment({ actor: null, streamId: crypto.randomUUID(), streamSeq: 0,
-          authDeadlineMs: deadline, expiresAtMs: this.record.expiresAtMs });
+        this.connections.set(server, { version: 1, protocol: "", savedAtMs: Date.now(),
+          actor: null, streamId: crypto.randomUUID(), streamSeq: 0, authDeadlineMs: deadline, expiresAtMs: this.record.expiresAtMs });
+        this.protocols.set(server, unwrap(channels.new_connection(crypto.randomUUID(), Date.now())));
+        this.checkpointConnection(server);
         this.ctx.acceptWebSocket(server);
-        this.authTimers.set(server, setTimeout(() => {
-          if (!this.attachment(server).actor) { this.error(server, "auth_timeout", "Authenticate within five seconds."); server.close(1008, "Authentication timeout"); }
-          this.authTimers.delete(server);
-        }, 5000));
+        await this.scheduleAlarm();
         return new Response(null, { status: 101, webSocket: client });
       }
       return Response.json({ error: "Unknown match route." }, { status: 404 });
@@ -298,43 +417,44 @@ export class MatchAuthority extends DurableObject<Env> {
   }
   async webSocketMessage(socket: WebSocket, frame: string | ArrayBuffer): Promise<void> {
     await this.serialize(async () => {
-      const connection = this.attachment(socket);
+      if (!this.connections.has(socket)) return;
       if (!this.record || !this.engine || Date.now() >= this.record.expiresAtMs) {
-        this.error(socket, "expired", "Match expired. Leave this match."); socket.close(1008, "Match expired"); return;
+        await this.expire(); return;
       }
-      if (typeof frame !== "string" || new TextEncoder().encode(frame).byteLength > 16384) {
-        this.error(socket, "invalid_frame", "Use text messages of at most 16 KiB."); socket.close(1009, "Frame too large"); return;
+      if (typeof frame !== "string") {
+        await this.cleanupConnection(socket);
+        this.connections.delete(socket); this.protocols.delete(socket);
+        socket.close(1003, "JSON text required"); return;
       }
-      let raw: unknown;
-      try { raw = JSON.parse(frame); } catch { this.error(socket, "invalid_json", "Invalid JSON message."); return; }
-      const parsed = parseClientMessage(raw);
-      if (!parsed.ok) { this.error(socket, "invalid_message", parsed.error); return; }
-      const message = parsed.value;
-      if (!connection.actor) {
-        if (message.type !== "authenticate" || Date.now() >= connection.authDeadlineMs) {
-          this.error(socket, "unauthorized", "Authenticate before sending other messages."); socket.close(1008, "Not authenticated"); return;
-        }
-        const host = message.hostToken ? await this.verify(message.hostToken, true) : null;
-        const player = message.playerToken ? await this.verify(message.playerToken, false) : null;
-        if ((message.hostToken && !host) || (message.playerToken && !player) || (!host && !player)) {
-          this.error(socket, "unauthorized", "Session credentials are invalid for this match."); socket.close(1008, "Not authenticated"); return;
-        }
-        const actor: VerifiedActor = { id: host?.id ?? player!.id, host: !!host, playerId: player?.playerId ?? null };
-        const authTimer = this.authTimers.get(socket);
-        if (authTimer !== undefined) clearTimeout(authTimer);
-        this.authTimers.delete(socket);
-        socket.serializeAttachment({ ...connection, actor, supportsFactionHistory: message.supportsFactionHistory === true,
-          supportsRoundResults: message.supportsRoundResults === true });
-        this.send(socket, { type: "authenticated", playerId: actor.playerId, canHost: actor.host, expiresAtMs: this.record.expiresAtMs });
-        this.snapshot(socket); return;
+      if (new TextEncoder().encode(frame).byteLength > 16384) {
+        await this.cleanupConnection(socket);
+        this.connections.delete(socket); this.protocols.delete(socket);
+        socket.close(1009, "Frame too large"); return;
       }
-      const actor = connection.actor;
-      if (message.type === "snapshot_request") { this.snapshot(socket); return; }
+      const result = channels.receive_text(this.protocols.get(socket)!, frame, Date.now());
+      if (result instanceof GleamError) {
+        if (!channels.HostError$isDecode(result[0])) await this.failConnection(socket);
+        return;
+      }
+      try { await this.applyChannel(socket, unwrap(result)); }
+      catch { await this.failConnection(socket); }
+    });
+  }
+  private async dispatchMessage(socket: WebSocket, actor: VerifiedActor, message: ClientMessage,
+    operation: ReplyOperation): Promise<void> {
+      if (!this.record || !this.engine) return;
+      const error = (code: string, reason: string, commandId: string | null = null) =>
+        this.error(socket, code, reason, commandId, operation);
+      if (message.type === "snapshot_request") { await this.snapshot(socket, operation); return; }
+      if (actor.playerId && !this.record.checkpoint.players.some(p => p.id === actor.playerId) &&
+        ["position", "suspend", "leave", "trial_ready", "feedback_seen"].includes(message.type)) {
+        await error("forbidden", "This player has left the match."); return;
+      }
       if (message.type === "host_command") {
-        if (!actor.host) { this.error(socket, "forbidden", "Only the host can send this command.", message.commandId); return; }
+        if (!actor.host) { await error("forbidden", "Only the host can send this command.", message.commandId); return; }
         const existing = this.record.outcomes.find(o => o.commandId === message.commandId);
-        if (existing) { this.send(socket, { type: "update", snapshot: this.view(actor), events: [], outcome: existing, trial: this.trialFor(actor), startChecking: false }); return; }
-        if (this.record.outcomes.length >= 10000) { this.error(socket, "command_limit", "Command limit reached. End this match.", message.commandId); return; }
+        if (existing) { await this.send(socket, { type: "update", snapshot: this.view(actor), events: [], outcome: existing, trial: this.trialFor(actor), startChecking: false }, operation); return; }
+        if (this.record.outcomes.length >= 10000) { await error("command_limit", "Command limit reached. End this match.", message.commandId); return; }
         const unsupported = message.command.type === "configure" &&
           (message.command.mode !== "test" || message.command.parameters.freshnessMs !== locationInactivityMs);
         const next: EngineTransition = unsupported
@@ -346,40 +466,40 @@ export class MatchAuthority extends DurableObject<Env> {
                 return observation ? [observation] : [];
               }) : [] });
         const outcome = { commandId: message.commandId, accepted: !next.rejections.length, reason: next.rejections[0]?.reason ?? "Command accepted." };
-        try { await this.accept(next, outcome); } catch { this.error(socket, "storage_failed", "State was not saved. Retry the same command ID.", message.commandId); return; }
+        try { await this.accept(next, outcome); } catch { await error("storage_failed", "State was not saved. Retry the same command ID.", message.commandId); return; }
         if (outcome.accepted && (message.command.type === "begin_resume" || message.command.type === "cancel_resume" ||
           message.command.type === "pause" || message.command.type === "end" || message.command.type === "start")) {
           this.trial = null; this.clearMeasurements();
         }
-        this.broadcast(next.events, outcome, socket); return;
+        await this.broadcast(next.events, outcome, socket, operation); return;
       }
       if (message.type === "clock_probe") {
         const serverReceiveMs = Date.now(), serverSendMs = Date.now();
         this.clocks.set(socket, { clock: null, probe: { nonce: message.nonce, clientSendMs: message.clientSendMs, serverReceiveMs, serverSendMs },
           wallMs: serverSendMs, monotonicMs: performance.now() });
-        this.send(socket, { type: "clock_reply", nonce: message.nonce, clientSendMs: message.clientSendMs, serverReceiveMs, serverSendMs }); return;
+        await this.send(socket, { type: "clock_reply", nonce: message.nonce, clientSendMs: message.clientSendMs, serverReceiveMs, serverSendMs }, operation); return;
       }
       if (message.type === "clock_confirm") {
         const session = this.clocks.get(socket);
-        if (!session?.probe || session.probe.nonce !== message.nonce) { this.error(socket, "clock_invalid", "Request a new clock probe."); return; }
+        if (!session?.probe || session.probe.nonce !== message.nonce) { await error("clock_invalid", "Request a new clock probe."); return; }
         const clock = estimateClock({ ...session.probe, clientReceiveMs: message.clientReceiveMs });
         session.probe = null;
-        if (!clock.ok) { session.clock = null; this.error(socket, "clock_invalid", clock.error); return; }
+        if (!clock.ok) { session.clock = null; await error("clock_invalid", clock.error); return; }
         session.clock = clock.value; session.wallMs = Date.now(); session.monotonicMs = performance.now();
-        this.send(socket, { type: "clock_ready", clock: clock.value }); return;
+        await this.send(socket, { type: "clock_ready", clock: clock.value }, operation); return;
       }
       if (message.type === "trial_begin") {
-        if (!actor.host) { this.error(socket, "forbidden", "Only the host can select the trial pair."); return; }
+        if (!actor.host) { await error("forbidden", "Only the host can select the trial pair."); return; }
         if (this.record.checkpoint.phase !== "lobby" || message.playerIds[0] === message.playerIds[1] ||
           !message.playerIds.every(id => this.record!.checkpoint.players.some(p => p.id === id))) {
-          this.error(socket, "trial_invalid", "Select two different joined players in the lobby."); return;
+          await error("trial_invalid", "Select two different joined players in the lobby."); return;
         }
         this.trial = { playerIds: message.playerIds, readyIds: [], collecting: false, referenceM: message.referenceM };
-        this.clearMeasurements(); this.broadcast([]); return;
+        this.clearMeasurements(); await this.broadcast([]); return;
       }
       if (message.type === "trial_ready") {
         if (!this.trial || !actor.playerId || !this.trial.playerIds.includes(actor.playerId)) {
-          this.error(socket, "trial_invalid", "You are not in the selected trial pair."); return;
+          await error("trial_invalid", "You are not in the selected trial pair."); return;
         }
         if (!message.consent) { this.trial = null; this.clearMeasurements(); }
         else {
@@ -387,24 +507,24 @@ export class MatchAuthority extends DurableObject<Env> {
           this.trial.collecting = this.trial.readyIds.length === 2;
           this.scheduleTick();
         }
-        this.broadcast([]); return;
+        await this.broadcast([]); return;
       }
       if (message.type === "trial_end") {
         if (!actor.host && (!actor.playerId || !this.trial?.playerIds.includes(actor.playerId))) {
-          this.error(socket, "forbidden", "Only the trial pair or host can stop the trial."); return;
+          await error("forbidden", "Only the trial pair or host can stop the trial."); return;
         }
         this.trial = null; this.clearMeasurements();
-        this.broadcast([]); return;
+        await this.broadcast([]); return;
       }
       if (message.type === "position") {
         if (!actor.playerId || !this.record.checkpoint.players.some(p => p.id === actor.playerId)) {
-          this.error(socket, "forbidden", "Join as a player to report a location."); return;
+          await error("forbidden", "Join as a player to report a location."); return;
         }
         const view = this.view(actor);
         const inTrial = this.trial?.collecting && this.trial.playerIds.includes(actor.playerId);
-        if (view.phase === "ended") { this.error(socket, "collection_stopped", "This room has ended."); return; }
+        if (view.phase === "ended") { await error("collection_stopped", "This room has ended."); return; }
         const previous = this.reports.get(actor.playerId);
-        if (previous && message.report.seq <= previous.seq) { this.error(socket, "old_sequence", "Location sequence is out of order."); return; }
+        if (previous && message.report.seq <= previous.seq) { await error("old_sequence", "Location sequence is out of order."); return; }
         const receivedAtMs = Date.now(), prior = this.lastKnownPositions.get(actor.playerId);
         const timing = this.captureTimings.get(actor.playerId)?.get(message.report.capturedAtMs);
         const repeated = !!timing || prior?.report.capturedAtMs === message.report.capturedAtMs;
@@ -416,7 +536,7 @@ export class MatchAuthority extends DurableObject<Env> {
           nowMs: receivedAtMs, actor: null, commands: [], observations: gameplay ? [gameplay] : [],
         });
         const resetIds = !gameplay || gameplay.accuracyM > (view.parameters?.maxAccuracyM ?? 0) ? [actor.playerId] : [];
-        try { await this.accept(next, null, undefined, resetIds); } catch { this.error(socket, "storage_failed", "Fix was not applied. Retry after reconnecting."); return; }
+        try { await this.accept(next, null, undefined, resetIds); } catch { await error("storage_failed", "Fix was not applied. Retry after reconnecting."); return; }
         if (this.record.checkpoint.phase !== "ended") {
           this.reports.set(actor.playerId, { seq: message.report.seq, capturedAtMs: message.report.capturedAtMs });
           this.lastKnownPositions.set(actor.playerId, known);
@@ -431,20 +551,20 @@ export class MatchAuthority extends DurableObject<Env> {
           }
           this.captureTimings.set(actor.playerId, timings);
         }
-        this.broadcast(next.events);
+        await this.broadcast(next.events);
         if (inTrial && this.trial && !repeated) {
           const clockSession = this.clocks.get(socket);
           if (!clockSession?.clock || Math.abs((Date.now() - clockSession.wallMs) - (performance.now() - clockSession.monotonicMs)) > 100) {
-            this.error(socket, "diagnostic_clock_unavailable", "Location was shared. A clock check is needed only for measurements.");
+            await error("diagnostic_clock_unavailable", "Location was shared. A clock check is needed only for measurements.");
           } else {
             const normalized = normalizeObservation(message.report, clockSession.clock, receivedAtMs, actor.playerId, 5000);
-            if (!normalized.ok) this.error(socket, "diagnostic_fix_invalid", `Location was shared. Measurement unavailable: ${normalized.error}`);
+            if (!normalized.ok) await error("diagnostic_fix_invalid", `Location was shared. Measurement unavailable: ${normalized.error}`);
             else {
               const previousReceiptMs = this.lastReceipts.get(actor.playerId);
               this.lastReceipts.set(actor.playerId, receivedAtMs);
               this.measurements.set(actor.playerId, { observation: normalized.value, receivedAtMs,
                 updateGapMs: previousReceiptMs === undefined ? 0 : Math.max(0, receivedAtMs - previousReceiptMs), clock: clockSession.clock });
-              this.sendTrialSample();
+              await this.sendTrialSample();
             }
           }
         }
@@ -457,7 +577,7 @@ export class MatchAuthority extends DurableObject<Env> {
           commands: message.type === "leave" ? [{ type: "leave", playerId: actor.playerId }] : [],
         });
         const sessions = message.type === "leave" ? this.record.sessions.filter(s => s.playerId !== actor.playerId) : this.record.sessions;
-        try { await this.accept(next, null, sessions, message.type === "suspend" ? [actor.playerId] : []); } catch { this.error(socket, "storage_failed", "Suspension was not saved. Stop local location collection."); return; }
+        try { await this.accept(next, null, sessions, message.type === "suspend" ? [actor.playerId] : []); } catch { await error("storage_failed", "Suspension was not saved. Stop local location collection."); return; }
         if (message.type === "leave") {
           this.lastKnownPositions.delete(actor.playerId); this.reports.delete(actor.playerId); this.captureTimings.delete(actor.playerId);
         }
@@ -468,24 +588,23 @@ export class MatchAuthority extends DurableObject<Env> {
         this.measurements.delete(actor.playerId);
         this.lastReceipts.delete(actor.playerId);
         if (this.trial?.playerIds.includes(actor.playerId)) { this.trial = null; this.clearMeasurements(); }
-        this.broadcast(next.events); return;
+        await this.broadcast(next.events); return;
       }
       if (message.type === "feedback_seen") {
         const feedback = this.record.feedback.find(f => f.eventSeq === message.eventSeq);
         if (!feedback || !actor.playerId || !feedback.recipients.some(r => r.playerId === actor.playerId)) {
-          this.error(socket, "feedback_invalid", "This feedback event does not belong to your player."); return;
+          await error("feedback_invalid", "This feedback event does not belong to your player."); return;
         }
         const record = { ...this.record, feedback: this.record.feedback.map(f => f.eventSeq !== message.eventSeq ? f : {
           ...f, recipients: f.recipients.map(r => r.playerId !== actor.playerId || r.seenAfterMs !== null ? r :
             { ...r, seenAfterMs: Math.max(0, Date.now() - f.atMs) }),
         }) };
-        try { await commitRecord(this.ctx.storage, record, []); } catch { this.error(socket, "storage_failed", "Feedback acknowledgement was not saved."); return; }
-        this.record = record; this.broadcast([]); return;
+        try { await commitRecord(this.ctx.storage, record, []); } catch { await error("storage_failed", "Feedback acknowledgement was not saved."); return; }
+        this.record = record; await this.broadcast([]); return;
       }
-      this.error(socket, "invalid_operation", "This operation cannot be used in the current state.");
-    });
+      await error("invalid_operation", "This operation cannot be used in the current state.");
   }
-  private sendTrialSample(): void {
+  private async sendTrialSample(): Promise<void> {
     if (!this.trial?.collecting) return;
     const pair = this.trial.playerIds.map(id => this.measurements.get(id));
     const a = pair[0], b = pair[1], now = Date.now();
@@ -505,20 +624,17 @@ export class MatchAuthority extends DurableObject<Env> {
       referenceM: this.trial.referenceM,
     };
     for (const socket of this.ctx.getWebSockets()) {
-      const actor = this.attachment(socket).actor;
-      if (actor && this.trialFor(actor)) this.send(socket, { type: "trial_sample", sample });
+      const actor = this.connections.get(socket)?.actor;
+      if (actor && this.trialFor(actor)) await this.send(socket, { type: "trial_sample", sample });
     }
   }
-  async webSocketClose(socket: WebSocket): Promise<void> {
-    const authTimer = this.authTimers.get(socket);
-    if (authTimer !== undefined) clearTimeout(authTimer);
-    this.authTimers.delete(socket);
+  private async cleanupConnection(socket: WebSocket): Promise<void> {
     this.clocks.delete(socket);
-    await this.serialize(async () => {
-      const actor = this.attachment(socket).actor;
+      const connection = this.connections.get(socket), actor = connection?.actor;
+      if (connection) { connection.actor = null; connection.authDeadlineMs = Date.now() + 5000; }
       if (actor?.playerId && this.record && this.engine) {
-        const others = this.ctx.getWebSockets().some(s => s !== socket &&
-          this.attachment(s).actor?.playerId === actor.playerId && s.readyState === WebSocket.OPEN);
+        const others = [...this.connections].some(([s, c]) => s !== socket &&
+          c.actor?.playerId === actor.playerId && this.joined(s) && s.readyState === WebSocket.OPEN);
         if (!others) {
           const next = advanceEngine(suspendEngine(this.engine, actor.playerId), { nowMs: Date.now(), actor: null, commands: [], observations: [] });
           await this.accept(next, null, undefined, [actor.playerId]);
@@ -527,21 +643,32 @@ export class MatchAuthority extends DurableObject<Env> {
           this.measurements.delete(actor.playerId);
           this.lastReceipts.delete(actor.playerId);
           if (this.trial?.playerIds.includes(actor.playerId)) { this.trial = null; this.clearMeasurements(); }
-          this.broadcast(next.events);
+          await this.broadcast(next.events);
         }
       }
+  }
+  async webSocketClose(socket: WebSocket): Promise<void> {
+    await this.serialize(async () => {
+      try {
+        const state = this.protocols.get(socket);
+        if (state && this.connections.has(socket)) await this.applyChannel(socket, unwrap(channels.disconnect(state, Date.now())));
+      } catch { await this.failConnection(socket); }
+      this.connections.delete(socket); this.protocols.delete(socket); this.clocks.delete(socket);
+      if (socket.readyState !== WebSocket.CLOSED) socket.close(1000, "Connection closed");
+      await this.scheduleAlarm();
     });
-    socket.close(1000, "Connection closed");
   }
   async webSocketError(socket: WebSocket): Promise<void> {
     await this.webSocketClose(socket);
   }
   private async expire(): Promise<void> {
     for (const socket of this.ctx.getWebSockets()) {
-      this.error(socket, "expired", "Match expired."); socket.close(1008, "Match expired");
+      try { await this.error(socket, "expired", "Match expired."); } catch { /* Close even if the final reply cannot be sent. */ }
     }
-    await this.ctx.storage.deleteAll();
     this.record = null; this.engine = null;
+    this.protocols.clear(); this.connections.clear();
+    await this.ctx.storage.deleteAll();
+    for (const socket of this.ctx.getWebSockets()) socket.close(1008, "Match expired");
     if (this.timer !== null) clearTimeout(this.timer);
     this.timer = null; this.trial = null; this.clearMeasurements(); this.reports.clear(); this.clocks.clear(); this.lastKnownPositions.clear();
     this.captureTimings.clear();
@@ -550,7 +677,17 @@ export class MatchAuthority extends DurableObject<Env> {
     await this.serialize(async () => {
       if (this.record && Date.now() >= this.record.expiresAtMs) await this.expire();
       else if (this.record && this.engine) {
-        await this.tick();
+        for (const [socket, connection] of this.connections) {
+          if (!connection.actor && Date.now() >= connection.authDeadlineMs) {
+            this.connections.delete(socket); this.protocols.delete(socket);
+            socket.close(1008, "Authorization timeout");
+          } else {
+            try { await this.applyChannel(socket, unwrap(channels.expire(this.protocols.get(socket)!, Date.now()))); }
+            catch { await this.failConnection(socket); }
+          }
+        }
+        const snapshot = snapshotFor(this.engine, null, Date.now());
+        if (snapshot.phase === "running" || snapshot.resumeChecking) await this.tick();
         await this.scheduleAlarm();
       }
     });

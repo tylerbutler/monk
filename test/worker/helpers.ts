@@ -1,9 +1,9 @@
 import { SELF } from "cloudflare:test";
-import { sessionCredentialsSchema, parseServerMessage } from "../../src/shared/protocol";
-import type { ClientMessage, HostCommand, RuleParameters, ServerMessage, SessionCredentials } from "../../src/shared/protocol";
+import { sessionCredentialsSchema } from "../../src/shared/protocol";
+import type { HostCommand, RuleParameters, SessionCredentials } from "../../src/shared/protocol";
 import { parameters } from "../fixtures";
+import { closeChannels, openChannel, transports } from "./phoenix-transport";
 
-export const sockets: WebSocket[] = [];
 export async function createMatch(label?: string): Promise<SessionCredentials> {
   const response = await SELF.fetch("https://monk.test/api/matches", { method: "POST", body: JSON.stringify({ label }) });
   if (!response.ok) throw new Error(await response.text());
@@ -16,48 +16,7 @@ export async function joinMatch(code: string, hostToken: string | null = null): 
   if (!response.ok) throw new Error(await response.text());
   return sessionCredentialsSchema.parse(await response.json());
 }
-export async function openSocket(code: string) {
-  const response = await SELF.fetch(`https://monk.test/api/matches/${code}/socket`, {
-    headers: { Upgrade: "websocket", Origin: "https://monk.test" },
-  });
-  const candidate = response.webSocket;
-  if (!candidate) throw new Error(`Socket failed: ${response.status} ${await response.text()}`);
-  const socket = candidate;
-  socket.accept();
-  sockets.push(socket);
-  const messages: ServerMessage[] = [];
-  const waiters = new Set<() => void>();
-  socket.addEventListener("message", event => {
-    const parsed = parseServerMessage(JSON.parse(String(event.data)));
-    if (!parsed.ok) throw new Error(parsed.error);
-    messages.push(parsed.value);
-    for (const wake of waiters) wake();
-  });
-  async function next<T extends ServerMessage["type"]>(type: T): Promise<Extract<ServerMessage, { type: T }>> {
-    for (;;) {
-      const index = messages.findIndex(m => m.type === type);
-      if (index >= 0) {
-        const message = messages.splice(index, 1)[0];
-        if (message.type === type) return message as Extract<ServerMessage, { type: T }>;
-      }
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => { waiters.delete(wake); reject(new Error(`No ${type} reply`)); }, 3000);
-        function wake() { clearTimeout(timeout); waiters.delete(wake); resolve(); }
-        waiters.add(wake);
-      });
-    }
-  }
-  function send(message: ClientMessage) { socket.send(JSON.stringify(message)); }
-  return { socket, send, next, messages };
-}
-export async function connect(credentials: SessionCredentials, supportsRoundResults = true) {
-  const client = await openSocket(credentials.matchCode);
-  client.send({ version: 1, type: "authenticate", hostToken: credentials.hostToken, playerToken: credentials.playerToken,
-    supportsFactionHistory: true, supportsRoundResults });
-  await client.next("authenticated");
-  await client.next("snapshot");
-  return client;
-}
+export const connect = openChannel;
 
 export async function probe(client: Awaited<ReturnType<typeof connect>>) {
   const nonce = crypto.randomUUID();
@@ -67,11 +26,13 @@ export async function probe(client: Awaited<ReturnType<typeof connect>>) {
   return client.next("clock_ready");
 }
 export async function closeSockets() {
-  await Promise.all(sockets.splice(0).map(s => new Promise<void>(resolve => {
+  const closed = [...transports].flatMap(transport => transport.worker ? [transport.worker] : [])
+    .map(s => new Promise<void>(resolve => {
     if (s.readyState === WebSocket.CLOSED) { resolve(); return; }
     s.addEventListener("close", () => resolve(), { once: true });
-    s.close();
-  })));
+  }));
+  closeChannels();
+  await Promise.all(closed);
 }
 
 export async function hostCommand(client: Awaited<ReturnType<typeof connect>>, command: HostCommand, commandId = crypto.randomUUID()) {

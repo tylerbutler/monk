@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
-import { parseClientMessage, parseServerMessage, parametersSchema } from "./protocol";
+import { channelJoinSchema, joinReplySchema, parseClientMessage, parseServerMessage, parametersSchema } from "./protocol";
+import { snapshotFor } from "../worker/engine";
 import { checkpointEngine } from "../worker/engine";
 import { parameters, pulse, runningFixture } from "../../test/fixtures";
 
@@ -8,6 +9,21 @@ it("rejects a client-selected host role and internal joins", () => {
     command: { type: "set_faction", playerId: "p1", faction: "rock" } }).ok).toBe(false);
   expect(parseClientMessage({ version: 1, type: "host_command", commandId: "test-1",
     command: { type: "join", playerId: "p1", faction: "rock" } }).ok).toBe(false);
+});
+it("validates credentials only in strict channel joins", () => {
+  const credentials = { hostToken: "h".repeat(64), playerToken: null };
+  expect(channelJoinSchema.safeParse(credentials).success).toBe(true);
+  expect(channelJoinSchema.safeParse({ ...credentials, role: "host" }).success).toBe(false);
+  expect(channelJoinSchema.safeParse({ ...credentials, hostToken: "short" }).success).toBe(false);
+  expect(parseClientMessage({ version: 1, type: "authenticate", ...credentials }).ok).toBe(false);
+});
+it("requires a complete snapshot in a strict join reply", () => {
+  const reply = { identity: { playerId: "p1", canHost: true, expiresAtMs: 10000 },
+    state: { version: 1, type: "snapshot", streamId: "stream", streamSeq: 1,
+      snapshot: snapshotFor(runningFixture(["rock", "paper"]), "p1", 0), trial: null, startChecking: false } };
+  expect(joinReplySchema.safeParse(reply).success).toBe(true);
+  expect(joinReplySchema.safeParse({ ...reply, state: {} }).success).toBe(false);
+  expect(joinReplySchema.safeParse({ ...reply, token: "secret" }).success).toBe(false);
 });
 it("accepts a versioned authorized-command shape, but not invalid coordinates", () => {
   expect(parseClientMessage({ version: 1, type: "host_command", commandId: "test-1",

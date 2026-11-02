@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { env } from "cloudflare:workers";
 import { evictDurableObject, reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { loadRecord } from "../../src/worker/storage";
-import { closeSockets, connect, hostCommand, joinMatch, openSocket, runningMatch } from "./helpers";
+import { closeSockets, connect, hostCommand, joinMatch, runningMatch } from "./helpers";
 
 afterEach(async () => { await closeSockets(); vi.restoreAllMocks(); await reset(); });
 
@@ -57,17 +57,6 @@ it("keeps a failed end out of storage and broadcasts", async () => {
     .filter(m => m.type === "update" && m.snapshot.roundResults !== undefined)).toEqual([]);
 });
 
-it("omits the new field for legacy sockets", async () => {
-  const match = await runningMatch();
-  const legacy = await openSocket(match.credentials.matchCode);
-  legacy.send({ version: 1, type: "authenticate", hostToken: null, playerToken: match.credentials.playerToken });
-  await legacy.next("authenticated"); await legacy.next("snapshot");
-  await hostCommand(match.host, { type: "end" });
-  expect((await legacy.next("update")).snapshot).not.toHaveProperty("roundResults");
-  legacy.send({ version: 1, type: "snapshot_request" });
-  expect((await legacy.next("snapshot")).snapshot).not.toHaveProperty("roundResults");
-});
-
 it("includes departed players without giving their open sockets results access", async () => {
   const match = await runningMatch();
   const credentials = await joinMatch(match.credentials.matchCode);
@@ -82,9 +71,7 @@ it("includes departed players without giving their open sockets results access",
   expect((await departed.next("update")).snapshot).not.toHaveProperty("roundResults");
   departed.send({ version: 1, type: "snapshot_request" });
   expect((await departed.next("snapshot")).snapshot).not.toHaveProperty("roundResults");
-  const invalid = await openSocket(credentials.matchCode);
-  invalid.send({ version: 1, type: "authenticate", hostToken: null, playerToken: credentials.playerToken });
-  expect((await invalid.next("error")).code).toBe("unauthorized");
+  await expect(connect(credentials)).rejects.toThrow("unauthorized");
 });
 
 it("shows partial legacy coverage without ranks, scores, or trophies", async () => {

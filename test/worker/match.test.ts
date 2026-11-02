@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { env } from "cloudflare:workers";
 import { SELF, reset, runInDurableObject } from "cloudflare:test";
 import { loadRecord } from "../../src/worker/storage";
-import { closeSockets, connect, createMatch, hostCommand, joinMatch, openSocket, probe, runningMatch } from "./helpers";
+import { closeSockets, connect, createMatch, hostCommand, joinMatch, probe, runningMatch } from "./helpers";
 import { parameters } from "../fixtures";
 
 afterEach(async () => {
@@ -320,10 +320,15 @@ it("bounds capture timing memory without keeping past coordinates", async () => 
   const result = await runInDurableObject(stub, async (instance, state) => {
     const socket = state.getWebSockets()[0];
     if (!socket) throw new Error("Authenticated socket missing");
-    for (let seq = 1; seq <= 513; seq++) await instance.webSocketMessage(socket, JSON.stringify({
+    const joinRef = (Reflect.get(instance, "protocols") as Map<WebSocket, unknown>).get(socket);
+    if (!joinRef) throw new Error("Missing protocol");
+    const attachment = socket.deserializeAttachment() as { protocol: string };
+    const ref = JSON.parse(attachment.protocol).memberships[0].join_ref;
+    for (let seq = 1; seq <= 513; seq++) await instance.webSocketMessage(socket, JSON.stringify([ref, String(seq),
+      `match:${credentials.matchCode}`, "position", {
       version: 1, type: "position", report: { seq, capturedAtMs: seq, reportedAgeMs: 0,
         latitude: 0, longitude: 0, accuracyM: 1 },
-    }));
+    }]));
     const histories: unknown = Reflect.get(instance, "captureTimings");
     const timings: unknown = histories instanceof Map ? histories.values().next().value : null;
     return timings instanceof Map ? { count: timings.size, fields: Object.keys(timings.values().next().value) } : { count: 0, fields: [] };
@@ -358,15 +363,11 @@ it("resolves a conversion and measures both visible-recipient acknowledgements",
 
 it("a join code grants no host authority, and wrong-match tokens fail", async () => {
   const a = await createMatch(), b = await createMatch();
-  const socket = await openSocket(a.matchCode);
-  socket.send({ version: 1, type: "authenticate", hostToken: a.matchCode, playerToken: null });
-  expect(await socket.next("error")).toMatchObject({ code: "invalid_message" });
+  await expect(connect({ ...a, hostToken: a.matchCode, playerToken: null })).rejects.toThrow("unauthorized");
   const joined = await connect(await joinMatch(a.matchCode));
   joined.send({ version: 1, type: "host_command", commandId: "forged-host", command: { type: "end" } });
   expect(await joined.next("error")).toMatchObject({ code: "forbidden" });
-  const wrong = await openSocket(a.matchCode);
-  wrong.send({ version: 1, type: "authenticate", hostToken: b.hostToken, playerToken: null });
-  expect(await wrong.next("error")).toMatchObject({ code: "unauthorized" });
+  await expect(connect({ ...a, hostToken: b.hostToken, playerToken: null })).rejects.toThrow("unauthorized");
 });
 it("joining guests receive only their own player credential", async () => {
   const host = await createMatch();
@@ -377,12 +378,14 @@ it("joining guests receive only their own player credential", async () => {
   client.send({ version: 1, type: "snapshot_request" });
   expect(await client.next("snapshot")).toMatchObject({ snapshot: { canHost: false, ownFaction: "paper" } });
 });
-it("returns visible invalid-JSON errors without logging secrets or locations", async () => {
+it("drops malformed JSON without mutation or sensitive logs and still answers snapshots", async () => {
   const logs = vi.spyOn(console, "warn");
   const host = await createMatch();
   const client = await connect(host);
   client.socket.send(`{"token":"${host.hostToken}","latitude":42.12345`);
-  expect(await client.next("error")).toMatchObject({ code: "invalid_json" });
+  client.send({ version: 1, type: "snapshot_request" });
+  expect((await client.next("snapshot")).snapshot.phase).toBe("lobby");
+  expect(client.messages.filter(m => m.type === "error")).toEqual([]);
   expect(JSON.stringify(logs.mock.calls)).not.toContain(host.hostToken);
   expect(JSON.stringify(logs.mock.calls)).not.toContain("42.12345");
 });
@@ -437,7 +440,7 @@ it("closed rosters reject new joins and corrupt records are not treated as new m
 it("rejects cross-origin sockets and credentials in URLs", async () => {
   const host = await createMatch();
   for (const [suffix, origin] of [["", "https://other.test"], ["?token=secret", "https://monk.test"]]) {
-    const response = await SELF.fetch(`https://monk.test/api/matches/${host.matchCode}/socket${suffix}`, {
+    const response = await SELF.fetch(`https://monk.test/api/matches/${host.matchCode}/socket/websocket${suffix}`, {
       headers: { Upgrade: "websocket", Origin: origin },
     });
 
