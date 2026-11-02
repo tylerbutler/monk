@@ -1,5 +1,5 @@
 import { test as base, expect } from "@playwright/test";
-import type { Page, WebSocket } from "@playwright/test";
+import type { Page, WebSocket, WebSocketRoute } from "@playwright/test";
 import { parseServerMessage } from "../../src/shared/protocol";
 import { installGeolocation } from "./geolocation";
 
@@ -13,8 +13,12 @@ function geolocation(eastM: number, accuracy = 1) {
   return { latitude: 0, longitude: eastM / 6371000 * 180 / Math.PI, accuracy };
 }
 
-export const test = base.extend<{ duel: Duel }>({
-  duel: async ({ browser, baseURL }, use) => {
+export const test = base.extend<{
+  duel: Duel;
+  hostSocketRoute: ((socket: WebSocketRoute) => void) | undefined;
+}>({
+  hostSocketRoute: [undefined, { option: true }],
+  duel: async ({ browser, baseURL, hostSocketRoute }, use) => {
     if (!baseURL) throw new Error("The duel fixture requires a local base URL.");
     const origin = new URL(baseURL).origin;
     const hostContext = await browser.newContext({
@@ -29,6 +33,7 @@ export const test = base.extend<{ duel: Duel }>({
         await installGeolocation(guestContext, geolocation(60));
         const host = await hostContext.newPage();
         const guest = await guestContext.newPage();
+        if (hostSocketRoute) await host.routeWebSocket("**/socket/websocket?**", hostSocketRoute);
         let connection: WebSocket | undefined;
         const observeConnection = (socket: WebSocket) => { connection = socket; };
         host.on("websocket", observeConnection);
@@ -64,8 +69,13 @@ export const test = base.extend<{ duel: Duel }>({
                 let input: unknown;
                 try { input = JSON.parse(frame.payload.toString()); }
                 catch { throw new Error("The server sent invalid JSON."); }
-                const parsed = parseServerMessage(input);
-                if (!parsed.ok) throw new Error(parsed.error);
+                if (!Array.isArray(input) || input.length !== 5 ||
+                  typeof input[2] !== "string" || !input[2].startsWith("match:")) return false;
+                const payload: unknown = input[4];
+                const application = input[3] === "phx_reply" && typeof payload === "object" &&
+                  payload !== null && "response" in payload ? payload.response : payload;
+                const parsed = parseServerMessage(application);
+                if (!parsed.ok) return false;
                 const message = parsed.value;
                 if (message.type !== "update" || !message.outcome) return false;
                 if (!message.outcome.accepted) throw new Error(`Round settings rejected: ${message.outcome.reason}`);

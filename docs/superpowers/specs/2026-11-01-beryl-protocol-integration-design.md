@@ -2,7 +2,7 @@
 
 Date: 2026-11-01
 
-Status: Written specification approved. Implementation has not started.
+Status: Implemented and software-verified. Physical phone testing remains pending.
 
 Implementation plan:
 [Beryl protocol integration](../plans/2026-11-01-beryl-protocol-integration.md).
@@ -22,7 +22,7 @@ The user approved replacing both ends of the connection and requested no
 compatibility support. Remove the old wire protocol and client capability
 negotiation. Do not add a dual-protocol server or a migration window.
 
-## Current system and integration boundary
+## System before integration and integration boundary
 
 `src/client/connection.ts` uses native WebSockets. It handles first-frame
 authentication, reconnect backoff, command retries, diagnostic clock messages,

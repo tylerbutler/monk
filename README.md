@@ -20,7 +20,11 @@ npm ci
 ```
 
 If you do not use mise, install the same Node and Gleam versions and put them
-on `PATH`. Gleam builds download the locked `gleam_stdlib` dependency from Hex.
+on `PATH`. Gleam builds download locked Hex and Git dependencies.
+The portable `beryl_protocol` package comes from `tylerbutler/beryl`, under
+`packages/beryl_protocol`; Roost comes from `tylerbutler/roost`. Both use
+commit references in `rules/gleam.toml`. The existing JavaScript rules build
+includes these packages; it does not use the BEAM-only Beryl runtime.
 Commit `package-lock.json` and `rules/manifest.toml` when dependencies change.
 
 ## Software verification
@@ -74,6 +78,10 @@ collector, storage sequencing, Svelte UI, WebSocket, Worker, and Gleam rules.
 It checks conversion on both screens, range exit, stopping sharing, and a
 visible nearby player whose location is too inaccurate for influence.
 Each interruption case includes recovery and conversion.
+Connection tests forward traffic to the real backend, drop a command reply,
+and close a transport. They check same-player recovery, saved command outcomes,
+and no repeated celebration. Synthetic visibility changes check that hidden
+recovery does not send positions or restart sharing without consent.
 
 The fixture uses the host controls to set a five-second conversion time and
 one-millisecond grace period. All other settings retain their defaults.
@@ -110,6 +118,28 @@ quality, OS permissions, and screen-lock or background behavior remain
 unverified by this suite. Follow the
 [two-iPhone trial checklist](docs/playtests/two-iphone-trial.md) for device checks.
 The physical trial remains **pending**.
+
+### Connections and recovery
+
+The browser uses Phoenix 1.8.16 over a same-origin WebSocket with one
+`match:<code>` channel. Roost and `beryl_protocol` handle framing and channel
+state in the Durable Object. Credentials go in the join payload, not the URL.
+This replaces the old wire protocol; reload an old open page after deployment.
+The server does not support old clients or long polling.
+
+The client sends a heartbeat every 25 seconds. The server closes a connection
+after 60 seconds without a heartbeat, even if it receives position reports.
+Rejoining requires a valid private snapshot before the app can send positions.
+An authority restart pauses a running round and clears temporary positions.
+Recovery snapshots do not replay conversion or award celebrations.
+Location reports do not queue for reconnect.
+
+The server saves host command outcomes before replies. Repeating a command ID
+returns its saved result without a second change. The client waits five seconds
+for a reply and makes at most five automatic attempts per join. An unresolved
+command stays unconfirmed; **Retry unconfirmed command** uses the same ID.
+Pending commands stay in the open page through reconnect, but do not survive a page reload.
+Saved server outcomes remain until the room expires.
 
 ### Marketing identity
 
