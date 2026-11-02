@@ -10,3 +10,4 @@ rules/build/
 playwright-report/
 test-results/
 .impeccable/review/
+.worktrees/
