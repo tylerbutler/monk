@@ -431,6 +431,15 @@ and serves `dist/` through `ASSETS`. Do not put account credentials or local
 secrets in source or CI. Validate the resulting HTTPS origin and manifest
 assets before inviting the two phones.
 
+Shared Monk links use the wide social graphic at
+`/brand/samples/social-1200x630.png`. Valid `/?room=XXXXXXXX` invite links
+use `/brand/samples/invite-1080.png` and show the room code in the preview
+title. The Worker writes Open Graph and Twitter Card metadata into the
+HTML, with absolute URLs for the serving origin. Link previews do not need
+JavaScript or access to room state. They contain no player data.
+Invalid room codes use the normal Monk preview. Rewritten HTML is not
+cached, so one room's metadata is not reused for another room.
+
 Wrangler runs `scripts/cloudflare-build.sh` before local serving, dry-run
 bundling, and deployment. The script uses the pinned installed Gleam compiler.
 On the Linux x86_64 Workers Builds image, it can install the missing compiler

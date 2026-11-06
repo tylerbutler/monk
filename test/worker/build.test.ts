@@ -32,6 +32,56 @@ it("serves the Monk game page identity", async () => {
   expect(html).toContain("<title>Monk</title>");
   expect(html).not.toContain("outdoor playtest");
 });
+it.each([
+  ["/", "Monk", "social-1200x630.png", "1200", "630", "https://monk.test/"],
+  ["/?room=ABCDEFGH", "Join Monk room ABCDEFGH", "invite-1080.png", "1080", "1080",
+    "https://monk.test/?room=ABCDEFGH"],
+  ["/?room=%20abcdefgh%20&source=chat", "Join Monk room ABCDEFGH", "invite-1080.png", "1080", "1080",
+    "https://monk.test/?room=ABCDEFGH"],
+  ["/?room=%22%3E%3Cscript%3E", "Monk", "social-1200x630.png", "1200", "630", "https://monk.test/"],
+])("serves crawler-readable social metadata at %s", async (path, title, image, width, height, shareUrl) => {
+  const response = await SELF.fetch(`https://monk.test${path}`);
+  expect(response.status).toBe(200);
+  const html = await response.text();
+  const tags = Array.from(html.matchAll(/<meta\b[^>]*>/g), match => match[0]);
+  const meta = (key: string) => {
+    const matching = tags.filter(tag => tag.includes(`property="${key}"`) || tag.includes(`name="${key}"`));
+    expect(matching, key).toHaveLength(1);
+    return matching[0].match(/\bcontent="([^"]*)"/)?.[1];
+  };
+  expect(meta("og:title")).toBe(title);
+  expect(meta("twitter:title")).toBe(title);
+  expect(meta("og:type")).toBe("website");
+  expect(meta("og:site_name")).toBe("Monk");
+  expect(meta("og:url")).toBe(shareUrl);
+  expect(meta("twitter:card")).toBe(image === "invite-1080.png" ? "summary" : "summary_large_image");
+  expect(meta("og:image:width")).toBe(width);
+  expect(meta("og:image:height")).toBe(height);
+  expect(meta("og:description")).toBeTruthy();
+  expect(meta("twitter:description")).toBe(meta("og:description"));
+  expect(meta("description")).toBe(meta("og:description"));
+  expect(meta("og:image:alt")).toBeTruthy();
+  expect(meta("twitter:image:alt")).toBe(meta("og:image:alt"));
+  const imageUrl = meta("og:image");
+  expect(imageUrl).toBe(`https://monk.test/brand/samples/${image}`);
+  expect(meta("twitter:image")).toBe(imageUrl);
+  if (!imageUrl) throw new Error("The social image is missing");
+  const asset = await SELF.fetch(imageUrl);
+  expect(asset.status).toBe(200);
+  expect(asset.headers.get("content-type")).toContain("image/png");
+  const bytes = new DataView(await asset.arrayBuffer());
+  expect(bytes.getUint32(16)).toBe(Number(width));
+  expect(bytes.getUint32(20)).toBe(Number(height));
+  expect(response.headers.get("cache-control")).toContain("no-store");
+  expect(response.headers.has("etag")).toBe(false);
+});
+it("does not reuse asset validators for a different room preview", async () => {
+  const response = await SELF.fetch("https://monk.test/?room=BCDEFGHJ", {
+    headers: { "If-None-Match": "*", "If-Modified-Since": "Wed, 01 Jan 2030 00:00:00 GMT" },
+  });
+  expect(response.status).toBe(200);
+  expect(await response.text()).toContain('content="Join Monk room BCDEFGHJ"');
+});
 it("serves the avatar artwork as the game favicon", async () => {
   const html = await (await SELF.fetch("https://monk.test/")).text();
   const path = html.match(/<link\b[^>]*rel="icon"[^>]*href="([^"]+)"/)?.[1];

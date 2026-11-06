@@ -35,6 +35,43 @@ export default {
         return Response.json({ error: "Match service failed. Try again." }, { status: 500 });
       }
     }
-    return env.ASSETS.fetch(request);
+    if (!["/", "/index.html"].includes(url.pathname) || !["GET", "HEAD"].includes(request.method)) {
+      return env.ASSETS.fetch(request);
+    }
+    const assetRequest = new Request(request);
+    assetRequest.headers.delete("if-none-match");
+    assetRequest.headers.delete("if-modified-since");
+    const response = await env.ASSETS.fetch(assetRequest);
+    if (response.status !== 200 || !response.headers.get("content-type")?.includes("text/html")) return response;
+
+    const code = url.searchParams.get("room")?.trim().toUpperCase() ?? "";
+    const invited = /^[A-Z2-9]{8}$/.test(code);
+    const shareUrl = new URL("/", url);
+    if (invited) shareUrl.searchParams.set("room", code);
+    const image = new URL(`/brand/samples/${invited ? "invite-1080.png" : "social-1200x630.png"}`, url).href;
+    const metadata: Record<string, string> = {
+      "og:url": shareUrl.href, "og:image": image, "twitter:image": image,
+    };
+    if (invited) {
+      const title = `Join Monk room ${code}`;
+      const description = `You are invited to room ${code}. Join your friends for outdoor play. Change sides. Keep playing.`;
+      const alt = "Monk. Your friends. New sides. Change sides. Keep playing.";
+      Object.assign(metadata, {
+        "og:title": title, "twitter:title": title,
+        description, "og:description": description, "twitter:description": description,
+        "og:image:width": "1080", "og:image:height": "1080",
+        "og:image:alt": alt, "twitter:image:alt": alt, "twitter:card": "summary",
+      });
+    }
+    const preview = new HTMLRewriter().on("head meta", {
+      element(element) {
+        const key = element.getAttribute("property") ?? element.getAttribute("name");
+        if (key && metadata[key] !== undefined) element.setAttribute("content", metadata[key]);
+      },
+    }).transform(response);
+    preview.headers.set("cache-control", "no-store");
+    preview.headers.delete("etag");
+    preview.headers.delete("last-modified");
+    return preview;
   },
 };
