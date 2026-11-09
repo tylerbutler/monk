@@ -90,24 +90,25 @@ export class MatchAuthority extends DurableObject<Env> {
     console.warn("monk", code);
     this.send(socket, { type: "error", code, reason, commandId });
   }
-  private view(actor: VerifiedActor) {
+  private view(actor: VerifiedActor, feedback = this.feedbackSummary()) {
     if (!this.engine || !this.record) throw new Error("Match engine is unavailable.");
     const snapshot = snapshotFor(this.engine, actor.playerId, Date.now(), actor.host, this.lastKnownPositions);
     const canReadResults = actor.host || snapshot.roster.some(p => p.id === actor.playerId);
-    return { ...snapshot, feedback: this.feedbackSummary(),
+    return { ...snapshot, feedback,
       ...(snapshot.phase === "ended" && canReadResults ?
         { roundResults: selectRoundResults(this.record.awardData, snapshot.roster) } : {}) };
   }
   private feedbackSummary(): FeedbackSummary {
+    const now = Date.now();
     const records = this.record?.feedback ?? [];
     const recipients = records.flatMap(f => f.recipients);
     const delays = recipients.flatMap(r => r.seenAfterMs === null ? [] : [r.seenAfterMs]).sort((a, b) => a - b);
     const completed = records.filter(f => f.recipients.every(r => r.seenAfterMs !== null && r.seenAfterMs <= 1000)).length;
     const failed = records.filter(f => !f.recipients.every(r => r.seenAfterMs !== null && r.seenAfterMs <= 1000) &&
-      (Date.now() - f.atMs >= 1000 || f.recipients.some(r => r.seenAfterMs !== null && r.seenAfterMs > 1000))).length;
+      (now - f.atMs >= 1000 || f.recipients.some(r => r.seenAfterMs !== null && r.seenAfterMs > 1000))).length;
     return {
       intended: recipients.length, acknowledged: delays.length,
-      missing: records.reduce((n, f) => n + (Date.now() - f.atMs >= 1000 ? f.recipients.filter(r => r.seenAfterMs === null).length : 0), 0),
+      missing: records.reduce((n, f) => n + (now - f.atMs >= 1000 ? f.recipients.filter(r => r.seenAfterMs === null).length : 0), 0),
       conversions: records.length, conversionsWithinOneSecond: completed, conversionsFailed: failed,
       conversionsPending: records.length - completed - failed,
       p95UpperMs: delays.length && delays.length === recipients.length ? delays[Math.ceil(delays.length * .95) - 1] : null,
@@ -127,11 +128,12 @@ export class MatchAuthority extends DurableObject<Env> {
       (e.attackerId === actor.playerId || e.targetId === actor.playerId));
   }
   private broadcast(events: EngineEvent[], outcome: CommandOutcome | null = null, caller?: WebSocket): void {
+    const feedback = this.feedbackSummary();
     for (const socket of this.ctx.getWebSockets()) {
       const actor = this.attachment(socket).actor;
       if (!actor) continue;
       const privateEvents = this.eventsFor(actor, events);
-      this.send(socket, { type: "update", snapshot: this.view(actor), events: privateEvents,
+      this.send(socket, { type: "update", snapshot: this.view(actor, feedback), events: privateEvents,
         outcome: socket === caller ? outcome : null, trial: this.trialFor(actor), startChecking: false });
     }
   }
@@ -334,7 +336,11 @@ export class MatchAuthority extends DurableObject<Env> {
         if (!actor.host) { this.error(socket, "forbidden", "Only the host can send this command.", message.commandId); return; }
         const existing = this.record.outcomes.find(o => o.commandId === message.commandId);
         if (existing) { this.send(socket, { type: "update", snapshot: this.view(actor), events: [], outcome: existing, trial: this.trialFor(actor), startChecking: false }); return; }
-        if (this.record.outcomes.length >= 10000) { this.error(socket, "command_limit", "Command limit reached. End this match.", message.commandId); return; }
+        if (this.record.outcomes.length >= 10000 &&
+          !(message.command.type === "end" && this.record.checkpoint.phase !== "ended")) {
+          this.error(socket, "command_limit", this.record.checkpoint.phase === "ended" ?
+            "Command limit reached. This match has ended." : "Command limit reached. End this match.", message.commandId); return;
+        }
         const unsupported = message.command.type === "configure" &&
           (message.command.mode !== "test" || message.command.parameters.freshnessMs !== locationInactivityMs);
         const next: EngineTransition = unsupported

@@ -1,5 +1,5 @@
 import { parseClientMessage, parseServerMessage } from "../shared/protocol";
-import type { ClientMessage, ConnectionHandlers, MatchConnection, SessionCredentials } from "../shared/protocol";
+import type { ClientMessage, ConnectionHandlers, MatchConnection, ServerMessage, SessionCredentials } from "../shared/protocol";
 
 export function connectMatch(credentials: SessionCredentials, handlers: ConnectionHandlers): MatchConnection {
   let socket: WebSocket, stopped = false, authenticated = false, needsSnapshot = true;
@@ -8,6 +8,8 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
   let backoff = 1000;
   let clockProbe: { nonce: string; wallMs: number; monotonicMs: number } | null = null;
   let probeTimeout: ReturnType<typeof setTimeout> | null = null;
+  let clockRefresh: ReturnType<typeof setTimeout> | null = null;
+  let diagnosticRequested = false, trialActive = false;
   const pending = new Map<string, { message: Extract<ClientMessage, { type: "host_command" }>; attempts: number }>();
   function status(state: "connecting" | "connected" | "reconnecting" | "failed", reason: string | null) {
     if (!stopped) handlers.onStatus({ state, reason });
@@ -15,15 +17,44 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
   function rawSend(message: ClientMessage) {
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
   }
-  function requestProbe() {
-    if (!authenticated || stopped) return;
+  function clearProbe() {
+    clockProbe = null;
     if (probeTimeout !== null) clearTimeout(probeTimeout);
+    probeTimeout = null;
+  }
+  function stopDiagnostics() {
+    clearProbe();
+    if (clockRefresh !== null) clearTimeout(clockRefresh);
+    clockRefresh = null; diagnosticRequested = false; trialActive = false;
+  }
+  function scheduleProbe(delay: number) {
+    if (clockRefresh !== null) clearTimeout(clockRefresh);
+    clockRefresh = null;
+    if (!diagnosticRequested || !trialActive || !authenticated || stopped) return;
+    clockRefresh = setTimeout(() => { clockRefresh = null; requestProbe(); }, delay);
+  }
+  function updateTrial(message: Extract<ServerMessage, { type: "snapshot" | "update" }>) {
+    if (!message.trial || message.snapshot.phase !== "lobby") { stopDiagnostics(); return; }
+    const active = message.trial.collecting && message.snapshot.ownPlayerId !== null &&
+      message.trial.readyIds.includes(message.snapshot.ownPlayerId);
+    const started = active && !trialActive;
+    trialActive = active;
+    if (!active) {
+      if (clockRefresh !== null) clearTimeout(clockRefresh);
+      clockRefresh = null;
+    } else if (started && diagnosticRequested && !clockProbe) requestProbe();
+  }
+  function requestProbe() {
+    if (!authenticated || stopped || clockProbe) return;
+    if (clockRefresh !== null) clearTimeout(clockRefresh);
+    clockRefresh = null;
     clockProbe = { nonce: crypto.randomUUID(), wallMs: Date.now(), monotonicMs: performance.now() };
     status("connected", "Checking the phone clock.");
     rawSend({ version: 1, type: "clock_probe", nonce: clockProbe.nonce, clientSendMs: clockProbe.wallMs });
     probeTimeout = setTimeout(() => {
       clockProbe = null; probeTimeout = null;
       status("connected", "Diagnostic clock check timed out. Location sharing is still available.");
+      scheduleProbe(5000);
     }, 5000);
   }
   function open() {
@@ -49,6 +80,7 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
       if (message.type === "snapshot") {
         if (message.streamSeq <= cursor) return;
         cursor = message.streamSeq; needsSnapshot = false;
+        updateTrial(message);
         if (message.startChecking) {
           for (const command of pending.values()) if (command.message.command.type === "start") command.attempts = 1;
         }
@@ -70,30 +102,33 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
       if (message.type === "clock_reply") {
         if (!clockProbe || message.nonce !== clockProbe.nonce || message.clientSendMs !== clockProbe.wallMs ||
           Math.abs((Date.now() - clockProbe.wallMs) - (performance.now() - clockProbe.monotonicMs)) > 100) {
-          clockProbe = null;
-          if (probeTimeout !== null) clearTimeout(probeTimeout);
-          probeTimeout = null;
-          status("connected", "Diagnostic clock reply is invalid. Retry the measurement clock check."); return;
+          clearProbe();
+          status("connected", "Diagnostic clock reply is invalid. Retry the measurement clock check.");
+          scheduleProbe(5000); return;
         }
         rawSend({ version: 1, type: "clock_confirm", nonce: message.nonce, clientReceiveMs: Date.now() });
       }
       if (message.type === "clock_ready") {
-        clockProbe = null;
-        if (probeTimeout !== null) clearTimeout(probeTimeout);
-        probeTimeout = null; status("connected", null);
+        clearProbe(); status("connected", null);
+        scheduleProbe(20000);
       }
       if (message.type === "update") {
+        updateTrial(message);
         if (message.outcome) pending.delete(message.outcome.commandId);
         if (message.startChecking) {
           for (const command of pending.values()) if (command.message.command.type === "start") command.attempts = 1;
         }
       }
       if (message.type === "error") {
+        if (message.commandId && message.code !== "storage_failed") pending.delete(message.commandId);
         if (message.code === "clock_invalid") {
-          clockProbe = null;
-          if (probeTimeout !== null) clearTimeout(probeTimeout);
-          probeTimeout = null;
+          clearProbe();
           status("connected", `Diagnostic clock: ${message.reason}`);
+          scheduleProbe(5000);
+        }
+        if ((message.code === "diagnostic_clock_unavailable" || message.code === "diagnostic_fix_invalid") &&
+          diagnosticRequested && trialActive && !clockProbe && clockRefresh === null) {
+          scheduleProbe(0);
         }
         if (message.code === "expired" || message.code === "unauthorized" || message.code === "auth_timeout") {
           status("failed", message.reason); handlers.onMessage(message); close(); return;
@@ -104,9 +139,7 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
     socket.addEventListener("error", () => status("reconnecting", "Connection failed. Location collection is stopped."));
     socket.addEventListener("close", event => {
       authenticated = false;
-      clockProbe = null;
-      if (probeTimeout !== null) clearTimeout(probeTimeout);
-      probeTimeout = null;
+      stopDiagnostics();
       if (stopped) return;
       if (event.code === 1008) { status("failed", "Session ended or credentials expired."); close(); return; }
       status("reconnecting", "Connection lost. Waiting to reconnect.");
@@ -117,7 +150,7 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
     stopped = true;
     clearInterval(retryInterval);
     if (reconnect !== null) clearTimeout(reconnect);
-    if (probeTimeout !== null) clearTimeout(probeTimeout);
+    stopDiagnostics();
     pending.clear(); socket.close();
   }
   const retryInterval = setInterval(() => {
@@ -133,7 +166,9 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
       const parsed = parseClientMessage(message);
       if (!parsed.ok) { status("failed", parsed.error); return; }
       if (message.type === "host_command") pending.set(message.commandId, { message, attempts: 1 });
-      if (message.type === "clock_probe") { requestProbe(); return; }
+      if (message.type === "clock_probe") { diagnosticRequested = true; requestProbe(); return; }
+      if (message.type === "trial_end" || message.type === "leave" || message.type === "suspend" ||
+        message.type === "trial_ready" && !message.consent) stopDiagnostics();
       if (!authenticated) {
         if (message.type !== "host_command") status("failed", "Connection is not ready. Location was not sent.");
         return;

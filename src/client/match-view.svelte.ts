@@ -1,5 +1,7 @@
 import { flushSync, mount, unmount } from "svelte";
+import type { ComponentProps } from "svelte";
 import Match from "./Match.svelte";
+import type TrialPanel from "./TrialPanel.svelte";
 import type { CompassState } from "./compass";
 import type { EngineEvent, PlayerSnapshot } from "../shared/protocol";
 import type { GameMotion, HudState, MatchActions } from "./views";
@@ -11,6 +13,7 @@ type ViewProps = {
   motion: GameMotion;
   ceremonyStartedAt: number | null;
   finishCeremony(): void;
+  trial?: ComponentProps<typeof TrialPanel>;
 };
 type MotionView = { props: ViewProps; activity: PlayerSnapshot; lastEventSeq: number };
 const views = new WeakMap<HTMLElement, MotionView & { component: ReturnType<typeof mount> }>();
@@ -81,17 +84,17 @@ function updateMotion(view: MotionView, snapshot: PlayerSnapshot, live: boolean,
 }
 
 export function renderMatch(root: HTMLElement, snapshot: PlayerSnapshot, actions: MatchActions,
-  live = true, elapsedMs = 0, hud: HudState | null = null): void {
+  live = true, elapsedMs = 0, hud: HudState | null = null, trial?: ComponentProps<typeof TrialPanel>): void {
   const view = views.get(root);
   if (view) {
     flushSync(() => {
       updateCeremony(view, snapshot, live, hud?.stateSource);
       updateMotion(view, snapshot, live, elapsedMs, hud?.events ?? []);
-      Object.assign(view.props, { snapshot, actions, live, elapsedMs, hud });
+      Object.assign(view.props, { snapshot, actions, live, elapsedMs, hud, trial });
     });
     return;
   }
-  const props: ViewProps = $state({ snapshot, actions, live, elapsedMs, hud, headingDegrees: null,
+  const props: ViewProps = $state({ snapshot, actions, live, elapsedMs, hud, trial, headingDegrees: null,
     motion: { reveal: null, conversions: [], failures: [] }, ceremonyStartedAt: null,
     finishCeremony() { props.ceremonyStartedAt = null; } });
   const motionView = { props, activity: activitySnapshot(snapshot, live, elapsedMs), lastEventSeq: -1 };

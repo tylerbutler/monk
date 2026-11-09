@@ -1,5 +1,7 @@
 <script lang="ts">
   import { flushSync } from "svelte";
+  import type { ComponentProps } from "svelte";
+  import TrialPanel from "./TrialPanel.svelte";
   import { configureSchema, factionSchema, gamePreset, locationInactivityMs } from "../shared/protocol";
   import type { PlayerSnapshot, RuleParameters } from "../shared/protocol";
   import type { GameMotion, HudState, MatchActions } from "./views";
@@ -8,11 +10,12 @@
   import Radar from "./Radar.svelte";
   import RoundResults from "./RoundResults.svelte";
 
-  let { snapshot, actions, live, elapsedMs, hud, headingDegrees, motion, ceremonyStartedAt, finishCeremony }: {
+  let { snapshot, actions, live, elapsedMs, hud, headingDegrees, motion, ceremonyStartedAt, finishCeremony, trial }: {
     snapshot: PlayerSnapshot; actions: MatchActions; live: boolean; elapsedMs: number;
     hud: HudState | null; headingDegrees: number | null;
     motion: GameMotion;
     ceremonyStartedAt: number | null; finishCeremony: () => void;
+    trial?: ComponentProps<typeof TrialPanel>;
   } = $props();
   const activity = $derived(activitySnapshot(snapshot, live, elapsedMs));
   const parameters = $derived(snapshot.parameters ?? gamePreset);
@@ -262,6 +265,7 @@
           <p>{f.p95UpperMs === null ? "Display-delay upper-bound p95 is unavailable while acknowledgements are missing." :
             `Display-delay upper-bound p95: ${Math.ceil(f.p95UpperMs)} ms. This is not one-way network latency.`}</p>
         {/if}
+        {#if snapshot.phase === "lobby" && trial}<TrialPanel {...trial} />{/if}
       </details>
     </details>
   </section>

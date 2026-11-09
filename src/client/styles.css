@@ -236,7 +236,7 @@ progress::-moz-progress-bar { background: var(--accent); }
 .radar-failure circle { fill: none; stroke: var(--faction-color); stroke-width: 2; }
 @keyframes conversion-signal { from { transform: translate(0, 0); } to { transform: translate(var(--signal-x), var(--signal-y)); } }
 @keyframes conversion-failure { 0%, 18.4615% { transform: scale(1); opacity: 1; animation-timing-function: cubic-bezier(.16, 1, .3, 1); } 100% { transform: scale(1.75); opacity: 0; } }
-/* The app reparents the HUD on updates; seek from event age so motion cannot restart. */
+/* Seek from monotonic event age so state updates cannot restart motion. */
 .conversion-progress-tip, .conversion-result, .conversion-takeover, .conversion-bubble,
 .conversion-faction-stamp, .conversion-impact-ring, .conversion-reveal-copy,
 .radar-conversion-signal, .radar-conversion-stamp, .radar-failure {

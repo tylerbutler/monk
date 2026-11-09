@@ -1,52 +1,22 @@
 import { flushSync, mount, unmount } from "svelte";
 import type { ComponentProps } from "svelte";
-import Entry from "./Entry.svelte";
-import RoomInvite from "./RoomInvite.svelte";
+import AppShell from "./AppShell.svelte";
+import TrialPanel from "./TrialPanel.svelte";
 import { connectMatch } from "./connection";
 import { requestLocationPermission, startLocation } from "./location";
 import { startCompass } from "./compass";
 import type { CompassState } from "./compass";
 import { addTrialSample, exportTrialSummary, newTrialSummary } from "./trial";
-import { describeEvent, names, symbols } from "./views";
-import { icons } from "./icons";
-import wordmark from "../../brand/assets/wordmark.svg?url";
+import { describeEvent } from "./views";
 import { destroyMatch, renderActivity, renderMatch, setRadarHeading, syncAwardDialog } from "./match-view.svelte";
 import { deviceSchema, isFactionChange, sessionCredentialsSchema } from "../shared/protocol";
 import type { ConnectionStatus, EngineEvent, HostCommand, LocationStatus, MatchConnection, PlayerSnapshot, ServerMessage, SessionCredentials, TrialSample, TrialStatus, TrialSummary } from "../shared/protocol";
 
-function addIcon(parent: HTMLElement, source: string, className = "ui-icon"): HTMLImageElement {
-  const image = document.createElement("img");
-  image.src = source; image.alt = ""; image.className = className; image.setAttribute("aria-hidden", "true");
-  parent.prepend(image); return image;
-}
-function text(parent: HTMLElement, tag: string, value: string, className = "", icon?: string): HTMLElement {
-  const node = document.createElement(tag); node.textContent = value; node.className = className;
-  if (icon) addIcon(node, icon);
-  parent.append(node); return node;
-}
-function eventLine(parent: HTMLElement, event: EngineEvent, snapshot: PlayerSnapshot): HTMLElement {
-  const line = text(parent, "p", describeEvent(event, snapshot));
-  line.dataset.eventSeq = String(event.eventSeq);
-  if (event.faction) addIcon(line, symbols[event.faction], "faction-icon").dataset.faction = event.faction;
-  return line;
-}
-function field(parent: HTMLElement, label: string, name: string, type = "text", value = ""): HTMLInputElement {
-  const wrapper = document.createElement("label");
-  wrapper.textContent = label;
-  const input = document.createElement("input");
-  input.type = type; input.name = name; input.id = name; input.value = value; input.dataset.retain = "";
-  if (type === "number") { input.min = "0"; input.step = "any"; input.inputMode = "decimal"; }
-  wrapper.append(input); parent.append(wrapper); return input;
-}
-
 export function mountApp(root: HTMLElement): () => void {
+  root.replaceChildren();
   const game = document.createElement("div");
   game.className = "match-view";
-  const entryRoot = document.createElement("div"); entryRoot.className = "entry-view";
-  const inviteRoot = document.createElement("div"); inviteRoot.className = "room-invitation";
-  let entryComponent: ReturnType<typeof mount> | null = null;
-  let inviteComponent: ReturnType<typeof mount> | null = null;
-  const history = document.createElement("details"); history.id = "faction-history";
+  let shell: ReturnType<typeof mount> | null = null;
   let credentials: SessionCredentials | null = null, connection: MatchConnection | null = null;
   let snapshot: PlayerSnapshot | null = null, trial: TrialStatus | null = null;
   let snapshotLive = false, snapshotReceivedAt = performance.now();
@@ -58,7 +28,7 @@ export function mountApp(root: HTMLElement): () => void {
   let conversionNotices: EngineEvent[] = [];
   let motionEvents: EngineEvent[] = [];
   let stateSource: "snapshot" | "update" | undefined;
-  let factionHistory: EngineEvent[] = [], historyAvailable = false, historyDirty = true, interruption: string | null = null;
+  let factionHistory: EngineEvent[] = [], historyAvailable = false, interruption: string | null = null;
   const pendingCommands = new Map<string, HostCommand>();
   const pendingFeedback = new Set<number>(), acknowledged = new Set<number>();
   let feedbackFrame = false, audio: AudioContext | null = null;
@@ -73,29 +43,61 @@ export function mountApp(root: HTMLElement): () => void {
   const invitedCode = rawInvite?.trim().toUpperCase() ?? null;
   const validInvite = invitedCode !== null && /^[A-Z2-9]{8}$/.test(invitedCode);
   if (invitedCode !== null && !validInvite) error = "This invite link has an invalid room code. Enter a valid eight-character code.";
-  const retained = new Map<string, { value: string; checked: boolean }>();
-  const disclosures = new Map<string, boolean>();
-  const entryProps = $state<ComponentProps<typeof Entry>>({
-    invitedCode: validInvite ? invitedCode : null, error: "", errorField: "",
-    create: async (label: string) => { connect(await request("/api/matches", { label })); },
-    join: async (code: string, label: string) => { connect(await request(`/api/matches/${code}/join`, { label })); },
+  const trialProps = $state<ComponentProps<typeof TrialPanel>>({
+    snapshot: null, trial: null, latest: null, summary: null, diagnosticStatus: "", requestingPermission: false,
+    begin: beginTrial, agree: requestTrialConsent,
+    decline() {
+      cancelPermissionCheck(); trialConsent = false;
+      connection?.send({ version: 1, type: "trial_ready", consent: false });
+      reconcileCollection(); render();
+    },
+    end() {
+      cancelPermissionCheck(); trialConsent = false;
+      connection?.send({ version: 1, type: "trial_end" }); reconcileCollection(); render();
+    },
+    exportSummary() {
+      if (!summary) return;
+      const blob = new Blob([exportTrialSummary(summary)], { type: "application/json" });
+      const url = URL.createObjectURL(blob), anchor = document.createElement("a");
+      anchor.href = url; anchor.download = "monk-two-iphone-summary.json"; anchor.click(); URL.revokeObjectURL(url);
+    },
+    discard() { summary = null; latest = null; render(); },
     reportError: showError,
   });
-  const inviteProps = $state<ComponentProps<typeof RoomInvite>>({
-    url: "", roomCode: "", phase: null, canHost: false, playerCount: 0,
-    start: () => sendCommand({ type: "start" }), reportError: showError,
+  const shellProps = $state<ComponentProps<typeof AppShell>>({
+    credentials: null, snapshot: null, connectionStatus, location, error: "", commandStatus: "",
+    feedback: [], conversionNotices: [], feedbackPending: false, factionHistory: [], historyAvailable: false,
+    audioAvailable: false, game, trial: trialProps,
+    entry: {
+      invitedCode: validInvite ? invitedCode : null, error: "", errorField: "",
+      create: async (label: string) => { connect(await request("/api/matches", { label })); },
+      join: async (code: string, label: string) => { connect(await request(`/api/matches/${code}/join`, { label })); },
+      reportError: showError,
+    },
+    invitation: {
+      url: "", roomCode: "", phase: null, canHost: false, playerCount: 0,
+      start: () => sendCommand({ type: "start" }), reportError: showError,
+    },
+    async joinHost() {
+      if (!credentials) return;
+      const player = await request(`/api/matches/${credentials.matchCode}/join`, { hostToken: credentials.hostToken });
+      connect({ ...player, hostToken: credentials.hostToken });
+    },
+    async enableAudio() {
+      audio = new AudioContext();
+      try { await audio.resume(); } catch { showError("Sound could not start. Visual feedback stays on."); }
+      render();
+    },
+    leave, reconnect() { if (credentials) connect(credentials); },
+    dismissConversion() {
+      const ids = new Set(conversionNotices.slice(-2).map(event => event.eventSeq));
+      conversionNotices = conversionNotices.filter(event => !ids.has(event.eventSeq));
+      for (const id of ids) pendingFeedback.delete(id);
+      render();
+    },
+    reportError: showError,
   });
 
-  function destroyInvitation() {
-    const component = inviteComponent;
-    if (component) flushSync(() => { void unmount(component); });
-    inviteComponent = null;
-  }
-  function destroyEntry() {
-    const component = entryComponent;
-    if (component) flushSync(() => { void unmount(component); });
-    entryComponent = null;
-  }
   function showError(reason: string, fieldId = "") {
     error = reason; errorField = fieldId; render();
     if (fieldId) {
@@ -127,21 +129,6 @@ export function mountApp(root: HTMLElement): () => void {
       else stop();
       applyCompass();
     }
-  }
-  function button(parent: HTMLElement, label: string, action: () => void | Promise<void>, name: string, className = "", icon?: string, busyLabel?: string) {
-    const node = document.createElement("button");
-    const caption = document.createTextNode(label);
-    node.type = "button"; node.append(caption); node.dataset.action = name; node.className = className;
-    node.id = `action-${name}`;
-    if (icon) addIcon(node, icon);
-    node.addEventListener("click", async () => {
-      node.disabled = true;
-      node.setAttribute("aria-busy", "true");
-      if (busyLabel) caption.data = busyLabel;
-      try { await action(); } catch (failure) { showError(failure instanceof Error ? failure.message : "Request failed. Try again."); }
-      finally { node.disabled = false; node.removeAttribute("aria-busy"); caption.data = label; }
-    });
-    parent.append(node); return node;
   }
   function stopCollection() {
     const stop = stopLocation; stopLocation = null;
@@ -217,7 +204,7 @@ export function mountApp(root: HTMLElement): () => void {
       snapshot = message.snapshot; trial = message.trial;
       snapshotReceivedAt = performance.now(); snapshotLive = document.visibilityState === "visible";
       if (message.type === "snapshot" && message.factionHistory !== undefined) {
-        factionHistory = message.factionHistory.filter(isFactionChange); historyAvailable = true; historyDirty = true;
+        factionHistory = message.factionHistory.filter(isFactionChange); historyAvailable = true;
       }
       if (snapshot.phase === "ended" || previousTrial && (!trial || previousTrial.referenceM !== trial.referenceM ||
         previousTrial.playerIds.some((id, index) => id !== trial?.playerIds[index]))) {
@@ -232,7 +219,7 @@ export function mountApp(root: HTMLElement): () => void {
         for (const event of message.events) {
           if (!feedback.some(e => e.eventSeq === event.eventSeq)) feedback = [...feedback, event].slice(-6);
           if (isFactionChange(event) && !factionHistory.some(e => e.eventSeq === event.eventSeq)) {
-            factionHistory.push(event); historyDirty = true;
+            factionHistory = [...factionHistory, event];
           }
           if (snapshot.ownPlayerId && (event.attackerId === snapshot.ownPlayerId || event.targetId === snapshot.ownPlayerId)) {
             if (event.type === "attack_interrupted") interruption = describeEvent(event, snapshot);
@@ -247,6 +234,10 @@ export function mountApp(root: HTMLElement): () => void {
       }
     }
     if (message.type === "error") {
+      if (message.commandId && message.code !== "storage_failed") {
+        pendingCommands.delete(message.commandId);
+        commandStatus = message.reason;
+      }
       if (message.code.startsWith("diagnostic_") || message.code === "clock_invalid") diagnosticStatus = message.reason;
       else error = message.reason;
       if (message.code === "expired") { cancelPermissionCheck(); consent = false; trialConsent = false; clockReady = false; stopCollection(); }
@@ -258,22 +249,24 @@ export function mountApp(root: HTMLElement): () => void {
     reconcileCollection(); render();
   }
   function connect(next: SessionCredentials) {
+    const sameSession = credentials?.matchCode === next.matchCode &&
+      credentials.hostToken === next.hostToken && credentials.playerToken === next.playerToken;
     if (credentials?.matchCode !== next.matchCode) {
       pendingCommands.clear(); commandStatus = ""; consent = false;
       factionHistory = []; historyAvailable = false; interruption = null;
     }
     cancelPermissionCheck(); stopCollection(); connection?.close();
     stopLiveUpdates();
-    destroyMatch(game);
-    credentials = next; snapshot = null; trial = null; trialConsent = false; clockReady = false; error = ""; diagnosticStatus = "";
-    historyAvailable = false; historyDirty = true;
+    if (!sameSession) { destroyMatch(game); snapshot = null; trial = null; }
+    credentials = next; trialConsent = false; clockReady = false; error = ""; diagnosticStatus = "";
+    historyAvailable = false;
     try { sessionStorage.setItem("monk-session", JSON.stringify(next)); }
     catch { throw new Error("Session storage is unavailable. Allow storage to keep private credentials."); }
     connection = connectMatch(next, {
       onMessage: receive,
       onStatus(status) {
         connectionStatus = status;
-        if (status.state === "connected" && status.reason) { clockReady = false; diagnosticStatus = status.reason; }
+        if (status.state === "connected" && status.reason) diagnosticStatus = status.reason;
         if (status.state !== "connected") { clockReady = false; stopCollection(); }
         if (status.state !== "connected") stopLiveUpdates();
         reconcileCollection();
@@ -342,10 +335,9 @@ export function mountApp(root: HTMLElement): () => void {
     cancelPermissionCheck(); stopCollection(); stopLiveUpdates(); consent = false; trialConsent = false;
     connection?.send({ version: 1, type: "leave" });
     connection?.close(); connection = null; credentials = null; snapshot = null; trial = null;
-    latest = null; summary = null; retained.clear(); disclosures.clear(); error = "";
+    latest = null; summary = null; error = "";
     pendingCommands.clear(); pendingFeedback.clear(); acknowledged.clear(); feedback = [];
     conversionNotices = []; factionHistory = []; historyAvailable = false; interruption = null;
-    history.replaceChildren(); history.open = false; historyDirty = true;
     destroyMatch(game);
     sessionStorage.removeItem("monk-session"); render();
   }
@@ -359,276 +351,77 @@ export function mountApp(root: HTMLElement): () => void {
     if (!a.success || !b.success || !conditions) throw new Error("Enter both phone models, iOS versions, modes, and test conditions before the trial.");
     return newTrialSummary({ devices: [a.data, b.data], conditions, candidates: snapshot?.parameters ? [snapshot.parameters] : [] });
   }
-  function trialView(parent: HTMLElement) {
-    const section = document.createElement("details"); section.className = "trial"; section.id = "location-trial";
-    section.open = !!trial; parent.append(section);
-    text(section, "summary", "Optional location measurement", "", icons.location).id = "location-trial-toggle";
-    text(section, "p", "Both selected players must agree to measurements. This does not change ordinary sharing or block the game.");
-    if (diagnosticStatus) text(section, "p", diagnosticStatus, "radar-note");
-    const details = document.createElement("details"); details.id = "trial-devices";
-    details.open = !summary; text(details, "summary", "Device pair and conditions", "", icons.settings).id = "trial-devices-toggle"; section.append(details);
-    const devices = document.createElement("div"); devices.className = "form-grid"; details.append(devices);
-    for (const i of [0, 1]) {
-      field(devices, `Phone ${i + 1} model`, `device-${i}`, "text");
-      field(devices, `Phone ${i + 1} iOS version`, `os-${i}`, "text");
-      const label = document.createElement("label"); label.textContent = `Phone ${i + 1} mode`;
-      const select = document.createElement("select"); select.id = `mode-${i}`; select.dataset.retain = "";
-      for (const mode of ["Safari tab", "Installed PWA", "Other browser"]) { const option = document.createElement("option"); option.textContent = mode; select.append(option); }
-      label.append(select); devices.append(label);
+  function beginTrial() {
+    const next = readDevices();
+    const a = root.querySelector<HTMLSelectElement>("#pair-0")?.value;
+    const b = root.querySelector<HTMLSelectElement>("#pair-1")?.value;
+    const rawReference = root.querySelector<HTMLInputElement>("#referenceM")?.value ?? "";
+    const referenceM = rawReference === "" ? null : Number(rawReference);
+    if (!a || !b || a === b || (referenceM !== null && (!Number.isFinite(referenceM) || referenceM < 0))) {
+      throw new Error("Select two different joined players and a valid reference separation.");
     }
-    field(details, "Outdoor conditions (do not enter names or coordinates)", "conditions");
-    if (snapshot?.canHost && !trial) {
-      const form = document.createElement("div"); form.className = "form-grid"; section.append(form);
-      for (const i of [0, 1]) {
-        const label = document.createElement("label"); label.textContent = `Trial player ${i + 1}`;
-        const select = document.createElement("select"); select.id = `pair-${i}`; select.dataset.retain = "";
-        snapshot.roster.forEach((player, index) => {
-          const option = document.createElement("option"); option.value = player.id; option.textContent = player.label;
-          option.selected = index === i; select.append(option);
-        });
-        label.append(select); form.append(label);
+    if (summary?.sampleCount) {
+      const prior = [summary.devices, summary.conditions, summary.candidates.map(c => c.parameters)];
+      const requested = [next.devices, next.conditions, next.candidates.map(c => c.parameters)];
+      if (JSON.stringify(prior) !== JSON.stringify(requested)) {
+        throw new Error("Export, then discard the existing summary before changing devices, conditions, or parameter candidates.");
       }
-      field(form, "Marked reference separation (metres)", "referenceM", "number");
-      button(section, "Request trial consent", () => {
-        const next = readDevices();
-        const a = root.querySelector<HTMLSelectElement>("#pair-0")?.value;
-        const b = root.querySelector<HTMLSelectElement>("#pair-1")?.value;
-        const rawReference = root.querySelector<HTMLInputElement>("#referenceM")?.value ?? "";
-        const referenceM = rawReference === "" ? null : Number(rawReference);
-        if (!a || !b || a === b || (referenceM !== null && (!Number.isFinite(referenceM) || referenceM < 0))) {
-          throw new Error("Select two different joined players and a valid reference separation.");
-        }
-        if (summary?.sampleCount) {
-          const prior = [summary.devices, summary.conditions, summary.candidates.map(c => c.parameters)];
-          const requested = [next.devices, next.conditions, next.candidates.map(c => c.parameters)];
-          if (JSON.stringify(prior) !== JSON.stringify(requested)) {
-            throw new Error("Export, then discard the existing summary before changing devices, conditions, or parameter candidates.");
-          }
-          summary = { ...summary, runtime: next.runtime };
-        } else summary = next;
-        latest = null;
-        connection?.send({ version: 1, type: "trial_begin", playerIds: [a, b], referenceM });
-      }, "trial-begin");
-    }
-    if (trial) {
-      text(section, "p", trial.collecting ? "Trial collecting. Keep both apps visible." : "Waiting for both players to agree.", "state-line");
-      if (snapshot?.ownPlayerId && trial.playerIds.includes(snapshot.ownPlayerId) && !trial.readyIds.includes(snapshot.ownPlayerId)) {
-        button(section, requestingPermission ? "Requesting location access..." : "Agree and collect location",
-          requestTrialConsent, "trial-ready").disabled = requestingPermission;
-        button(section, "Decline trial", () => {
-          cancelPermissionCheck(); trialConsent = false;
-          connection?.send({ version: 1, type: "trial_ready", consent: false });
-          reconcileCollection(); render();
-        }, "trial-decline", "secondary");
-      }
-      button(section, "Stop trial", () => {
-        cancelPermissionCheck(); trialConsent = false;
-        connection?.send({ version: 1, type: "trial_end" }); reconcileCollection(); render();
-      }, "trial-end", "secondary");
-      text(section, "p", trial.referenceM === null ? "No reference separation entered." : `Reference separation: ${trial.referenceM} m`);
-    }
-    if (latest) {
-      const metrics = document.createElement("dl"); metrics.className = "measurements"; section.append(metrics);
-      const metric = (label: string, value: string) => { text(metrics, "dt", label); text(metrics, "dd", value); };
-      metric("Estimated distance", `${latest.distanceM.toFixed(1)} m`);
-      metric("Reported uncertainty", latest.uncertaintiesM.map(v => `${v.toFixed(1)} m`).join(" / "));
-      metric("Sample age", latest.agesMs.map(v => `${Math.round(v)} ms`).join(" / "));
-      metric("Update gap", latest.updateGapsMs.map(v => `${v} ms`).join(" / "));
-      metric("Capture-to-receipt upper bound", latest.delayBoundsMs.map(v => `${Math.ceil(v[1])} ms`).join(" / "));
-      metric("Clock uncertainty", latest.clockUncertaintiesMs.map(v => `${v} ms`).join(" / "));
-    }
-    if (summary) {
-      text(section, "p", `${summary.sampleCount} samples. Results are provisional and device-specific.`);
-      button(section, "Export measurement summary", () => {
-        if (!summary) return;
-        const blob = new Blob([exportTrialSummary(summary)], { type: "application/json" });
-        const url = URL.createObjectURL(blob), anchor = document.createElement("a");
-        anchor.href = url; anchor.download = "monk-two-iphone-summary.json"; anchor.click(); URL.revokeObjectURL(url);
-      }, "export-trial", "secondary");
-      if (!trial) button(section, "Discard measurement summary", () => {
-        summary = null; latest = null; render();
-      }, "discard-trial", "secondary");
-    }
+      summary = { ...summary, runtime: next.runtime };
+    } else summary = next;
+    latest = null;
+    connection?.send({ version: 1, type: "trial_begin", playerIds: [a, b], referenceM });
   }
   function render() {
     if (disposed) return;
-    if (!credentials || snapshot?.phase === "ended") destroyInvitation();
     const playing = snapshot?.phase === "running" || snapshot?.phase === "paused";
     if (!snapshot?.radar || snapshot.phase === "ended") { stopCompass?.(); stopCompass = null; }
     const active = document.activeElement;
-    const focused = active instanceof HTMLElement ? active.id : "";
-    const selection = active instanceof HTMLInputElement && active.selectionStart !== null ?
-      { start: active.selectionStart, end: active.selectionEnd, direction: active.selectionDirection } : null;
-    for (const input of root.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-retain]")) {
-      retained.set(input.id, { value: input.value, checked: input instanceof HTMLInputElement && input.checked });
-    }
-    for (const details of root.querySelectorAll<HTMLDetailsElement>("details[id]")) {
-      if (details.id === "room-invite" && details.dataset.phase !== (snapshot?.phase ?? "") ||
-        details.id === "safe-play" && details.dataset.context !== (playing ? "game" : "setup")) disclosures.delete(details.id);
-      else disclosures.set(details.id, details.open);
-    }
-    root.replaceChildren();
     root.classList.toggle("in-game", playing);
     root.classList.toggle("homepage", !credentials);
     root.classList.toggle("room-shell", !!credentials && !playing);
     root.dataset.phase = snapshot?.phase ?? (credentials ? "connecting" : "entry");
-    const header = document.createElement("header"); header.className = "masthead"; root.append(header);
-    const title = text(header, "h1", "");
-    const logo = document.createElement("img");
-    logo.src = wordmark; logo.alt = "Monk"; logo.width = 104; logo.height = 32; title.append(logo);
-    if (!credentials) {
-      const skip = document.createElement("a"); skip.href = "#play"; skip.className = "skip-to-play";
-      skip.textContent = "Skip to play"; header.append(skip);
-    }
-    if (playing && credentials) text(header, "span", `Room ${credentials.matchCode}`, "room-code");
-    if (snapshot && conversionNotices.length) {
-      const notice = document.createElement("aside"); notice.className = "conversion-notice";
-      notice.setAttribute("role", "status"); notice.setAttribute("aria-live", pendingFeedback.size ? "polite" : "off");
-      notice.setAttribute("aria-label", "Conversion notification"); root.append(notice);
-      const shown = conversionNotices.slice(-2);
-      for (const event of [...shown].reverse()) {
-        eventLine(notice, event, snapshot);
-      }
-      button(notice, "Dismiss notification", () => {
-        const ids = new Set(shown.map(e => e.eventSeq));
-        conversionNotices = conversionNotices.filter(e => !ids.has(e.eventSeq));
-        for (const id of ids) pendingFeedback.delete(id);
-        render();
-      }, "dismiss-conversion", "secondary", icons.close);
-    }
-    if (error && credentials) { const alert = text(root, "p", error, "error"); alert.setAttribute("role", "alert"); }
-    if (!credentials) {
-      root.append(entryRoot);
-      flushSync(() => { entryProps.error = error; entryProps.errorField = errorField; });
-      if (!entryComponent) {
-        entryComponent = mount(Entry, { target: entryRoot, props: entryProps });
-        flushSync();
-      }
-    } else {
-      destroyEntry();
-      const top = document.createElement("div"); top.className = "match-heading";
-      if (!playing) root.append(top);
-      const roomTools = document.createElement("details"); roomTools.id = "room-tools";
-      const tools = playing ? roomTools : top;
-      if (playing) { top.append(roomTools); text(roomTools, "summary", "Room & options", "", icons.settings).id = "room-tools-toggle"; }
-      text(tools, "h2", `Room ${credentials.matchCode}`);
-      if (snapshot?.phase !== "ended") {
-        const roomCode = credentials.matchCode;
+    flushSync(() => {
+      Object.assign(trialProps, { snapshot, trial, latest, summary, diagnosticStatus, requestingPermission });
+      Object.assign(shellProps, { credentials, snapshot, connectionStatus, location, error, commandStatus,
+        feedback, conversionNotices, feedbackPending: pendingFeedback.size > 0, factionHistory, historyAvailable,
+        audioAvailable: !!snapshot?.ownPlayerId && typeof AudioContext !== "undefined" && !audio });
+      Object.assign(shellProps.entry, { error, errorField });
+      if (credentials) {
         const invite = new URL("/", window.location.origin); invite.searchParams.set("room", credentials.matchCode);
-        if (inviteProps.url !== invite.href) destroyInvitation();
-        flushSync(() => Object.assign(inviteProps, {
-          url: invite.href, roomCode, phase: snapshot?.phase ?? null,
+        Object.assign(shellProps.invitation, {
+          url: invite.href, roomCode: credentials.matchCode, phase: snapshot?.phase ?? null,
           canHost: snapshot?.canHost ?? false, playerCount: snapshot?.roster.length ?? 0,
-        }));
-        tools.append(inviteRoot);
-        if (!inviteComponent) {
-          inviteComponent = mount(RoomInvite, { target: inviteRoot, props: inviteProps });
-          flushSync();
-        }
-      }
-      if (!snapshot) text(root, "p", "Connecting to the private match. Location is not collected.");
-      if (snapshot) {
-        if (snapshot.canHost && !snapshot.ownPlayerId && snapshot.phase !== "ended") {
-          button(tools, "Join as a player on this phone", async () => {
-            if (!credentials) return;
-            const player = await request(`/api/matches/${credentials.matchCode}/join`, { hostToken: credentials.hostToken });
-            connect({ ...player, hostToken: credentials.hostToken });
-          }, "host-join", "", icons.join);
-        }
-        const section = document.createElement("section"); section.className = "gameplay"; root.append(section);
-        const known = snapshot.radar?.reference?.playerId === snapshot.ownPlayerId ||
-          snapshot.radar?.players.some(p => p.playerId === snapshot?.ownPlayerId && p.position);
-        const locationLabel = snapshot.ownPlayerId && snapshot.phase !== "ended" ?
-          consent ? location.collecting ? known && location.permission === "granted" ?
-            "Location sharing is on" : "Waiting for your location" :
-            "Sharing will resume when connected and visible." : "Location sharing is off" : null;
-        section.append(game);
-        renderMatch(game, snapshot, {
-          pause: () => sendCommand({ type: "pause" }),
-          beginResume: () => sendCommand({ type: "begin_resume" }), cancelResume: () => sendCommand({ type: "cancel_resume" }),
-          end: () => sendCommand({ type: "end" }), configure: sendCommand,
-          setFaction: (playerId, faction) => sendCommand({ type: "set_faction", playerId, faction }), leave,
-        }, connectionStatus.state === "connected" && snapshotLive, Math.max(0, performance.now() - snapshotReceivedAt), {
-          locationLabel, sharing: consent, compass, toggleCompass, interruption, events: motionEvents, stateSource,
-          reconnect() { if (credentials) connect(credentials); },
-          shareLocation() { error = ""; consent = true; reconcileCollection(); render(); },
-          stopSharing() { consent = false; trialConsent = false; cancelPermissionCheck(); stopCollection(); render(); },
         });
-        motionEvents = [];
-        applyCompass();
-        if (commandStatus) { const notice = text(section, "p", commandStatus, "state-line"); notice.setAttribute("role", "status"); }
-        for (const select of section.querySelectorAll<HTMLSelectElement>('[data-action="set-faction"]')) {
-          select.disabled = [...pendingCommands.values()].some(c => c.type === "set_faction");
-        }
-        if (snapshot.ownPlayerId && typeof AudioContext !== "undefined" && !audio) {
-          button(tools, "Enable sound cues", async () => {
-            audio = new AudioContext();
-            try { await audio.resume(); } catch { showError("Sound could not start. Visual feedback stays on."); }
-            render();
-          }, "enable-audio", "secondary", icons.sound);
-        }
-        game.querySelector("#location-trial")?.remove();
-        if (snapshot.phase === "lobby" && snapshot.canHost) trialView(game.querySelector("#host-diagnostics") ?? game);
-        else if (trial && snapshot.ownPlayerId && trial.playerIds.includes(snapshot.ownPlayerId)) trialView(root);
-        if (feedback.length) {
-          const events = document.createElement("details"); events.id = "match-feedback"; events.className = "feedback";
-          events.setAttribute("aria-label", "Match feedback"); tools.append(events);
-          text(events, "summary", "Match feedback", "", icons.feedback).id = "match-feedback-toggle";
-          for (const event of [...feedback].reverse()) {
-            eventLine(events, event, snapshot);
-          }
-        }
-        root.append(history);
-        if (historyDirty) {
-          const scrollTop = history.querySelector("ol")?.scrollTop ?? 0;
-          history.replaceChildren();
-          text(history, "summary", `Faction changes (${factionHistory.length})`, "", icons.factions).id = "faction-history-toggle";
-          text(history, "p", snapshot.canHost ? "All faction changes in this room. Times are local to this device." :
-            "Only changes involving you. Times are local to this device.", "radar-note");
-          if (!historyAvailable) text(history, "p", "Full history is unavailable. Reconnect to load saved changes.", "warning");
-          else if (!factionHistory.length) text(history, "p", "No faction changes yet. Conversions and host changes will appear here.", "radar-note");
-          const list = document.createElement("ol"); list.className = "faction-history-list"; history.append(list);
-          const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-          for (const event of [...factionHistory].reverse()) {
-            const item = document.createElement("li"); list.append(item);
-            const date = new Date(event.atMs);
-            text(item, "time", timeFormat.format(date)).setAttribute("datetime", date.toISOString());
-            eventLine(item, event, snapshot);
-            if (event.type === "conversion" && event.oldFaction && event.faction) {
-              text(item, "span", `${names[event.oldFaction]} to ${names[event.faction]}`, "faction-history-transition");
-            }
-          }
-          list.scrollTop = scrollTop; historyDirty = false;
-        }
       }
-      if (playing) root.append(top);
-      if (connectionStatus.state === "failed") button(root, "Reconnect", () => { if (credentials) connect(credentials); }, "reconnect", "secondary", icons.refresh);
-      button(tools, "Leave room", leave, "leave", "secondary", icons.leave);
-      const status = document.createElement("section"); status.className = "status"; status.setAttribute("aria-label", "Device status");
-      (connectionStatus.state === "connected" && !location.reason ? tools : root).append(status);
-      text(status, "p", `Connection: ${connectionStatus.state}${connectionStatus.state !== "connected" && connectionStatus.reason ? ` - ${connectionStatus.reason}` : ""}`);
-      if (location.reason && location.reason !== error) text(status, "p", location.reason, "warning");
-    }
-    const safety = document.createElement("footer"); root.append(safety);
-    const help = document.createElement("details"); help.id = "safe-play"; help.open = !!credentials && !playing; safety.append(help);
-    help.dataset.context = playing ? "game" : "setup";
-    text(help, "summary", "Location and safe play", "", icons.safety).id = "safe-play-toggle";
-    text(help, "p", "Agree on a bounded outdoor area and safe routes. No running or touching is needed. You can leave without a gameplay penalty. Keep this app visible and the screen on.");
-    text(help, "p", "Share location uses browser permission. Players and the host see approximate direction and distance, not raw opponent coordinates. Last-known positions stay on radar, but influence stops after 30 seconds without a new position. Sharing stops when this app is hidden or disconnected. Locations stay only in temporary server memory, not match records or exports. Rooms and credentials expire within 24 hours.");
-    text(help, "p", "At round end, room members can see player names, conversion totals, and earned trophies.");
-    for (const input of root.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-retain]")) {
-      const value = retained.get(input.id);
-      if (value) { input.value = value.value; if (input instanceof HTMLInputElement) input.checked = value.checked; }
-    }
-    for (const details of root.querySelectorAll<HTMLDetailsElement>("details[id]")) {
-      if (details.id === "location-trial" && trial) details.open = true;
-      else if (disclosures.has(details.id)) details.open = disclosures.get(details.id) === true;
+    });
+    if (!shell) { shell = mount(AppShell, { target: root, props: shellProps }); flushSync(); }
+    if (credentials && snapshot) {
+      const known = snapshot.radar?.reference?.playerId === snapshot.ownPlayerId ||
+        snapshot.radar?.players.some(p => p.playerId === snapshot?.ownPlayerId && p.position);
+      const locationLabel = snapshot.ownPlayerId && snapshot.phase !== "ended" ?
+        consent ? location.collecting ? known && location.permission === "granted" ?
+          "Location sharing is on" : "Waiting for your location" :
+          "Sharing will resume when connected and visible." : "Location sharing is off" : null;
+      renderMatch(game, snapshot, {
+        pause: () => sendCommand({ type: "pause" }),
+        beginResume: () => sendCommand({ type: "begin_resume" }), cancelResume: () => sendCommand({ type: "cancel_resume" }),
+        end: () => sendCommand({ type: "end" }), configure: sendCommand,
+        setFaction: (playerId, faction) => sendCommand({ type: "set_faction", playerId, faction }), leave,
+      }, connectionStatus.state === "connected" && snapshotLive, Math.max(0, performance.now() - snapshotReceivedAt), {
+        locationLabel, sharing: consent, compass, toggleCompass, interruption, events: motionEvents, stateSource,
+        reconnect() { if (credentials) connect(credentials); },
+        shareLocation() { error = ""; consent = true; reconcileCollection(); render(); },
+        stopSharing() { consent = false; trialConsent = false; cancelPermissionCheck(); stopCollection(); render(); },
+      }, trialProps);
+      motionEvents = [];
+      applyCompass();
+      for (const select of game.querySelectorAll<HTMLSelectElement>('[data-action="set-faction"]')) {
+        select.disabled = [...pendingCommands.values()].some(c => c.type === "set_faction");
+      }
     }
     syncAwardDialog(root);
-    if (focused && !root.querySelector("#award-ceremony")) {
-      const next = root.querySelector<HTMLElement>(`[id="${focused}"]`);
-      next?.focus({ preventScroll: true });
-      if (selection && next instanceof HTMLInputElement) next.setSelectionRange(selection.start, selection.end, selection.direction ?? undefined);
+    if (active instanceof HTMLElement && root.contains(active) && document.activeElement !== active && !root.querySelector("#award-ceremony")) {
+      active.focus({ preventScroll: true });
     }
     acknowledgeVisibleFeedback();
   }
@@ -664,9 +457,8 @@ export function mountApp(root: HTMLElement): () => void {
     stopCompass?.(); stopCompass = null;
     clearInterval(ageInterval);
     if (audio) void audio.close().catch(() => console.warn("monk", "audio_close_failed"));
-    destroyInvitation();
-    destroyEntry();
     destroyMatch(game);
-    document.removeEventListener("visibilitychange", visibility); root.replaceChildren();
+    if (shell) { const component = shell; shell = null; flushSync(() => { void unmount(component); }); }
+    document.removeEventListener("visibilitychange", visibility);
   };
 }

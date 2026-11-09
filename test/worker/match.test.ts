@@ -1,9 +1,10 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { env } from "cloudflare:workers";
-import { SELF, reset, runInDurableObject } from "cloudflare:test";
-import { loadRecord } from "../../src/worker/storage";
+import { SELF, evictDurableObject, reset, runInDurableObject } from "cloudflare:test";
+import { commitRecord, loadRecord } from "../../src/worker/storage";
 import { closeSockets, connect, createMatch, hostCommand, joinMatch, openSocket, probe, runningMatch } from "./helpers";
 import { parameters } from "../fixtures";
+import type { FeedbackSummary } from "../../src/shared/protocol";
 
 afterEach(async () => {
   await closeSockets();
@@ -418,6 +419,30 @@ it("a failed storage commit emits no successful transition", async () => {
   client.send({ version: 1, type: "snapshot_request" });
   expect(await client.next("snapshot")).toMatchObject({ snapshot: { phase: "lobby" } });
 });
+it("permits an idempotent final end command after the normal command budget is exhausted", async () => {
+  const credentials = await createMatch();
+  const stub = env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode));
+  await runInDurableObject(stub, async (_, state) => {
+    const record = await loadRecord(state.storage);
+    if (!record) throw new Error("Missing match fixture");
+    await commitRecord(state.storage, { ...record, outcomes: Array.from({ length: 10000 }, (_, i) => ({
+      commandId: `saved-${i}`, accepted: true, reason: "Command accepted.",
+    })) }, []);
+  });
+  await evictDurableObject(stub);
+  const host = await connect(credentials);
+  host.send({ version: 1, type: "host_command", commandId: "over-budget", command: { type: "start" } });
+  expect(await host.next("error")).toMatchObject({ code: "command_limit", commandId: "over-budget" });
+  const ended = await hostCommand(host, { type: "end" }, "final-end");
+  expect(ended.outcome?.accepted).toBe(true);
+  expect(ended.snapshot.phase).toBe("ended");
+  expect((await hostCommand(host, { type: "end" }, "final-end")).outcome).toEqual(ended.outcome);
+  const saved = await runInDurableObject(stub, (_, state) => loadRecord(state.storage));
+  expect(saved?.outcomes).toHaveLength(10001);
+  expect(saved?.events.filter(e => e.type === "lifecycle")).toHaveLength(1);
+  host.send({ version: 1, type: "host_command", commandId: "another-end", command: { type: "end" } });
+  expect(await host.next("error")).toMatchObject({ code: "command_limit", commandId: "another-end" });
+});
 it("closed rosters reject new joins and corrupt records are not treated as new matches", async () => {
   const host = await createMatch();
   const client = await connect(host);
@@ -464,4 +489,24 @@ it("counts missing feedback as a failed conversion rather than reporting success
     intended: 2, acknowledged: 1, missing: 1, conversionsFailed: 1,
     conversionsWithinOneSecond: 0, p95UpperMs: null,
   });
+});
+
+it("calculates room-wide feedback once for all recipients of a broadcast", async () => {
+  const credentials = await createMatch();
+  const guests = await Promise.all([joinMatch(credentials.matchCode), joinMatch(credentials.matchCode)]);
+  const clients = await Promise.all([connect(credentials), ...guests.map(guest => connect(guest))]);
+  const stub = env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode));
+  const counter = await runInDurableObject(stub, instance => {
+    const original: () => FeedbackSummary = Reflect.get(instance, "feedbackSummary");
+    const summarize = vi.fn(() => original.call(instance));
+    Reflect.set(instance, "feedbackSummary", summarize);
+    return { calls: () => summarize.mock.calls.length, restore: () => Reflect.set(instance, "feedbackSummary", original) };
+  });
+  try {
+    const result = await hostCommand(clients[0], { type: "configure", mode: "test",
+      parameters: { ...parameters, freshnessMs: 30000 }, approved: false, deviceLimitations: "" });
+    const updates = await Promise.all(clients.slice(1).map(client => client.next("update")));
+    expect(counter.calls()).toBe(1);
+    expect(updates.map(update => update.snapshot.feedback)).toEqual([result.snapshot.feedback, result.snapshot.feedback]);
+  } finally { counter.restore(); }
 });

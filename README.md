@@ -29,10 +29,13 @@ Commit `package-lock.json` and `rules/manifest.toml` when dependencies change.
 npm test && npm run typecheck && npm run build && npm run check:bundle
 ```
 
-The entry, rules, invitation, and gameplay UI use Svelte with Vite. The
-TypeScript controller in `src/client/app.svelte.ts` owns network connections
-and device permissions. Svelte components stay mounted across updates, so
-form input, invitation QR codes, radar, and focused controls stay in place.
+The application shell, entry, rules, invitation, and gameplay UI use Svelte
+with Vite. The TypeScript controller in `src/client/app.svelte.ts` owns network
+connections and device permissions. `AppShell.svelte` keeps the shell mounted
+and updates notifications, history, and room tools without rebuilding the DOM.
+`TrialPanel.svelte` keeps measurement forms inside host diagnostics or the
+selected player's view. Form input, invitation QR codes, radar, disclosures,
+and focused controls stay in place across updates.
 
 `npm test` compiles the real Gleam rules and runs unit/browser-API tests and
 tests in the Workers runtime. Worker tests first build the browser assets,

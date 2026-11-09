@@ -22,6 +22,19 @@ afterEach(() => {
   mountedViews.clear();
 });
 
+it("replaces the static loading fallback when the persistent shell first mounts", () => {
+  sessionStorage.clear();
+  const root = document.createElement("main");
+  root.innerHTML = "<h1>Monk</h1><p>Loading Monk. Location sharing is off.</p>";
+  document.body.append(root);
+  const cleanup = mountApp(root);
+  try {
+    expect(root.querySelectorAll("h1")).toHaveLength(1);
+    expect(root.textContent).not.toContain("Loading Monk.");
+    expect(root.querySelector(".masthead")).toBe(root.firstElementChild);
+  } finally { cleanup(); root.remove(); }
+});
+
 it.each(["/", "/?room=ABCDEFGH"])("puts room setup before optional detailed rules at %s", path => {
   sessionStorage.clear();
   history.replaceState(null, "", path);
@@ -959,7 +972,10 @@ it("restores faction history without replaying alerts and keeps changes out of t
     expect(app.root.querySelector("#faction-history")?.textContent).toContain("You converted Former player to Rock.");
     expect(app.root.querySelector("#faction-history time")?.getAttribute("datetime")).toBe("1970-01-01T00:00:01.000Z");
     expect(app.root.querySelector(".conversion-notice")).toBeNull();
-    const historyList = app.root.querySelector("#faction-history ol");
+    const historyList = app.root.querySelector<HTMLOListElement>("#faction-history ol");
+    const savedItem = historyList?.firstElementChild;
+    if (!historyList) throw new Error("Missing history list");
+    historyList.scrollTop = 42;
     const noise: EngineEvent[] = Array.from({ length: 8 }, (_, index) => ({ ...event, type: "lifecycle",
       faction: null, attackerId: null, targetId: null, eventSeq: 11 + index, reason: "Round running." }));
     app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 6,
@@ -972,6 +988,9 @@ it("restores faction history without replaying alerts and keeps changes out of t
     app.socket.receive({ version: 1, type: "update", streamId: "app-stream", streamSeq: 8,
       snapshot, trial: null, startChecking: false, events: [event, { ...event, eventSeq: 20 }], outcome: null });
     expect(app.root.querySelectorAll("#faction-history li")).toHaveLength(2);
+    expect(app.root.querySelector("#faction-history ol")).toBe(historyList);
+    expect(historyList.lastElementChild).toBe(savedItem);
+    expect(historyList.scrollTop).toBe(42);
   } finally { app.cleanup(); }
 });
 
@@ -1545,14 +1564,19 @@ it("preserves grouped measurements between reference blocks and requires explici
     input.value = value;
   }
   try {
+    const devices = app.root.querySelector<HTMLDetailsElement>("#trial-devices");
+    if (!devices) throw new Error("Missing device disclosure");
+    devices.open = true;
     for (const [id, value] of [["device-0", "iPhone 15"], ["os-0", "iOS 18"], ["device-1", "iPhone 16"],
       ["os-1", "iOS 18"], ["conditions", "Open outdoor area"], ["referenceM", "4"]]) field(id, value);
     app.root.querySelector<HTMLButtonElement>('[data-action="trial-begin"]')?.click();
     update({ playerIds: ["p1", "p2"], readyIds: ["p1", "p2"], collecting: true, referenceM: 4 });
+    expect(devices.open).toBe(true);
     app.socket.receive({ version: 1, type: "trial_sample", streamId: "app-stream", streamSeq: ++seq, sample });
     expect(app.root.textContent).toContain("1 samples");
     app.root.querySelector<HTMLButtonElement>('[data-action="trial-end"]')?.click();
     update(null);
+    expect(app.root.querySelector<HTMLDetailsElement>("#location-trial")?.open).toBe(true);
     field("referenceM", "20");
     app.root.querySelector<HTMLButtonElement>('[data-action="trial-begin"]')?.click();
     update({ playerIds: ["p1", "p2"], readyIds: ["p1", "p2"], collecting: true, referenceM: 20 });
@@ -2068,5 +2092,160 @@ it("restores game-control focus across an authority update", () => {
     app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
       snapshot, trial: null, startChecking: false });
     expect(document.activeElement).toBe(app.root.querySelector('[data-action="start"]'));
+  } finally { app.cleanup(); }
+});
+
+it("keeps the shell, trial drafts and focused controls connected during authority updates", () => {
+  const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true };
+  const app = browserApp(snapshot);
+  const selectors = [".masthead", ".match-heading", ".room-invitation", "#invite-qr", ".gameplay",
+    ".match-view", "#location-trial", "#trial-devices", "#conditions", "#faction-history", ".status", "#safe-play"];
+  const nodes = selectors.map(selector => app.root.querySelector(selector));
+  const observer = new MutationObserver(() => {});
+  try {
+    const input = app.root.querySelector<HTMLInputElement>("#conditions");
+    const trial = app.root.querySelector<HTMLDetailsElement>("#location-trial");
+    const devices = app.root.querySelector<HTMLDetailsElement>("#trial-devices");
+    if (!input || !trial || !devices) throw new Error("Missing trial form");
+    devices.open = false;
+    trial.open = true; input.value = "Open field"; input.focus(); input.setSelectionRange(1, 4);
+    const blurred = vi.fn(); input.addEventListener("blur", blurred);
+    observer.observe(app.root, { childList: true, subtree: true });
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
+      snapshot, trial: null, startChecking: false });
+    selectors.forEach((selector, index) => expect(app.root.querySelector(selector)).toBe(nodes[index]));
+    const removed = observer.takeRecords().flatMap(record => [...record.removedNodes]);
+    expect(removed.some(node => nodes.some(stable => stable && (node === stable || node.contains(stable))))).toBe(false);
+    expect(blurred).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(input);
+    expect([input.value, input.selectionStart, input.selectionEnd, trial.open]).toEqual(["Open field", 1, 4, true]);
+    expect(devices.open).toBe(false);
+  } finally { observer.disconnect(); app.cleanup(); }
+});
+
+it("keeps the selected trial player when another player leaves", () => {
+  const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper", "scissors", "rock"]), "p1", 0), canHost: true };
+  const app = browserApp(snapshot);
+  try {
+    const pair = app.root.querySelector<HTMLSelectElement>("#pair-1");
+    if (!pair) throw new Error("Missing trial player selection");
+    pair.value = "p4"; pair.dispatchEvent(new Event("change", { bubbles: true })); flushSync();
+    const roster = snapshot.roster.filter(player => player.id !== "p2");
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
+      snapshot: { ...snapshot, roster }, trial: null, startChecking: false });
+    expect(pair.value).toBe("p4");
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 6,
+      snapshot: { ...snapshot, roster: roster.filter(player => player.id !== "p4") }, trial: null, startChecking: false });
+    expect(pair.value).toBe("p3");
+  } finally { app.cleanup(); }
+});
+
+it("defaults the second trial player when a second player joins", () => {
+  const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0), canHost: true };
+  const app = browserApp({ ...snapshot, roster: snapshot.roster.slice(0, 1) });
+  try {
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
+      snapshot, trial: null, startChecking: false });
+    expect(app.root.querySelector<HTMLSelectElement>("#pair-0")?.value).toBe("p1");
+    expect(app.root.querySelector<HTMLSelectElement>("#pair-1")?.value).toBe("p2");
+  } finally { app.cleanup(); }
+});
+
+it("keeps room drafts and disclosures through an explicit reconnect", () => {
+  const snapshot = { ...snapshotFor(lobbyFixture(["rock", "paper", "scissors"]), "p1", 0), canHost: true };
+  const app = browserApp(snapshot);
+  const values = { "device-0": "iPhone", "os-0": "18", "mode-0": "Installed PWA",
+    conditions: "Open field", referenceM: "8", "pair-1": "p3", entryRadiusM: "45" };
+  const disclosures = ["host-tools", "advanced-settings", "location-trial", "faction-history"];
+  try {
+    for (const [id, value] of Object.entries(values)) {
+      const field = app.root.querySelector<HTMLInputElement | HTMLSelectElement>(`#${id}`);
+      if (!field) throw new Error(`Missing field: ${id}`);
+      field.value = value; field.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    for (const id of disclosures) {
+      const details = app.root.querySelector<HTMLDetailsElement>(`#${id}`);
+      if (!details) throw new Error(`Missing disclosure: ${id}`);
+      details.open = true;
+    }
+    const devices = app.root.querySelector<HTMLDetailsElement>("#trial-devices");
+    if (!devices) throw new Error("Missing device disclosure");
+    devices.open = false;
+    app.socket.dispatchEvent(new MessageEvent("message", { data: "invalid JSON" }));
+    app.root.querySelector<HTMLButtonElement>('[data-action="reconnect"]')?.click();
+    const replacement = app.sockets.at(-1);
+    if (!replacement || replacement === app.socket) throw new Error("Missing replacement connection");
+    app.authenticate(replacement, "new-stream");
+    for (const [id, value] of Object.entries(values)) {
+      expect(app.root.querySelector<HTMLInputElement | HTMLSelectElement>(`#${id}`)?.value).toBe(value);
+    }
+    for (const id of disclosures) expect(app.root.querySelector<HTMLDetailsElement>(`#${id}`)?.open).toBe(true);
+    expect(app.root.querySelector<HTMLDetailsElement>("#trial-devices")?.open).toBe(false);
+  } finally { app.cleanup(); }
+});
+
+it("keeps entry and safety nodes connected while showing a validation error", () => {
+  sessionStorage.clear();
+  const root = document.createElement("main"); document.body.append(root);
+  const cleanup = mountApp(root), observer = new MutationObserver(() => {});
+  try {
+    const entry = root.querySelector(".entry-view"), safety = root.querySelector("#safe-play");
+    const input = root.querySelector<HTMLInputElement>("#matchCode");
+    if (!entry || !safety || !input) throw new Error("Missing entry");
+    input.value = "BAD";
+    observer.observe(root, { childList: true, subtree: true });
+    root.querySelector("form")?.dispatchEvent(new Event("submit", { cancelable: true }));
+    expect(root.querySelector("#safe-play")).toBe(safety);
+    expect(observer.takeRecords().some(record => [...record.removedNodes].some(node =>
+      node === entry || node.contains(entry) || node === safety || node.contains(safety)))).toBe(false);
+    expect(document.activeElement).toBe(input);
+  } finally { observer.disconnect(); cleanup(); root.remove(); }
+});
+
+it("releases a terminally rejected host command and does not replay it on reconnect", () => {
+  const snapshot = { ...snapshotFor(runningFixture(["rock", "scissors"]), "p1", 0), canHost: true };
+  const app = browserApp(snapshot);
+  try {
+    const select = app.root.querySelector<HTMLSelectElement>("#faction-p1");
+    if (!select) throw new Error("Missing faction control");
+    select.value = "paper"; select.dispatchEvent(new Event("change", { bubbles: true }));
+    const sent = app.frames.map(frame => JSON.parse(frame)).find(frame => frame.type === "host_command");
+    app.socket.receive({ version: 1, type: "error", streamId: "app-stream", streamSeq: 5,
+      code: "invalid_command", reason: "This change is not allowed.", commandId: sent.commandId });
+    expect(select.disabled).toBe(false);
+    expect(app.root.querySelector(".gameplay > [role=status]")?.textContent).toBe("This change is not allowed.");
+    app.socket.dispatchEvent(new MessageEvent("message", { data: "invalid JSON" }));
+    app.root.querySelector<HTMLButtonElement>('[data-action="reconnect"]')?.click();
+    const replacement = app.sockets.at(-1);
+    if (!replacement || replacement === app.socket) throw new Error("Missing replacement connection");
+    const before = app.frames.length;
+    app.authenticate(replacement, "new-stream");
+    expect(app.frames.slice(before).map(frame => JSON.parse(frame)).filter(frame => frame.type === "host_command")).toEqual([]);
+  } finally { app.cleanup(); }
+});
+
+it("keeps trial-only collection running during a connected diagnostic clock error", () => {
+  const browser = permissionBrowser();
+  const snapshot = snapshotFor(lobbyFixture(["rock", "paper"]), "p1", 0);
+  const app = browserApp(snapshot);
+  try {
+    const trial: TrialStatus = { playerIds: ["p1", "p2"], readyIds: [], collecting: false, referenceM: 4 };
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 5,
+      snapshot, trial, startChecking: false });
+    app.root.querySelector<HTMLButtonElement>('[data-action="trial-ready"]')?.click();
+    browser.grant();
+    app.socket.receive({ version: 1, type: "snapshot", streamId: "app-stream", streamSeq: 6,
+      snapshot, trial: { ...trial, readyIds: ["p1", "p2"], collecting: true }, startChecking: false });
+    app.socket.receive({ version: 1, type: "clock_ready", streamId: "app-stream", streamSeq: 7,
+      clock: { offsetMs: 0, uncertaintyMs: 5, measuredAtMs: Date.now() } });
+    browser.fix();
+    app.socket.receive({ version: 1, type: "error", streamId: "app-stream", streamSeq: 8,
+      code: "clock_invalid", reason: "Retry the diagnostic clock check.", commandId: null });
+    browser.fix(Date.now() + 1);
+    expect(app.frames.map(frame => JSON.parse(frame)).filter(frame => frame.type === "position")).toHaveLength(2);
+    expect(app.frames.map(frame => JSON.parse(frame)).filter(frame => frame.type === "suspend")).toEqual([]);
+    app.socket.dispatchEvent(new Event("error"));
+    browser.fix(Date.now() + 2);
+    expect(app.frames.map(frame => JSON.parse(frame)).filter(frame => frame.type === "position")).toHaveLength(2);
   } finally { app.cleanup(); }
 });

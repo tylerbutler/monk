@@ -102,6 +102,110 @@ it("retries a lost command reply using the same command ID", () => {
   expect(commands[1]).toEqual(commands[0]);
   connection.close();
 });
+it.each(["command_limit", "forbidden"])("does not retry the permanent %s command error or fail a healthy connection", code => {
+  const statuses: ConnectionStatus[] = [];
+  const connection = connectMatch(credentials, { onMessage() {}, onStatus: s => statuses.push(s) });
+  const socket = instances[0]; auth(socket); socket.receive(snapshot("stream-a", 2));
+  connection.send({ version: 1, type: "host_command", commandId: "terminal", command: { type: "end" } });
+  socket.receive({ version: 1, type: "error", streamId: "stream-a", streamSeq: 3, code,
+    reason: "Command cannot be accepted.", commandId: "terminal" });
+  vi.advanceTimersByTime(9000);
+  expect(socket.frames.map(f => JSON.parse(f)).filter(m => m.type === "host_command")).toHaveLength(1);
+  expect(statuses.at(-1)?.state).toBe("connected");
+  connection.close();
+});
+it("keeps retrying a storage failure with the original command ID", () => {
+  const connection = connectMatch(credentials, { onMessage() {}, onStatus() {} });
+  const socket = instances[0]; auth(socket); socket.receive(snapshot("stream-a", 2));
+  connection.send({ version: 1, type: "host_command", commandId: "retry", command: { type: "pause" } });
+  socket.receive({ version: 1, type: "error", streamId: "stream-a", streamSeq: 3,
+    code: "storage_failed", reason: "Retry the same command ID.", commandId: "retry" });
+  vi.advanceTimersByTime(1500);
+  expect(socket.frames.map(f => JSON.parse(f)).filter(m => m.type === "host_command").map(m => m.commandId))
+    .toEqual(["retry", "retry"]);
+  connection.close();
+});
+
+it("renews the clock through a long consented trial and stops renewing when the trial ends", () => {
+  const connection = connectMatch(credentials, { onMessage() {}, onStatus() {} });
+  const socket = instances[0]; auth(socket);
+  const state = snapshot("stream-a", 2);
+  if (state.type !== "snapshot") throw new Error("Missing snapshot");
+  socket.receive({ ...state, snapshot: { ...state.snapshot, ownPlayerId: "p1" },
+    trial: { playerIds: ["p1", "p2"], readyIds: ["p1", "p2"], collecting: true, referenceM: 4 } });
+  connection.send({ version: 1, type: "clock_probe", nonce: "initial", clientSendMs: Date.now() });
+  let streamSeq = 2;
+  function confirm() {
+    const probe = socket.frames.map(f => JSON.parse(f)).filter(m => m.type === "clock_probe").at(-1);
+    socket.receive({ version: 1, type: "clock_reply", streamId: "stream-a", streamSeq: ++streamSeq,
+      nonce: probe.nonce, clientSendMs: probe.clientSendMs, serverReceiveMs: Date.now(), serverSendMs: Date.now() });
+    socket.receive({ version: 1, type: "clock_ready", streamId: "stream-a", streamSeq: ++streamSeq,
+      clock: { offsetMs: 0, uncertaintyMs: 0, measuredAtMs: Date.now() } });
+  }
+  confirm();
+  for (let count = 2; count <= 4; count++) {
+    vi.advanceTimersByTime(20000);
+    expect(socket.frames.map(f => JSON.parse(f)).filter(m => m.type === "clock_probe")).toHaveLength(count);
+    confirm();
+  }
+  socket.receive({ ...state, streamSeq: ++streamSeq, trial: null });
+  const count = socket.frames.length;
+  vi.advanceTimersByTime(60000);
+  expect(socket.frames).toHaveLength(count);
+  connection.close();
+});
+
+it("retries an expired diagnostic clock without probing ordinary gameplay or after close", () => {
+  const connection = connectMatch(credentials, { onMessage() {}, onStatus() {} });
+  const socket = instances[0]; auth(socket);
+  const state = snapshot("stream-a", 2);
+  if (state.type !== "snapshot") throw new Error("Missing snapshot");
+  socket.receive({ ...state, snapshot: { ...state.snapshot, ownPlayerId: "p1" },
+    trial: { playerIds: ["p1", "p2"], readyIds: ["p1", "p2"], collecting: true, referenceM: 4 } });
+  connection.send({ version: 1, type: "clock_probe", nonce: "initial", clientSendMs: Date.now() });
+  socket.receive({ version: 1, type: "error", streamId: "stream-a", streamSeq: 3,
+    code: "clock_invalid", reason: "Clock is invalid.", commandId: null });
+  vi.advanceTimersByTime(5000);
+  expect(socket.frames.map(f => JSON.parse(f)).filter(m => m.type === "clock_probe")).toHaveLength(2);
+  connection.close();
+  const count = socket.frames.length;
+  vi.advanceTimersByTime(60000);
+  expect(socket.frames).toHaveLength(count);
+});
+it("refreshes a clock that expired while waiting for the other player's consent", () => {
+  const connection = connectMatch(credentials, { onMessage() {}, onStatus() {} });
+  const socket = instances[0]; auth(socket);
+  const state = snapshot("stream-a", 2);
+  if (state.type !== "snapshot") throw new Error("Missing snapshot");
+  const waiting = { ...state, snapshot: { ...state.snapshot, ownPlayerId: "p1" },
+    trial: { playerIds: ["p1", "p2"] as [string, string], readyIds: ["p1"], collecting: false, referenceM: 4 } };
+  socket.receive(waiting);
+  connection.send({ version: 1, type: "clock_probe", nonce: "initial", clientSendMs: Date.now() });
+  socket.receive({ version: 1, type: "clock_ready", streamId: "stream-a", streamSeq: 3,
+    clock: { offsetMs: 0, uncertaintyMs: 0, measuredAtMs: Date.now() } });
+  vi.advanceTimersByTime(60000);
+  expect(socket.frames.map(f => JSON.parse(f)).filter(m => m.type === "clock_probe")).toHaveLength(1);
+  socket.receive({ ...waiting, streamSeq: 4,
+    trial: { ...waiting.trial, readyIds: ["p1", "p2"], collecting: true } });
+  expect(socket.frames.map(f => JSON.parse(f)).filter(m => m.type === "clock_probe")).toHaveLength(2);
+  connection.close();
+});
+it("retries a timed-out trial probe but cancels renewal immediately on local trial stop", () => {
+  const connection = connectMatch(credentials, { onMessage() {}, onStatus() {} });
+  const socket = instances[0]; auth(socket);
+  const state = snapshot("stream-a", 2);
+  if (state.type !== "snapshot") throw new Error("Missing snapshot");
+  socket.receive({ ...state, snapshot: { ...state.snapshot, ownPlayerId: "p1" },
+    trial: { playerIds: ["p1", "p2"], readyIds: ["p1", "p2"], collecting: true, referenceM: 4 } });
+  connection.send({ version: 1, type: "clock_probe", nonce: "initial", clientSendMs: Date.now() });
+  vi.advanceTimersByTime(10000);
+  expect(socket.frames.map(f => JSON.parse(f)).filter(m => m.type === "clock_probe")).toHaveLength(2);
+  connection.send({ version: 1, type: "trial_end" });
+  const count = socket.frames.length;
+  vi.advanceTimersByTime(60000);
+  expect(socket.frames).toHaveLength(count);
+  connection.close();
+});
 it("keeps an authoritative ten-second start check connected until its outcome arrives", () => {
   const statuses: ConnectionStatus[] = [];
   const connection = connectMatch(credentials, { onMessage() {}, onStatus: s => statuses.push(s) });

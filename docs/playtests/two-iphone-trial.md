@@ -40,6 +40,10 @@ One summary keeps the compatible reference-separation blocks. Before changing
 phones, conditions, or parameter candidates, export the current summary and
 select **Discard measurement summary**. Start a new summary for the new setup.
 
+During an active trial, the app refreshes the diagnostic clock estimate every
+20 seconds and retries failed clock checks. A clock refresh does not stop
+location sharing. Diagnostic clock checks stop when the trial ends.
+
 Recommendations are provisional. Diagnostic freshness is 5000 ms; it is not
 a gameplay value. Evaluate candidate radii, uncertainty, freshness, dwell,
 and grace with the actual phone pair. GPS uncertainty
@@ -48,7 +52,7 @@ is reported evidence, not a guaranteed physical boundary.
 ## Try a two-player round
 
 New rooms use entry 30 m, retention 40 m, maximum uncertainty 15 m,
-dwell 2000 ms, grace 3000 ms, and a ten-minute round. Influence expires after
+dwell 30000 ms, grace 3000 ms, and a ten-minute round. Influence expires after
 30 seconds without a new usable position. These values do not establish GPS
 accuracy. Measurements are optional; you can start without them.
 
