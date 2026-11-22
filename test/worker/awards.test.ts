@@ -270,7 +270,7 @@ it("stops eligibility on explicit suspend and last socket close", async () => {
   const initial = (await match.read()).awardData!;
   match.advance(1000);
   await new Promise<void>(resolve => {
-    additional.socket.addEventListener("close", () => resolve(), { once: true }); additional.socket.close();
+    additional.socket.addEventListener("close", () => resolve(), { once: true }); additional.phoenix.disconnect();
   });
   match.host.send({ version: 1, type: "snapshot_request" });
   expect((await match.host.next("snapshot")).snapshot.roster.find(p => p.id === match.ids[0])?.active).toBe(true);
@@ -283,11 +283,12 @@ it("stops eligibility on explicit suspend and last socket close", async () => {
   });
   match.advance(1000);
   await report(match.host, 3, match.now());
+  match.other.messages.length = 0;
   match.advance(1000);
   await new Promise<void>(resolve => {
-    match.host.socket.addEventListener("close", () => resolve(), { once: true }); match.host.socket.close();
+    match.host.socket.addEventListener("close", () => resolve(), { once: true }); match.host.phoenix.disconnect();
   });
-  match.other.send({ version: 1, type: "snapshot_request" }); await match.other.next("snapshot");
+  while ((await match.other.next("update")).snapshot.roster.find(p => p.id === match.ids[0])?.active) { /* wait for saved cleanup */ }
   const closed = (await match.read()).awardData!;
   expect(closed.players[match.ids[0]]).toMatchObject({
     eligibleMs: initial.players[match.ids[0]].eligibleMs + 2000, currentUnconvertedEligibleMs: 0,
@@ -354,7 +355,7 @@ it("retains summaries across roster turnover", async () => {
     guest.send({ version: 1, type: "leave" });
     guest.send({ version: 1, type: "snapshot_request" }); await guest.next("snapshot");
     await new Promise<void>(resolve => {
-      guest.socket.addEventListener("close", () => resolve(), { once: true }); guest.socket.close();
+      guest.socket.addEventListener("close", () => resolve(), { once: true }); guest.phoenix.disconnect();
     });
     match.host.messages.length = 0; match.other.messages.length = 0;
   }
