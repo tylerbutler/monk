@@ -17,7 +17,8 @@ export const recordSchema = z.strictObject({
   awardData: awardDataSchema.nullable().default(null),
   sessions: z.array(sessionSchema).max(101),
   events: z.array(eventSchema),
-  outcomes: z.array(outcomeSchema).max(10000),
+  // Reserve one outcome beyond the command budget so the host can always end.
+  outcomes: z.array(outcomeSchema).max(10001),
   feedback: z.array(z.strictObject({
     eventSeq: z.number().int().nonnegative(), atMs: z.number().int().nonnegative(),
     recipients: z.array(z.strictObject({ playerId: z.string().min(1), seenAfterMs: z.number().nonnegative().nullable() })).length(2),

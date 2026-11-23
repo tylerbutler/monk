@@ -161,6 +161,123 @@ it("retries storage failures but treats a saved rejected outcome as final", () =
   vi.advanceTimersByTime(15_000);
   expect(socket.applicationFrames().filter(frame => frame.type === "host_command")).toHaveLength(2);
 });
+function advanceConnected(socket: TestSocket, duration: number) {
+  let cursor = socket.frames.length;
+  for (let elapsed = 0; elapsed < duration; elapsed += 1000) {
+    vi.advanceTimersByTime(Math.min(1000, duration - elapsed));
+    const frames = socket.decoded();
+    for (const frame of frames.slice(cursor)) if (frame[3] === "heartbeat") socket.reply(frame, {});
+    cursor = frames.length;
+  }
+}
+it("renews the clock through a long consented trial and stops renewing when the trial ends", () => {
+  const { connection, socket } = setup(); authorize(socket);
+  const state = snapshot("stream-a", 2);
+  socket.receive({ ...state, snapshot: { ...state.snapshot, ownPlayerId: "p1" },
+    trial: { playerIds: ["p1", "p2"], readyIds: ["p1", "p2"], collecting: true, referenceM: 4 } });
+  connection.send({ version: 1, type: "clock_probe", nonce: "initial", clientSendMs: Date.now() });
+  let streamSeq = 2;
+  function confirm() {
+    const probe = socket.applicationFrames().filter(m => m.type === "clock_probe").at(-1)!;
+    if (typeof probe.nonce !== "string" || typeof probe.clientSendMs !== "number") throw new Error("Missing clock probe");
+    socket.receive({ version: 1, type: "clock_reply", streamId: "stream-a", streamSeq: ++streamSeq,
+      nonce: probe.nonce, clientSendMs: probe.clientSendMs, serverReceiveMs: Date.now(), serverSendMs: Date.now() });
+    socket.receive({ version: 1, type: "clock_ready", streamId: "stream-a", streamSeq: ++streamSeq,
+      clock: { offsetMs: 0, uncertaintyMs: 0, measuredAtMs: Date.now() } });
+  }
+  confirm();
+  for (let count = 2; count <= 4; count++) {
+    advanceConnected(socket, 20000);
+    expect(socket.applicationFrames().filter(m => m.type === "clock_probe")).toHaveLength(count);
+    confirm();
+  }
+  socket.receive({ ...state, streamSeq: ++streamSeq, trial: null });
+  const count = socket.applicationFrames().filter(m => m.type === "clock_probe").length;
+  advanceConnected(socket, 60000);
+  expect(socket.applicationFrames().filter(m => m.type === "clock_probe")).toHaveLength(count);
+});
+
+it("retries an expired diagnostic clock without probing ordinary gameplay or after close", () => {
+  const { connection, socket } = setup(); authorize(socket);
+  const state = snapshot("stream-a", 2);
+  socket.receive({ ...state, snapshot: { ...state.snapshot, ownPlayerId: "p1" },
+    trial: { playerIds: ["p1", "p2"], readyIds: ["p1", "p2"], collecting: true, referenceM: 4 } });
+  connection.send({ version: 1, type: "clock_probe", nonce: "initial", clientSendMs: Date.now() });
+  socket.receive({ version: 1, type: "error", streamId: "stream-a", streamSeq: 3,
+    code: "clock_invalid", reason: "Clock is invalid.", commandId: null });
+  vi.advanceTimersByTime(5000);
+  expect(socket.applicationFrames().filter(m => m.type === "clock_probe")).toHaveLength(2);
+  connection.close();
+  const count = socket.frames.length;
+  vi.advanceTimersByTime(60000);
+  expect(socket.frames).toHaveLength(count);
+});
+it("refreshes a clock that expired while waiting for the other player's consent", () => {
+  const { connection, socket } = setup(); authorize(socket);
+  const state = snapshot("stream-a", 2);
+  const waiting = { ...state, snapshot: { ...state.snapshot, ownPlayerId: "p1" },
+    trial: { playerIds: ["p1", "p2"] as [string, string], readyIds: ["p1"], collecting: false, referenceM: 4 } };
+  socket.receive(waiting);
+  connection.send({ version: 1, type: "clock_probe", nonce: "initial", clientSendMs: Date.now() });
+  socket.receive({ version: 1, type: "clock_ready", streamId: "stream-a", streamSeq: 3,
+    clock: { offsetMs: 0, uncertaintyMs: 0, measuredAtMs: Date.now() } });
+  advanceConnected(socket, 60000);
+  expect(socket.applicationFrames().filter(m => m.type === "clock_probe")).toHaveLength(1);
+  socket.receive({ ...waiting, streamSeq: 4,
+    trial: { ...waiting.trial, readyIds: ["p1", "p2"], collecting: true } });
+  expect(socket.applicationFrames().filter(m => m.type === "clock_probe")).toHaveLength(2);
+});
+it("starts the consented trial clock when collecting first appears in a recovery snapshot", () => {
+  const { connection, socket, statuses } = setup(); authorize(socket);
+  const waiting = { ...snapshot("stream-a", 2), snapshot: {
+    ...snapshot().snapshot, ownPlayerId: "p1",
+  }, trial: { playerIds: ["p1", "p2"] as [string, string], readyIds: ["p1"], collecting: false, referenceM: 4 } };
+  socket.receive(waiting);
+  connection.send({ version: 1, type: "clock_probe", nonce: "initial", clientSendMs: Date.now() });
+  socket.receive({ version: 1, type: "clock_ready", streamId: "stream-a", streamSeq: 3,
+    clock: { offsetMs: 0, uncertaintyMs: 0, measuredAtMs: Date.now() } });
+  socket.receive({ version: 1, type: "error", streamId: "stream-a", streamSeq: 6,
+    code: "sample", reason: "Gap", commandId: null });
+  const request = socket.decoded().find(frame => frame[3] === "snapshot_request")!;
+  socket.reply(request, { ...waiting, streamSeq: 7,
+    trial: { ...waiting.trial, readyIds: ["p1", "p2"], collecting: true } });
+  expect(statuses.at(-1)?.state).toBe("connected");
+  expect(socket.applicationFrames().filter(message => message.type === "clock_probe")).toHaveLength(2);
+});
+it("retries a timed-out trial probe but cancels renewal immediately on local trial stop", () => {
+  const { connection, socket } = setup(); authorize(socket);
+  const state = snapshot("stream-a", 2);
+  socket.receive({ ...state, snapshot: { ...state.snapshot, ownPlayerId: "p1" },
+    trial: { playerIds: ["p1", "p2"], readyIds: ["p1", "p2"], collecting: true, referenceM: 4 } });
+  connection.send({ version: 1, type: "clock_probe", nonce: "initial", clientSendMs: Date.now() });
+  vi.advanceTimersByTime(10000);
+  expect(socket.applicationFrames().filter(m => m.type === "clock_probe")).toHaveLength(2);
+  connection.send({ version: 1, type: "trial_end" });
+  const count = socket.applicationFrames().filter(m => m.type === "clock_probe").length;
+  advanceConnected(socket, 60000);
+  expect(socket.applicationFrames().filter(m => m.type === "clock_probe")).toHaveLength(count);
+});
+it("keeps an authoritative ten-second start check connected until its outcome arrives", () => {
+  const { connection, socket, statuses, handlers } = setup(); authorize(socket);
+  socket.receive(snapshot("stream-a", 2));
+  socket.receive({ version: 1, type: "clock_ready", streamId: "stream-a", streamSeq: 3,
+    clock: { offsetMs: 0, uncertaintyMs: 0, measuredAtMs: Date.now() } });
+  connection.send({ version: 1, type: "host_command", commandId: "slow-start", command: { type: "start" } });
+  for (let seq = 4; seq <= 13; seq++) {
+    vi.advanceTimersByTime(1000);
+    const current = snapshot("stream-a", seq);
+    if (current.type !== "snapshot") throw new Error("Invalid test snapshot");
+    socket.receive({ ...current, startChecking: true });
+  }
+  expect(statuses.filter(s => s.state === "failed")).toHaveLength(0);
+  expect(handlers.onCommandUnconfirmed).not.toHaveBeenCalled();
+  socket.receive({ version: 1, type: "update", streamId: "stream-a", streamSeq: 14,
+    snapshot: snapshotFor(lobbyFixture(["rock", "paper"]), null, 0), trial: null, startChecking: false, events: [],
+    outcome: { commandId: "slow-start", accepted: false, reason: "Freshness check timed out." } });
+  const count = socket.applicationFrames().filter(f => f.type === "host_command").length;
+  vi.advanceTimersByTime(15000);
+  expect(socket.applicationFrames().filter(f => f.type === "host_command")).toHaveLength(count);
+});
 it("disposal stops request callbacks, reconnects and heartbeats", () => {
   const { connection, socket, handlers } = setup(); authorize(socket);
   connection.send({ version: 1, type: "host_command", commandId: "disposed", command: { type: "pause" } });

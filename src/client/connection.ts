@@ -1,7 +1,7 @@
 import { Socket } from "phoenix";
 import type { Channel, Push } from "phoenix";
 import { joinReplySchema, parseClientMessage, parseServerMessage } from "../shared/protocol";
-import type { ClientMessage, ConnectionHandlers, MatchConnection, SessionCredentials } from "../shared/protocol";
+import type { ClientMessage, ConnectionHandlers, MatchConnection, ServerMessage, SessionCredentials } from "../shared/protocol";
 
 type CancellablePush = Push & { cancelTimeout(): void; cancelRefEvent(): void };
 
@@ -14,6 +14,8 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
   let snapshotRequest: object | null = null;
   let clockProbe: { nonce: string; wallMs: number; monotonicMs: number } | null = null;
   let probeTimeout: ReturnType<typeof setTimeout> | null = null;
+  let clockRefresh: ReturnType<typeof setTimeout> | null = null;
+  let diagnosticRequested = false, trialActive = false;
   const attempts = new Map<string, number>();
   const requests = new Map<string, object>();
   const unconfirmed = new Set<string>();
@@ -28,6 +30,28 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
     if (probeTimeout !== null) clearTimeout(probeTimeout);
     probeTimeout = null;
   }
+  function stopDiagnostics() {
+    clearProbe();
+    if (clockRefresh !== null) clearTimeout(clockRefresh);
+    clockRefresh = null; diagnosticRequested = false; trialActive = false;
+  }
+  function scheduleProbe(delay: number) {
+    if (clockRefresh !== null) clearTimeout(clockRefresh);
+    clockRefresh = null;
+    if (!diagnosticRequested || !trialActive || !ready()) return;
+    clockRefresh = setTimeout(() => { clockRefresh = null; requestProbe(); }, delay);
+  }
+  function updateTrial(message: Extract<ServerMessage, { type: "snapshot" | "update" }>) {
+    if (!message.trial || message.snapshot.phase !== "lobby") { stopDiagnostics(); return; }
+    const active = message.trial.collecting && message.snapshot.ownPlayerId !== null &&
+      message.trial.readyIds.includes(message.snapshot.ownPlayerId);
+    const started = active && !trialActive;
+    trialActive = active;
+    if (!active) {
+      if (clockRefresh !== null) clearTimeout(clockRefresh);
+      clockRefresh = null;
+    } else if (started && diagnosticRequested && !clockProbe) requestProbe();
+  }
   function track(push: Push): Push {
     const request = push as CancellablePush;
     activePushes.add(request);
@@ -40,13 +64,13 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
     activePushes.clear();
   }
   function invalidate() {
-    generation += 1; baseline = false; snapshotRequest = null; requests.clear(); clearProbe(); cancelRequests();
+    generation += 1; baseline = false; snapshotRequest = null; requests.clear(); stopDiagnostics(); cancelRequests();
     status("reconnecting", "Connection lost. Location sharing is stopped.");
   }
   function close() {
     if (stopped) return;
     stopped = true; generation += 1; baseline = false;
-    requests.clear(); attempts.clear(); unconfirmed.clear(); snapshotRequest = null; clearProbe(); cancelRequests();
+    requests.clear(); attempts.clear(); unconfirmed.clear(); snapshotRequest = null; stopDiagnostics(); cancelRequests();
     channel.leave(); socket.disconnect();
   }
   function fail(reason: string) { status("failed", reason); close(); }
@@ -80,6 +104,7 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
       streamId = message.streamId; cursor = message.streamSeq;
       handlers.onMessage(message);
       if (recovering) becameReady();
+      updateTrial(message);
       return;
     }
     if (message.streamId === streamId && message.streamSeq <= cursor) return;
@@ -87,6 +112,7 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
       requestSnapshot(); return;
     }
     cursor = message.streamSeq;
+    if (message.type === "update") updateTrial(message);
     if (message.type === "update" && message.outcome) {
       requests.delete(message.outcome.commandId); attempts.delete(message.outcome.commandId); unconfirmed.delete(message.outcome.commandId);
     }
@@ -96,13 +122,18 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
     if (message.type === "clock_reply") {
       if (!clockProbe || message.nonce !== clockProbe.nonce || message.clientSendMs !== clockProbe.wallMs ||
         Math.abs((Date.now() - clockProbe.wallMs) - (performance.now() - clockProbe.monotonicMs)) > 100) {
-        clearProbe(); status("connected", "Diagnostic clock reply is invalid. Retry the measurement clock check."); return;
+        clearProbe(); status("connected", "Diagnostic clock reply is invalid. Retry the measurement clock check.");
+        scheduleProbe(5000); return;
       }
       push({ version: 1, type: "clock_confirm", nonce: message.nonce, clientReceiveMs: Date.now() });
     }
-    if (message.type === "clock_ready") { clearProbe(); status("connected"); }
+    if (message.type === "clock_ready") { clearProbe(); status("connected"); scheduleProbe(20000); }
     if (message.type === "error" && message.code === "clock_invalid") {
-      clearProbe(); status("connected", `Diagnostic clock: ${message.reason}`);
+      clearProbe(); status("connected", `Diagnostic clock: ${message.reason}`); scheduleProbe(5000);
+    }
+    if (message.type === "error" && (message.code === "diagnostic_clock_unavailable" || message.code === "diagnostic_fix_invalid") &&
+      diagnosticRequested && trialActive && !clockProbe && clockRefresh === null) {
+      scheduleProbe(0);
     }
     handlers.onMessage(message);
   }
@@ -157,13 +188,16 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
     track(channel.push(message.type, message, 5000)).receive("ok", response).receive("error", response);
   }
   function requestProbe() {
-    if (!ready()) return;
-    clearProbe();
+    if (!ready() || clockProbe) return;
+    if (clockRefresh !== null) clearTimeout(clockRefresh);
+    clockRefresh = null;
     clockProbe = { nonce: crypto.randomUUID(), wallMs: Date.now(), monotonicMs: performance.now() };
+    status("connected", "Checking the phone clock.");
     push({ version: 1, type: "clock_probe", nonce: clockProbe.nonce, clientSendMs: clockProbe.wallMs });
     probeTimeout = setTimeout(() => {
       clearProbe();
       if (ready()) status("connected", "Diagnostic clock check timed out. Location sharing is still available.");
+      scheduleProbe(5000);
     }, 5000);
   }
   function createChannel() {
@@ -182,6 +216,7 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
       if (!parsed.success) { fail("Join response is invalid. Reconnect to this match."); return; }
       generation += 1; attempts.clear(); requests.clear(); unconfirmed.clear();
       streamId = parsed.data.state.streamId; cursor = parsed.data.state.streamSeq;
+      updateTrial(parsed.data.state);
       handlers.onMessage(parsed.data.state); becameReady();
     }).receive("error", raw => {
       if (stopped || currentChannel !== channel) return;
@@ -202,11 +237,13 @@ export function connectMatch(credentials: SessionCredentials, handlers: Connecti
       if (stopped) return;
       const parsed = parseClientMessage(message);
       if (!parsed.ok) { status("failed", parsed.error); return; }
+      if (message.type === "trial_end" || message.type === "leave" || message.type === "suspend" ||
+        message.type === "trial_ready" && !message.consent) stopDiagnostics();
       if (message.type === "host_command") {
         if (unconfirmed.delete(message.commandId)) attempts.delete(message.commandId);
         command(message);
       } else if (message.type === "snapshot_request") requestSnapshot();
-      else if (message.type === "clock_probe") requestProbe();
+      else if (message.type === "clock_probe") { diagnosticRequested = true; requestProbe(); }
       else push(message);
     },
     close,

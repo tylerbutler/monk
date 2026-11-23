@@ -33,10 +33,13 @@ Commit `package-lock.json` and `rules/manifest.toml` when dependencies change.
 npm test && npm run typecheck && npm run build && npm run check:bundle
 ```
 
-The entry, rules, invitation, and gameplay UI use Svelte with Vite. The
-TypeScript controller in `src/client/app.svelte.ts` owns network connections
-and device permissions. Svelte components stay mounted across updates, so
-form input, invitation QR codes, radar, and focused controls stay in place.
+The application shell, entry, rules, invitation, and gameplay UI use Svelte
+with Vite. The TypeScript controller in `src/client/app.svelte.ts` owns network
+connections and device permissions. `AppShell.svelte` keeps the shell mounted
+and updates notifications, history, and room tools without rebuilding the DOM.
+`TrialPanel.svelte` keeps measurement forms inside host diagnostics or the
+selected player's view. Form input, invitation QR codes, radar, disclosures,
+and focused controls stay in place across updates.
 
 `npm test` compiles the real Gleam rules and runs unit/browser-API tests and
 tests in the Workers runtime. Worker tests first build the browser assets,
@@ -460,6 +463,15 @@ Wrangler creates the SQLite-backed `MatchAuthority` Durable Object binding
 and serves `dist/` through `ASSETS`. Do not put account credentials or local
 secrets in source or CI. Validate the resulting HTTPS origin and manifest
 assets before inviting the two phones.
+
+Shared Monk links use the wide social graphic at
+`/brand/samples/social-1200x630.png`. Valid `/?room=XXXXXXXX` invite links
+use `/brand/samples/invite-1080.png` and show the room code in the preview
+title. The Worker writes Open Graph and Twitter Card metadata into the
+HTML, with absolute URLs for the serving origin. Link previews do not need
+JavaScript or access to room state. They contain no player data.
+Invalid room codes use the normal Monk preview. Rewritten HTML is not
+cached, so one room's metadata is not reused for another room.
 
 Wrangler runs `scripts/cloudflare-build.sh` before local serving, dry-run
 bundling, and deployment. The script uses the pinned installed Gleam compiler.

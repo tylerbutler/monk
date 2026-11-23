@@ -14,6 +14,7 @@
   let creating = $state(false), joining = $state(false);
 
   async function createRoom() {
+    if (creating || joining) return;
     creating = true;
     try { await create(nameInput?.value.trim() ?? ""); }
     catch (failure) { reportError(failure instanceof Error ? failure.message : "Request failed. Try again."); }
@@ -21,6 +22,7 @@
   }
   async function joinRoom(event: SubmitEvent) {
     event.preventDefault();
+    if (creating || joining) return;
     if (!(event.currentTarget instanceof HTMLFormElement)) return;
     const code = String(new FormData(event.currentTarget).get("matchCode") ?? "").trim().toUpperCase();
     if (!/^[A-Z2-9]{8}$/.test(code)) {
@@ -35,7 +37,7 @@
 
 {#snippet createButton()}
   <button type="button" id="action-create" data-action="create" class:secondary={!!invitedCode}
-    disabled={creating} aria-busy={creating} onclick={createRoom}><img class="ui-icon" src={icons.create} alt="" aria-hidden="true" />{creating ? "Creating room..." : "Create room"}</button>
+    disabled={creating || joining} aria-busy={creating} onclick={createRoom}><img class="ui-icon" src={icons.create} alt="" aria-hidden="true" />{creating ? "Creating room..." : "Create room"}</button>
 {/snippet}
 
 <div class="entry-layout" data-invited={String(!!invitedCode)}>
@@ -65,7 +67,7 @@
       </label>
       {#if !invitedCode}<p class="input-help" id="room-code-hint">Enter the eight-character code from your host.</p>{/if}
       {#if error && errorField === "matchCode"}<p class="error" id="room-code-error" role="alert">{error}</p>{/if}
-      <button type="submit" id="action-join" disabled={joining} aria-busy={joining}><img class="ui-icon" src={icons.join} alt="" aria-hidden="true" />{joining ? "Joining room..." : "Join room"}</button>
+      <button type="submit" id="action-join" disabled={creating || joining} aria-busy={joining}><img class="ui-icon" src={icons.join} alt="" aria-hidden="true" />{joining ? "Joining room..." : "Join room"}</button>
     </form>
     {#if invitedCode}{@render createButton()}{/if}
     <p class="entry-safety">Location sharing stays off until you choose Share location. Agree on a safe outdoor play area.</p>
