@@ -217,6 +217,7 @@ export type ConnectionStatus = { state: "connecting" | "connected" | "reconnecti
 export type ConnectionHandlers = {
   onMessage(message: ServerMessage): void; onStatus(status: ConnectionStatus): void;
   onReady(): void; onCommandUnconfirmed(commandId: string): void;
+  onLeft?(): void;
 };
 export type MatchConnection = { send(message: ClientMessage): void; close(): void };
 export type LocationStatus = {

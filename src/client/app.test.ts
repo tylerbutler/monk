@@ -534,6 +534,35 @@ function conversionFixture() {
   return { initial, confirmed: pulse(state, 3000, [0, 4]) };
 }
 
+it("persists pending leave through reload without replaying commands or restarting sensors", () => {
+  vi.useFakeTimers();
+  const snapshot = { ...snapshotFor(runningFixture(["rock", "paper"]), "p1", 0), canHost: true };
+  const app = browserApp(snapshot);
+  let restoredCleanup: (() => void) | null = null;
+  const restoredRoot = document.createElement("main");
+  try {
+    app.root.querySelector<HTMLButtonElement>('[data-action="pause"]')?.click();
+    app.root.querySelector<HTMLButtonElement>('[data-action="leave"]')!.click();
+    const saved = sessionStorage.getItem("monk-session");
+    expect(JSON.parse(saved!).leaving).toBe(true);
+    expect(app.socket.readyState).toBe(TestSocket.OPEN);
+    const count = app.frames.filter(frame => JSON.parse(frame).type === "host_command").length;
+    app.authenticate(app.socket, "while-leaving");
+    expect(app.frames.filter(frame => JSON.parse(frame).type === "host_command")).toHaveLength(count);
+    document.body.append(restoredRoot);
+    restoredCleanup = mountApp(restoredRoot);
+    const restored = app.sockets.at(-1)!;
+    app.authenticate(restored, "restored");
+    expect(restored.applicationFrames().map(frame => frame.type)).toEqual(["leave"]);
+    expect(restoredRoot.querySelector('[data-action="share-location"]')).toBeNull();
+    restored.reply(restored.decoded().find(frame => frame[3] === "leave")!, {});
+    expect(sessionStorage.getItem("monk-session")).toBeNull();
+    expect(restoredRoot.querySelector(".join-form")).not.toBeNull();
+  } finally {
+    restoredCleanup?.(); restoredRoot.remove(); app.cleanup(); vi.useRealTimers();
+  }
+});
+
 function trophyFixture() {
   const running = snapshotFor(runningFixture(["rock", "scissors"]), "p1", 0);
   const roundResults: RoundResults = { coverage: "complete", players: [
@@ -1037,6 +1066,7 @@ it("keeps the HUD and its open player details stable through age and authority u
     expect(document.activeElement).toBe(toggle);
     app.root.querySelector<HTMLButtonElement>('[data-action="leave"]')?.click();
     expect(app.root.querySelector(".game-hud")).toBeNull();
+    app.socket.reply(app.socket.decoded().find(frame => frame[3] === "leave")!, {});
     expect(app.root.querySelector("section")?.id).toBe("play");
     vi.advanceTimersByTime(500);
     expect(app.root.querySelector("[data-radar]")).toBeNull();
@@ -1475,6 +1505,32 @@ it("shares location while paused and stops sharing without leaving", () => {
     expect(app.frames.filter(f => JSON.parse(f).type === "position")).toHaveLength(1);
     expect(app.frames.map(f => JSON.parse(f)).some(f => f.type === "suspend")).toBe(true);
     expect(app.frames.map(f => JSON.parse(f)).some(f => f.type === "leave")).toBe(false);
+  } finally { app.cleanup(); }
+});
+
+it("stops active location collection before leave is confirmed and ignores late fixes", () => {
+  let fix: PositionCallback = () => {};
+  const clearWatch = vi.fn();
+  Object.defineProperty(navigator, "geolocation", { configurable: true, value: {
+    watchPosition: (success: PositionCallback) => { fix = success; return 42; },
+    clearWatch,
+  } });
+  const app = browserApp(snapshotFor(runningFixture(["rock", "paper"]), "p1", 0));
+  const position: GeolocationPosition = { timestamp: Date.now(), coords: {
+    latitude: 0, longitude: 0, accuracy: 1, altitude: null, altitudeAccuracy: null, heading: null, speed: null,
+    toJSON: () => ({}) }, toJSON: () => ({}) };
+  try {
+    app.root.querySelector<HTMLButtonElement>('[data-action="round-consent"]')!.click();
+    fix(position);
+    expect(app.socket.positionFrames()).toHaveLength(1);
+    app.root.querySelector<HTMLButtonElement>('[data-action="leave"]')!.click();
+    expect(clearWatch).toHaveBeenCalledWith(42);
+    expect(sessionStorage.getItem("monk-session")).not.toBeNull();
+    fix(position);
+    expect(app.socket.positionFrames()).toHaveLength(1);
+    expect(app.root.querySelector('[data-action="round-consent"]')).toBeNull();
+    app.socket.reply(app.socket.decoded().find(frame => frame[3] === "leave")!, {});
+    expect(sessionStorage.getItem("monk-session")).toBeNull();
   } finally { app.cleanup(); }
 });
 

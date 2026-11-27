@@ -5,6 +5,8 @@ import TrialPanel from "./TrialPanel.svelte";
 import { connectMatch } from "./connection";
 import { requestLocationPermission, startLocation } from "./location";
 import { startCompass } from "./compass";
+import { savedSessionSchema } from "./session";
+import type { SavedSession } from "./session";
 import type { CompassState } from "./compass";
 import { addTrialSample, exportTrialSummary, newTrialSummary } from "./trial";
 import { describeEvent } from "./views";
@@ -17,7 +19,8 @@ export function mountApp(root: HTMLElement): () => void {
   const game = document.createElement("div");
   game.className = "match-view";
   let shell: ReturnType<typeof mount> | null = null;
-  let credentials: SessionCredentials | null = null, connection: MatchConnection | null = null;
+  let credentials: SavedSession | null = null, connection: MatchConnection | null = null;
+  let leaving = false;
   let snapshot: PlayerSnapshot | null = null, trial: TrialStatus | null = null;
   let snapshotLive = false, snapshotReceivedAt = performance.now();
   let latest: TrialSample | null = null, summary: TrialSummary | null = null;
@@ -87,9 +90,10 @@ export function mountApp(root: HTMLElement): () => void {
       start: () => sendCommand({ type: "start" }), reportError: showError,
     },
     async joinHost() {
-      if (!credentials) return;
+      if (!credentials || leaving) return;
+      const current = credentials;
       const player = await request(`/api/matches/${credentials.matchCode}/join`, { hostToken: credentials.hostToken });
-      connect({ ...player, hostToken: credentials.hostToken });
+      if (credentials === current && !leaving) connect({ ...player, hostToken: current.hostToken });
     },
     async enableAudio() {
       audio = new AudioContext();
@@ -161,7 +165,7 @@ export function mountApp(root: HTMLElement): () => void {
     requestingPermission = false;
   }
   function requestTrialConsent() {
-    if (requestingPermission) return;
+    if (requestingPermission || leaving) return;
     function agree() {
       trialConsent = true;
       connection?.send({ version: 1, type: "clock_probe", nonce: crypto.randomUUID(), clientSendMs: Date.now() });
@@ -184,7 +188,7 @@ export function mountApp(root: HTMLElement): () => void {
     stopPermissionCheck = requestingPermission ? cancel : null;
   }
   function reconcileCollection() {
-    const needed = !!snapshot?.ownPlayerId && (consent || trialConsent && clockReady &&
+    const needed = !leaving && !!snapshot?.ownPlayerId && (consent || trialConsent && clockReady &&
       !!trial?.collecting && trial.readyIds.includes(snapshot.ownPlayerId)) && connectionStatus.state === "connected" &&
       document.visibilityState === "visible" && snapshot.phase !== "ended";
     if (!needed) { stopCollection(); return; }
@@ -200,7 +204,7 @@ export function mountApp(root: HTMLElement): () => void {
     }
   }
   function receive(message: ServerMessage) {
-    if (disposed) return;
+    if (disposed || leaving) return;
     if (message.type === "clock_ready") clockReady = true;
     if (message.type === "snapshot" || message.type === "update") {
       stateSource = message.type;
@@ -252,7 +256,7 @@ export function mountApp(root: HTMLElement): () => void {
     }
     reconcileCollection(); render();
   }
-  function connect(next: SessionCredentials) {
+  function connect(next: SavedSession) {
     const sameSession = credentials?.matchCode === next.matchCode &&
       credentials.hostToken === next.hostToken && credentials.playerToken === next.playerToken;
     if (credentials?.matchCode !== next.matchCode) {
@@ -262,13 +266,17 @@ export function mountApp(root: HTMLElement): () => void {
     cancelPermissionCheck(); stopCollection(); connection?.close();
     stopLiveUpdates();
     if (!sameSession) { destroyMatch(game); snapshot = null; trial = null; }
-    credentials = next; trialConsent = false; clockReady = false; error = ""; diagnosticStatus = "";
+    credentials = next; leaving = next.leaving === true;
+    if (leaving) { snapshot = null; trial = null; pendingCommands.clear(); consent = false; }
+    trialConsent = false; clockReady = false; error = ""; diagnosticStatus = "";
     historyAvailable = false;
     try { sessionStorage.setItem("monk-session", JSON.stringify(next)); }
     catch { throw new Error("Session storage is unavailable. Allow storage to keep private credentials."); }
     connection = connectMatch(next, {
       onMessage: receive,
+      onLeft: finishLeave,
       onReady() {
+        if (leaving) return;
         for (const [commandId, pending] of pendingCommands) {
           if (!pending.unconfirmed) connection?.send({ version: 1, type: "host_command", commandId, command: pending.command });
         }
@@ -292,6 +300,7 @@ export function mountApp(root: HTMLElement): () => void {
     render();
   }
   function sendCommand(command: HostCommand) {
+    if (leaving) return;
     if (command.type === "set_faction" && [...pendingCommands.values()].some(p => p.command.type === "set_faction")) return;
     const pending = command.type === "start" ? [...pendingCommands].find(([, value]) => value.command.type === "start") : undefined;
     const commandId = pending?.[0] ?? crypto.randomUUID();
@@ -348,10 +357,21 @@ export function mountApp(root: HTMLElement): () => void {
     return parsed.data;
   }
   function leave() {
+    if (!credentials) return;
+    leaving = true; consent = false; trialConsent = false; clockReady = false;
+    pendingCommands.clear();
     stopCompass?.(); stopCompass = null;
-    cancelPermissionCheck(); stopCollection(); stopLiveUpdates(); consent = false; trialConsent = false;
+    cancelPermissionCheck(); stopCollection(); stopLiveUpdates();
+    credentials = { ...credentials, leaving: true };
+    try { sessionStorage.setItem("monk-session", JSON.stringify(credentials)); }
+    catch { error = "Leave could not be saved on this phone. Keep this page open until the server confirms departure."; }
+    snapshot = null; trial = null; destroyMatch(game);
     connection?.send({ version: 1, type: "leave" });
+    render();
+  }
+  function finishLeave() {
     connection?.close(); connection = null; credentials = null; snapshot = null; trial = null;
+    leaving = false;
     latest = null; summary = null; error = "";
     pendingCommands.clear(); pendingFeedback.clear(); acknowledged.clear(); feedback = [];
     conversionNotices = []; factionHistory = []; historyAvailable = false; interruption = null;
@@ -461,7 +481,7 @@ export function mountApp(root: HTMLElement): () => void {
   try {
     const raw = sessionStorage.getItem("monk-session");
     if (raw) {
-      const parsed = sessionCredentialsSchema.safeParse(JSON.parse(raw));
+      const parsed = savedSessionSchema.safeParse(JSON.parse(raw));
       if (!parsed.success) throw new Error("Stored session is invalid. Leave and join again.");
       connect(parsed.data);
       if (validInvite && parsed.data.matchCode !== invitedCode) {

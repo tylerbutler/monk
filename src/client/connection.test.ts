@@ -19,13 +19,13 @@ function snapshot(streamId = "stream-a", streamSeq = 1): Extract<ServerMessage, 
   return { version: 1, type: "snapshot", streamId, streamSeq,
     snapshot: snapshotFor(lobbyFixture(["rock", "paper"]), null, 0), trial: null, startChecking: false };
 }
-function setup(overrides: Partial<ConnectionHandlers> = {}) {
+function setup(overrides: Partial<ConnectionHandlers> = {}, session = credentials) {
   const statuses: ConnectionStatus[] = [], messages: ServerMessage[] = [];
   const handlers: ConnectionHandlers = {
     onMessage: message => messages.push(message), onStatus: status => statuses.push(status),
     onReady: vi.fn(), onCommandUnconfirmed: vi.fn(), ...overrides,
   };
-  const connection = connectMatch(credentials, handlers); connections.push(connection);
+  const connection = connectMatch(session, handlers); connections.push(connection);
   return { connection, socket: TestSocket.instances[0], statuses, messages, handlers };
 }
 function authorize(socket: TestSocket, streamId = "stream-a") {
@@ -287,4 +287,66 @@ it("disposal stops request callbacks, reconnects and heartbeats", () => {
   expect(socket.frames).toHaveLength(count);
   expect(TestSocket.instances).toHaveLength(1);
   expect(handlers.onCommandUnconfirmed).not.toHaveBeenCalled();
+});
+
+it("keeps leave open until acknowledged and stops all other sends and command retries", () => {
+  const departed = vi.fn();
+  const { connection, socket } = setup({ onLeft: departed });
+  authorize(socket);
+  connection.send({ version: 1, type: "host_command", commandId: "pending", command: { type: "pause" } });
+  connection.send({ version: 1, type: "leave" });
+  connection.send(position);
+  connection.send({ version: 1, type: "host_command", commandId: "new", command: { type: "start" } });
+  expect(socket.readyState).toBe(TestSocket.OPEN);
+  expect(departed).not.toHaveBeenCalled();
+  expect(socket.positionFrames()).toHaveLength(0);
+  vi.advanceTimersByTime(4999);
+  expect(socket.applicationFrames().filter(frame => frame.type === "host_command")).toHaveLength(1);
+  socket.reply(socket.decoded().find(frame => frame[3] === "leave")!, {});
+  expect(departed).toHaveBeenCalledOnce();
+  expect(socket.readyState).toBe(TestSocket.CLOSED);
+});
+
+it("retries an offline leave on join without replaying readiness callbacks", () => {
+  const { connection, socket, handlers } = setup();
+  connection.send({ version: 1, type: "leave" });
+  authorize(socket);
+  expect(socket.applicationFrames().map(frame => frame.type)).toEqual(["leave"]);
+  expect(handlers.onReady).not.toHaveBeenCalled();
+});
+
+it("can leave during snapshot recovery without waiting for the canceled snapshot", () => {
+  const { connection, socket } = setup();
+  authorize(socket); gap(socket);
+  connection.send({ version: 1, type: "leave" });
+  expect(socket.applicationFrames().filter(frame => frame.type === "leave")).toHaveLength(1);
+});
+
+it("does not treat a failed departure write as confirmation", () => {
+  const departed = vi.fn();
+  const { connection, socket } = setup({ onLeft: departed });
+  authorize(socket); connection.send({ version: 1, type: "leave" });
+  socket.reply(socket.decoded().find(frame => frame[3] === "leave")!,
+    { version: 1, type: "error", streamId: "stream-a", streamSeq: 2,
+      code: "storage_failed", reason: "Not saved.", commandId: null }, "error");
+  expect(departed).not.toHaveBeenCalled();
+  const replacement = TestSocket.instances.at(-1)!;
+  authorize(replacement, "retry");
+  expect(replacement.applicationFrames().map(frame => frame.type)).toEqual(["leave"]);
+});
+
+it.each(["unauthorized", "expired"])("finishes a lost leave acknowledgement when rejoin confirms %s", code => {
+  const departed = vi.fn();
+  const session = { ...credentials, playerToken: "p".repeat(64) };
+  const { connection, socket, handlers } = setup({ onLeft: departed }, session);
+  authorize(socket);
+  connection.send({ version: 1, type: "leave" });
+  vi.advanceTimersByTime(5000);
+  const replacement = TestSocket.instances.at(-1)!;
+  expect(replacement).not.toBe(socket);
+  replacement.open();
+  replacement.reply(replacement.decoded().find(frame => frame[3] === "phx_join")!,
+    { code, reason: "Session ended." }, "error");
+  expect(departed).toHaveBeenCalledOnce();
+  expect(handlers.onReady).toHaveBeenCalledOnce();
 });

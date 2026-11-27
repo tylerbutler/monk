@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ComponentProps } from "svelte";
-  import type { ConnectionStatus, EngineEvent, LocationStatus, PlayerSnapshot, SessionCredentials } from "../shared/protocol";
+  import type { ConnectionStatus, EngineEvent, LocationStatus, PlayerSnapshot } from "../shared/protocol";
+  import type { SavedSession } from "./session";
   import Entry from "./Entry.svelte";
   import RoomInvite from "./RoomInvite.svelte";
   import TrialPanel from "./TrialPanel.svelte";
@@ -12,7 +13,7 @@
   let { credentials, snapshot, connectionStatus, location, error, commandStatus, feedback,
     conversionNotices, feedbackPending, factionHistory, historyAvailable, audioAvailable, unconfirmedCount,
     entry, invitation, trial, game, joinHost, enableAudio, leave, reconnect, retryCommands, dismissConversion, reportError }: {
-    credentials: SessionCredentials | null; snapshot: PlayerSnapshot | null;
+    credentials: SavedSession | null; snapshot: PlayerSnapshot | null;
     connectionStatus: ConnectionStatus; location: LocationStatus; error: string; commandStatus: string;
     feedback: EngineEvent[]; conversionNotices: EngineEvent[]; feedbackPending: boolean;
     factionHistory: EngineEvent[]; historyAvailable: boolean; audioAvailable: boolean; unconfirmedCount: number;
@@ -73,7 +74,7 @@
         <details id="room-tools" use:contextDisclosure={{ context: playing, open: !playing }} class:setup={!playing}>
           <summary id="room-tools-toggle" hidden={!playing}>{@render icon(icons.settings)}Room &amp; options</summary>
           <h2>Room {credentials.matchCode}</h2>
-          {#if snapshot?.phase !== "ended"}<div class="room-invitation"><RoomInvite {...invitation} /></div>{/if}
+          {#if !credentials.leaving && snapshot?.phase !== "ended"}<div class="room-invitation"><RoomInvite {...invitation} /></div>{/if}
           {#if snapshot}
             {#if snapshot.canHost && !snapshot.ownPlayerId && snapshot.phase !== "ended"}
               <ShellButton label="Join as a player on this phone" action={joinHost} name="host-join" icon={icons.join} {reportError} />
@@ -119,7 +120,7 @@
           {/each}
         </ol>
       </details>
-    {:else}<p>Connecting to the private match. Location is not collected.</p>{/if}
+    {:else}<p>{credentials.leaving ? "Leaving the room. Waiting for server confirmation. Location is not collected." : "Connecting to the private match. Location is not collected."}</p>{/if}
   {/each}
   {#if connectionStatus.state === "failed"}
     <ShellButton label="Reconnect" action={reconnect} name="reconnect" class="secondary" icon={icons.refresh} {reportError} />
@@ -129,7 +130,7 @@
 <footer>
   <details id="safe-play" use:contextDisclosure={{ context: playing, open: !!credentials && !playing }} data-context={playing ? "game" : "setup"}>
     <summary id="safe-play-toggle">{@render icon(icons.safety)}Location and safe play</summary>
-    <p>Agree on a bounded outdoor area and safe routes. No running or touching is needed. You can leave without a gameplay penalty. Keep this app visible and the screen on.</p>
+    <p>Agree on a bounded outdoor area and safe routes. No running or touching is needed. You can leave without a gameplay penalty. Leaving stops sensors immediately. The phone keeps the departure request until the server confirms it, including after reconnect or reload. Keep this app visible and the screen on.</p>
     <p>Share location uses browser permission. Players and the host see approximate direction and distance, not raw opponent coordinates. Last-known positions stay on radar, but influence stops after 30 seconds without a new position. Sharing stops when this app is hidden or disconnected. Locations stay only in temporary server memory, not match records or exports. Rooms and credentials expire within 24 hours.</p>
     <p>At round end, room members can see player names, conversion totals, and earned trophies.</p>
   </details>
