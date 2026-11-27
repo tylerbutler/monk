@@ -9,6 +9,7 @@ function recoveryWire() {
   let dropCommandReply = false, holdJoin = false;
   let resumeJoin: (() => void) | null = null;
   let droppedCommandId: string | null = null, positions = 0, lastPositionSeq = 0;
+  let rosterAfterUpdate: string[] | null = null;
   function close() {
     if (!connection) throw new Error("Missing match connection.");
     connection.client.close({ code: 1012, reason: "Recovery test" });
@@ -20,6 +21,7 @@ function recoveryWire() {
     get lastPositionSeq() { return lastPositionSeq; },
     get droppedCommandId() { return droppedCommandId; },
     get holdingJoin() { return resumeJoin !== null; },
+    get rosterAfterUpdate() { return rosterAfterUpdate; },
     dropNextCommandReply() { dropCommandReply = true; },
     holdNextJoin() { holdJoin = true; },
     releaseJoin() { const resume = resumeJoin; resumeJoin = null; holdJoin = false; resume?.(); },
@@ -34,6 +36,10 @@ function recoveryWire() {
       });
       server.onMessage(raw => {
         const [, , topic, event, payload] = JSON.parse(raw.toString());
+        if (event === "update") {
+          const parsed = parseServerMessage(payload);
+          if (parsed.ok && parsed.value.type === "update") rosterAfterUpdate = parsed.value.snapshot.roster.map(player => player.id);
+        }
         if (event === "phx_reply") {
           const join = joinReplySchema.safeParse(payload.response);
           if (join.success) {
@@ -114,4 +120,18 @@ test("hidden recovery sends no positions before visibility, readiness, consent, 
   expect(wire.lastPositionSeq).toBeGreaterThan(lastSeq);
   await expect(host.locator(".radar-players")).toContainText("about 55 m E");
   await expect(host.locator(".conversion-notice, .conversion-takeover, #award-ceremony")).toHaveCount(0);
+});
+
+test("leaving during reconnect removes the player when the channel is ready", async ({ page, wire }) => {
+  await page.routeWebSocket("**/socket/websocket?**", socket => wire.route(socket));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Create room", exact: true }).click();
+  await expect.poll(() => wire.joins.length).toBe(1);
+  wire.holdNextJoin(); wire.close();
+  await expect.poll(() => wire.holdingJoin).toBe(true);
+  await page.getByRole("button", { name: "Leave room", exact: true }).click();
+  await expect(page.getByText(/^Leaving the room\. Waiting for server confirmation/)).toBeVisible();
+  wire.releaseJoin();
+  await expect(page.getByRole("button", { name: "Create room", exact: true })).toBeVisible();
+  expect(wire.rosterAfterUpdate).toEqual([]);
 });
