@@ -170,8 +170,11 @@ export async function loadRecord(storage: DurableObjectStorage): Promise<MatchRe
   return { ...record, checkpoint: { ...record.checkpoint, mode: "test",
     parameters: { ...(record.checkpoint.parameters ?? gamePreset), freshnessMs: locationInactivityMs } } };
 }
-export async function commitRecord(storage: DurableObjectStorage, record: MatchRecord, events: EngineEvent[]): Promise<void> {
+export async function commitRecord(
+  storage: DurableObjectStorage, record: MatchRecord, events: EngineEvent[], initialAlarmMs?: number,
+): Promise<void> {
   const validated = recordSchema.parse({ ...record, events: [...record.events, ...events] });
+  if (initialAlarmMs !== undefined) countSchema.parse(initialAlarmMs);
   const next = encode(validated);
   await storage.transaction(async transaction => {
     const raw = await transaction.get("record");
@@ -195,6 +198,7 @@ export async function commitRecord(storage: DurableObjectStorage, record: MatchR
     }
     next.manifest.revision = countSchema.parse((previous?.manifest.revision ?? 0) + 1);
     await transaction.put("record", next.manifest);
+    if (initialAlarmMs !== undefined) await transaction.setAlarm(initialAlarmMs);
   });
   // A failed or retried transaction must not advance the committed delta baseline.
   cache.set(storage, next);

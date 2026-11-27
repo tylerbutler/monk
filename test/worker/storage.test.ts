@@ -184,3 +184,38 @@ it("propagates read and retirement failures without exposing old sessions or adv
     expect(await loadRecord(state.storage)).toEqual(record);
   });
 });
+
+it("creates the room and its initial expiry alarm together, leaving later alarms unchanged", async () => {
+  await runInDurableObject(stub(), async (_, state) => {
+    const record = fixture();
+    await commitRecord(state.storage, record, [], record.expiresAtMs);
+    expect(await loadRecord(state.storage)).toEqual(record);
+    expect(await state.storage.getAlarm()).toBe(record.expiresAtMs);
+    const nextDeadline = Date.now() + 60000;
+    await state.storage.setAlarm(nextDeadline);
+    await commitRecord(state.storage, record, []);
+    expect(await state.storage.getAlarm()).toBe(nextDeadline);
+  });
+});
+
+it("rolls back room creation if its expiry alarm fails and permits a clean retry", async () => {
+  await runInDurableObject(stub(), async (_, state) => {
+    const record = fixture();
+    const transaction = state.storage.transaction.bind(state.storage);
+    const spy = vi.spyOn(state.storage, "transaction").mockImplementationOnce(callback => transaction(async tx => {
+      return callback(new Proxy(tx, { get(target, property) {
+        if (property === "setAlarm") return async () => { throw new Error("Initial alarm failed"); };
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      } }));
+    }));
+    await expect(commitRecord(state.storage, record, [], record.expiresAtMs)).rejects.toThrow("Initial alarm failed");
+    spy.mockRestore();
+    expect((await state.storage.list()).size).toBe(0);
+    expect(await state.storage.getAlarm()).toBeNull();
+    expect(await loadRecord(state.storage)).toBeNull();
+    await commitRecord(state.storage, record, [], record.expiresAtMs);
+    expect(await loadRecord(state.storage)).toEqual(record);
+    expect(await state.storage.getAlarm()).toBe(record.expiresAtMs);
+  });
+});
