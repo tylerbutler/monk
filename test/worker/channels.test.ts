@@ -328,6 +328,19 @@ it("unauthorized sockets expire at the five-second deadline", async () => {
   expect((await closed).code).toBe(1008);
   expect((await runInDurableObject(stub, (_, state) => loadRecord(state.storage)))?.checkpoint.phase).toBe("lobby");
 });
+it("closes a delayed valid join as a timeout, not a revoked session", async () => {
+  let now = Date.now();
+  vi.spyOn(Date, "now").mockImplementation(() => now);
+  const { matchCode, hostToken, playerToken } = await createMatch();
+  const socket = await rawSocket(matchCode);
+  const result = new Promise<string>(resolve => {
+    socket.addEventListener("close", event => resolve(`${event.code} ${event.reason}`), { once: true });
+    socket.addEventListener("message", () => resolve("join reply"), { once: true });
+  });
+  now += 5000;
+  socket.send(JSON.stringify(["1", "1", `match:${matchCode}`, "phx_join", { hostToken, playerToken }]));
+  expect(await result).toBe("1008 Authorization timeout");
+});
 it("eviction does not extend the initial authorization deadline", async () => {
   let now = Date.now();
   vi.spyOn(Date, "now").mockImplementation(() => now);

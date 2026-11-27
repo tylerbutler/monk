@@ -127,6 +127,13 @@ export class MatchAuthority extends DurableObject<Env> {
     return !!state && !!this.connections.get(socket)?.actor && !!this.record &&
       core.channel(state, `match:${this.record.matchCode}`).isOk();
   }
+  private closeIfAuthTimedOut(socket: WebSocket): boolean {
+    const connection = this.attachment(socket);
+    if (connection.actor || Date.now() < connection.authDeadlineMs) return false;
+    this.connections.delete(socket); this.protocols.delete(socket);
+    socket.close(1008, "Authorization timeout");
+    return true;
+  }
   private checkpointConnection(socket: WebSocket): void {
     const connection = this.attachment(socket);
     const now = Date.now();
@@ -163,9 +170,9 @@ export class MatchAuthority extends DurableObject<Env> {
         const input = channelJoinSchema.safeParse(action.payload);
         const host = input.success && input.data.hostToken ? await this.verify(input.data.hostToken, true) : null;
         const player = input.success && input.data.playerToken ? await this.verify(input.data.playerToken, false) : null;
+        if (this.closeIfAuthTimedOut(socket)) return;
         const connection = this.attachment(socket);
         if (!input.success || action.topic !== `match:${this.record!.matchCode}` ||
-          Date.now() >= connection.authDeadlineMs && !connection.actor ||
           input.data.hostToken && !host || input.data.playerToken && !player || !host && !player) {
           await this.applyChannel(socket, unwrap(channels.join_rejected(this.protocols.get(socket)!, action.operation,
             JSON.stringify({ code: "unauthorized", reason: "Session credentials or topic are invalid for this match." }), Date.now())));
@@ -443,6 +450,7 @@ export class MatchAuthority extends DurableObject<Env> {
       if (!this.record || !this.engine || Date.now() >= this.record.expiresAtMs) {
         await this.expire(); return;
       }
+      if (this.closeIfAuthTimedOut(socket)) return;
       if (typeof frame !== "string") {
         await this.cleanupConnection(socket);
         this.connections.delete(socket); this.protocols.delete(socket);
@@ -708,14 +716,10 @@ export class MatchAuthority extends DurableObject<Env> {
     await this.serialize(async () => {
       if (this.record && Date.now() >= this.record.expiresAtMs) await this.expire();
       else if (this.record && this.engine) {
-        for (const [socket, connection] of this.connections) {
-          if (!connection.actor && Date.now() >= connection.authDeadlineMs) {
-            this.connections.delete(socket); this.protocols.delete(socket);
-            socket.close(1008, "Authorization timeout");
-          } else {
-            try { await this.applyChannel(socket, unwrap(channels.expire(this.protocols.get(socket)!, Date.now()))); }
-            catch { await this.failConnection(socket); }
-          }
+        for (const socket of this.connections.keys()) {
+          if (this.closeIfAuthTimedOut(socket)) continue;
+          try { await this.applyChannel(socket, unwrap(channels.expire(this.protocols.get(socket)!, Date.now()))); }
+          catch { await this.failConnection(socket); }
         }
         const snapshot = snapshotFor(this.engine, null, Date.now());
         if (snapshot.phase === "running" || snapshot.resumeChecking) await this.tick();
