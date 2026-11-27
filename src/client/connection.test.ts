@@ -7,7 +7,7 @@ import { snapshotFor } from "../worker/engine";
 import { lobbyFixture } from "../../test/fixtures";
 import { TestSocket, joinReply } from "../../test/phoenix-socket";
 
-const credentials = { matchCode: "ABCDEFGH", hostToken: "h".repeat(64), playerToken: null };
+const credentials = { matchCode: "ABCDEFGH", hostToken: "h".repeat(64), playerToken: null, expiresAtMs: Date.now() + 86400000 };
 const connections: ReturnType<typeof connectMatch>[] = [];
 beforeEach(() => {
   TestSocket.instances = []; vi.stubGlobal("WebSocket", TestSocket); vi.useFakeTimers();

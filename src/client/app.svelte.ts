@@ -360,7 +360,7 @@ export function mountApp(root: HTMLElement): () => void {
       throw new Error(failure);
     }
     const parsed = sessionCredentialsSchema.safeParse(raw);
-    if (!parsed.success || parsed.data.expiresAtMs === undefined) throw new Error("Match credentials are invalid. Create or join again.");
+    if (!parsed.success) throw new Error("Match credentials are invalid. Create or join again.");
     return { ...parsed.data, savedAtMs: Date.now() };
   }
   function leave() {
@@ -489,10 +489,14 @@ export function mountApp(root: HTMLElement): () => void {
     const raw = sessionStorage.getItem("monk-session");
     if (raw) {
       const parsed = savedSessionSchema.safeParse(JSON.parse(raw));
-      if (!parsed.success) throw new Error("Stored session is invalid. Leave and join again.");
-      connect(parsed.data);
-      if (validInvite && parsed.data.matchCode !== invitedCode) {
-        error = `You are already in room ${parsed.data.matchCode}. Leave it before joining room ${invitedCode}.`;
+      if (!parsed.success) {
+        sessionStorage.removeItem("monk-session");
+        error = "Saved room is no longer available. Create or join another room.";
+      } else {
+        connect(parsed.data);
+        if (credentials && validInvite && parsed.data.matchCode !== invitedCode) {
+          error = `You are already in room ${parsed.data.matchCode}. Leave it before joining room ${invitedCode}.`;
+        }
       }
     }
   } catch { error = "Stored session could not be loaded. Clear this browser session or join again."; }

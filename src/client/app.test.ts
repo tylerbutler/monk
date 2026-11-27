@@ -508,7 +508,7 @@ function browserApp(snapshot: ReturnType<typeof snapshotFor>) {
   sessionStorage.clear();
   sessionStorage.setItem("monk-session", JSON.stringify({
     matchCode: "ABCDEFGH", hostToken: snapshot.canHost ? "h".repeat(64) : null,
-    playerToken: snapshot.ownPlayerId ? "p".repeat(64) : null,
+    playerToken: snapshot.ownPlayerId ? "p".repeat(64) : null, expiresAtMs: Date.now() + 86400000,
   }));
   const root = document.createElement("main"); document.body.append(root);
   const cleanup = mountApp(root);
@@ -580,6 +580,20 @@ it("persists joined expiry and clears expired saved credentials on reload withou
     expect(restoredRoot.querySelector(".join-form")).not.toBeNull();
     expect(restoredRoot.textContent).toMatch(/expired/i);
   } finally { restoredCleanup?.(); restoredRoot.remove(); app.cleanup(); vi.useRealTimers(); }
+});
+
+it("discards a saved session without a room deadline instead of reconnecting forever", () => {
+  sessionStorage.setItem("monk-session", JSON.stringify({
+    matchCode: "ABCDEFGH", hostToken: null, playerToken: "p".repeat(64),
+  }));
+  TestSocket.instances = []; vi.stubGlobal("WebSocket", TestSocket);
+  const root = document.createElement("main");
+  const cleanup = mountApp(root);
+  try {
+    expect(TestSocket.instances).toHaveLength(0);
+    expect(sessionStorage.getItem("monk-session")).toBeNull();
+    expect(root.querySelector(".join-form")).not.toBeNull();
+  } finally { cleanup(); sessionStorage.clear(); vi.unstubAllGlobals(); }
 });
 
 it.each([false, true])("expires HTTP credentials before their first join (pending leave: %s)", async pendingLeave => {

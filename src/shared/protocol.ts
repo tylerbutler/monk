@@ -147,7 +147,7 @@ export const channelJoinSchema = z.strictObject({ hostToken: token.nullable(), p
 export type ChannelJoin = z.infer<typeof channelJoinSchema>;
 export const sessionCredentialsSchema = z.strictObject({
   matchCode: z.string().regex(/^[A-Z2-9]{8}$/), hostToken: token.nullable(), playerToken: token.nullable(),
-  expiresAtMs: time.optional(),
+  expiresAtMs: time,
 });
 export type SessionCredentials = z.infer<typeof sessionCredentialsSchema>;
 export const clockSchema = z.strictObject({ offsetMs: z.number().finite(), uncertaintyMs: z.number().nonnegative().max(1000), measuredAtMs: time });

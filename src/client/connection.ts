@@ -24,7 +24,7 @@ export function connectMatch(credentials: SavedSession, handlers: ConnectionHand
   let channel: Channel, stopped = false, baseline = false, generation = 0, restarting = false;
   let leaving = credentials.leaving === true, leaveRequest: object | null = null;
   let session = credentials;
-  let expiryMonotonicMs = remainingMs === null ? null : performance.now() + remainingMs;
+  let expiryMonotonicMs = performance.now() + remainingMs;
   let expiryTimer: ReturnType<typeof setTimeout> | null = null;
   let streamId: string | null = null, cursor = 0;
   let snapshotRequest: object | null = null;
@@ -104,15 +104,14 @@ export function connectMatch(credentials: SavedSession, handlers: ConnectionHand
   }
   function checkExpiry() {
     if (stopped) return true;
-    if (remainingSessionMs(session) === 0 || expiryMonotonicMs !== null && performance.now() >= expiryMonotonicMs) {
+    if (remainingSessionMs(session) === 0 || performance.now() >= expiryMonotonicMs) {
       sessionEnded(expiredReason); return true;
     }
     return false;
   }
   function scheduleExpiry() {
     const remaining = remainingSessionMs(session);
-    if (remaining === null) return;
-    expiryMonotonicMs = Math.min(expiryMonotonicMs ?? Infinity, performance.now() + remaining);
+    expiryMonotonicMs = Math.min(expiryMonotonicMs, performance.now() + remaining);
     if (expiryTimer !== null) clearTimeout(expiryTimer);
     expiryTimer = setTimeout(() => sessionEnded(expiredReason), Math.max(0, expiryMonotonicMs - performance.now()));
   }
@@ -281,7 +280,7 @@ export function connectMatch(credentials: SavedSession, handlers: ConnectionHand
       if (!parsed.success) { fail("Join response is invalid. Reconnect to this match."); return; }
       session = { ...session, expiresAtMs: parsed.data.identity.expiresAtMs, savedAtMs: session.savedAtMs ?? Date.now() };
       scheduleExpiry();
-      handlers.onJoin?.(session.expiresAtMs!);
+      handlers.onJoin?.(session.expiresAtMs);
       if (checkExpiry()) return;
       generation += 1; attempts.clear(); requests.clear(); unconfirmed.clear();
       streamId = parsed.data.state.streamId; cursor = parsed.data.state.streamSeq;
