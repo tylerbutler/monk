@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { env } from "cloudflare:workers";
 import { evictDurableObject, reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
-import { loadRecord } from "../../src/worker/storage";
+import { commitRecord, loadRecord } from "../../src/worker/storage";
 import { closeSockets, connect, hostCommand, joinMatch, runningMatch } from "./helpers";
 
 afterEach(async () => { await closeSockets(); vi.restoreAllMocks(); await reset(); });
@@ -85,7 +85,7 @@ it("shows partial legacy coverage without ranks, scores, or trophies", async () 
     await state.storage.deleteAlarm();
     const record = await loadRecord(state.storage);
     if (!record) throw new Error("Missing legacy fixture.");
-    await state.storage.put("record", { ...record, awardData: null });
+    await commitRecord(state.storage, { ...record, awardData: null }, []);
     expect((await loadRecord(state.storage))?.awardData).toBeNull();
   });
   await evictDurableObject(stub);
@@ -107,7 +107,7 @@ it("keeps ended legacy records without a collector unavailable across recovery",
     const record = await loadRecord(state.storage);
     if (!record) throw new Error("Missing ended legacy fixture.");
     expect(record.checkpoint.phase).toBe("ended");
-    await state.storage.put("record", { ...record, awardData: null });
+    await commitRecord(state.storage, { ...record, awardData: null }, []);
     expect((await loadRecord(state.storage))?.awardData).toBeNull();
   });
   for (let recovery = 0; recovery < 2; recovery++) {

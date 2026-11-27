@@ -2,10 +2,11 @@ import { afterEach, expect, it, vi } from "vitest";
 import { env } from "cloudflare:workers";
 import { evictDurableObject, reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { advanceEngine, checkpointEngine, restoreEngine } from "../../src/worker/engine";
-import { loadRecord, recordSchema } from "../../src/worker/storage";
+import { commitRecord, loadRecord, recordSchema } from "../../src/worker/storage";
 import { advanceAwardData } from "../../src/worker/award-data";
 import type { PositionReport } from "../../src/shared/protocol";
 import { closeSockets, connect, createMatch, hostCommand, joinMatch, runningMatch } from "./helpers";
+import { putStoredItem } from "./storage-fixtures";
 
 afterEach(async () => { await closeSockets(); vi.restoreAllMocks(); await reset(); });
 
@@ -207,7 +208,7 @@ it("recovers collected rounds without outage credit", async () => {
   expect((await match.read()).awardData!.players[match.ids[0]].eligibleMs).toBe(saved.players[match.ids[0]].eligibleMs + 1000);
 });
 
-it.each(["lobby", "running", "paused", "ended"] as const)("recovers legacy %s records with honest coverage", async phase => {
+it.each(["lobby", "running", "paused", "ended"] as const)("recovers %s records without award data with honest coverage", async phase => {
   const credentials = await createMatch();
   await joinMatch(credentials.matchCode);
   const stub = env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode));
@@ -223,8 +224,7 @@ it.each(["lobby", "running", "paused", "ended"] as const)("recovers legacy %s re
       engine = next.state; record.events.push(...next.events);
     }
     record.checkpoint = checkpointEngine(engine, engine.last_at);
-    const { awardData: _removed, ...legacy } = record;
-    await state.storage.put("record", legacy);
+    await commitRecord(state.storage, { ...record, awardData: null }, []);
     expect((await loadRecord(state.storage))?.awardData).toBeNull();
     return record;
   });
@@ -257,10 +257,12 @@ it("rejects malformed present award data", async () => {
       { ...data, lastFrame: { ...data.lastFrame, remainingMs: data.lastFrame.remainingMs + 1 } },
       { ...data, lastFrame: { ...data.lastFrame, players: data.lastFrame.players.slice(1) } },
     ]) {
-      await state.storage.put("record", { ...original, awardData: invalid });
+      const { players: _players, openEncounters: _encounters, ...header } = invalid;
+      await putStoredItem(state.storage, "award", header);
       await expect(loadRecord(state.storage)).rejects.toThrow("Stored match record is invalid.");
     }
-    await state.storage.put("record", original);
+    const { players: _players, openEncounters: _encounters, ...header } = data;
+    await putStoredItem(state.storage, "award", header);
   });
 });
 

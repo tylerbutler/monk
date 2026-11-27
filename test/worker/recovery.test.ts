@@ -5,6 +5,7 @@ import { advanceEngine, checkpointEngine, restoreEngine, snapshotFor } from "../
 import { commitRecord, loadRecord } from "../../src/worker/storage";
 import { command, pulse, runningFixture } from "../fixtures";
 import { closeSockets, connect, createMatch, hostCommand, joinMatch, probe, runningMatch } from "./helpers";
+import { putStoredItem } from "./storage-fixtures";
 
 afterEach(async () => { await closeSockets(); vi.restoreAllMocks(); await reset(); });
 
@@ -15,7 +16,7 @@ async function trial(withoutParameters = false) {
     await runInDurableObject(stub, async (_, state) => {
       const record = await loadRecord(state.storage);
       if (!record) throw new Error("Missing legacy lobby fixture");
-      await state.storage.put("record", { ...record, awardData: null, checkpoint: { ...record.checkpoint, parameters: null } });
+      await commitRecord(state.storage, { ...record, awardData: null, checkpoint: { ...record.checkpoint, parameters: null } }, []);
     });
     await evictDurableObject(stub);
   }
@@ -126,8 +127,8 @@ it("recovers running as paused, preserves committed duration, and clears observa
     const record = await loadRecord(state.storage);
     if (!record) throw new Error("Missing fixture record");
     const checkpoint = checkpointEngine(pulse(runningFixture(["rock", "scissors"]), 1000, [0, 4]).state, 1000);
-    await state.storage.put("record", { ...record, awardData: null,
-      checkpoint: { ...checkpoint, id: record.matchCode, hostId: record.checkpoint.hostId, createdAtMs: record.createdAtMs } });
+    await commitRecord(state.storage, { ...record, awardData: null,
+      checkpoint: { ...checkpoint, id: record.matchCode, hostId: record.checkpoint.hostId, createdAtMs: record.createdAtMs } }, []);
   });
 
   await evictDurableObject(stub);
@@ -139,19 +140,20 @@ it("recovers running as paused, preserves committed duration, and clears observa
   } });
 });
 
-it("loads older matches and drops removed play-area metadata on the next commit", async () => {
+it("drops removed play-area metadata in a supported checkpoint on the next commit", async () => {
   const credentials = await createMatch();
   const stub = env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode));
   await runInDurableObject(stub, async (_, state) => {
     const original = await loadRecord(state.storage);
     if (!original) throw new Error("Missing fixture record");
-    await state.storage.put("record", { ...original, checkpoint: { ...original.checkpoint, playArea: "Old test note" } });
+    await putStoredItem(state.storage, "checkpoint", { ...original.checkpoint, playArea: "Old test note" });
     const loaded = await loadRecord(state.storage);
     if (!loaded) throw new Error("Older match was lost");
     expect(loaded.checkpoint).not.toHaveProperty("playArea");
     expect(loaded.sessions).toEqual(original.sessions);
     await commitRecord(state.storage, loaded, []);
-    expect(await state.storage.get("record")).toEqual(original);
+    expect(await loadRecord(state.storage)).toEqual(original);
+    expect(JSON.stringify(await state.storage.get("record:v2:checkpoint:000000000000:000000"))).not.toContain("playArea");
   });
   const client = await connect(credentials);
   client.send({ version: 1, type: "snapshot_request" });
@@ -164,10 +166,9 @@ it("still rejects unrelated stored checkpoint fields during legacy cleanup", asy
   await runInDurableObject(stub, async (_, state) => {
     const original = await loadRecord(state.storage);
     if (!original) throw new Error("Missing fixture record");
-    await state.storage.put("record", { ...original,
-      checkpoint: { ...original.checkpoint, playArea: "Old test note", latitude: 1 } });
+    await putStoredItem(state.storage, "checkpoint", { ...original.checkpoint, playArea: "Old test note", latitude: 1 });
     await expect(loadRecord(state.storage)).rejects.toThrow("Stored match record is invalid");
-    await state.storage.put("record", original);
+    await putStoredItem(state.storage, "checkpoint", original.checkpoint);
   });
 });
 
@@ -192,7 +193,7 @@ it.each(["test", "normal"] as const)("migrates saved %s rooms without losing ide
     const legacy = { ...record, awardData: null, checkpoint: { ...record.checkpoint, mode, phase: "running" as const,
       remainingMs: 123456, parameters: { ...record.checkpoint.parameters!,
         entryRadiusM: 19, retentionRadiusM: 29, freshnessMs: 5000, dwellMs: 4000 } } };
-    await state.storage.put("record", legacy);
+    await commitRecord(state.storage, legacy, []);
     return legacy;
   });
   await evictDurableObject(stub);
@@ -202,7 +203,7 @@ it.each(["test", "normal"] as const)("migrates saved %s rooms without losing ide
   expect(snapshot).toMatchObject({ phase: "paused", mode: "test", remainingMs: 123456,
     parameters: { entryRadiusM: 19, retentionRadiusM: 29, freshnessMs: 30000, dwellMs: 4000 } });
   expect(snapshot.roster.map(({ active: _, ...p }) => p)).toEqual(original.checkpoint.players);
-  const stored = await runInDurableObject(stub, (_, state) => state.storage.get<typeof original>("record"));
+  const stored = await runInDurableObject(stub, (_, state) => loadRecord(state.storage));
   expect(stored?.sessions).toEqual(original.sessions);
   expect(stored?.checkpoint).toMatchObject({ phase: "paused", mode: "test", remainingMs: 123456 });
   expect((await hostCommand(host, { type: "begin_resume" })).snapshot.phase).toBe("running");

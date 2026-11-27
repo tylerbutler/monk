@@ -145,7 +145,7 @@ it("shares cached and approximate locations in lobby and pause without clock pro
     radar: { reference: { ageMs: expect.any(Number), active: true } } });
   expect(snapshot.roster.some(p => p.active)).toBe(true);
   const record = await runInDurableObject(env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode)),
-    (_, state) => state.storage.get("record"));
+    (_, state) => loadRecord(state.storage));
   expect(JSON.stringify(record)).not.toMatch(/latitude|longitude|radar|reportedAgeMs/);
 });
 
@@ -459,9 +459,10 @@ it("closed rosters reject new joins and corrupt records are not treated as new m
   await runInDurableObject(stub, async (_, state) => {
     const original = await loadRecord(state.storage);
     if (!original) throw new Error("Missing match fixture");
+    const manifest = await state.storage.get("record");
     await state.storage.put("record", { broken: true });
     await expect(loadRecord(state.storage)).rejects.toThrow("Stored match record is invalid");
-    await state.storage.put("record", original);
+    await state.storage.put("record", manifest);
   });
 });
 it("rejects cross-origin sockets and credentials in URLs", async () => {
