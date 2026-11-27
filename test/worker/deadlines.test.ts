@@ -1,11 +1,22 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { env } from "cloudflare:workers";
-import { SELF, reset, runInDurableObject } from "cloudflare:test";
+import { SELF, evictDurableObject, reset, runInDurableObject } from "cloudflare:test";
 import { closeSockets, connect, createMatch, hostCommand, joinMatch, runningMatch } from "./helpers";
 import { receivePush } from "./phoenix-transport";
 import type { MatchRecord } from "../../src/worker/storage";
+import { loadRecord } from "../../src/worker/storage";
 
 afterEach(async () => { await closeSockets(); vi.restoreAllMocks(); await reset(); });
+
+it("discards expired rooms during wake-up without waiting for an alarm or request", async () => {
+  let now = Date.now();
+  vi.spyOn(Date, "now").mockImplementation(() => now);
+  const credentials = await createMatch();
+  const stub = env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode));
+  await evictDurableObject(stub);
+  now += 86_400_000;
+  expect(await runInDurableObject(stub, (_, state) => loadRecord(state.storage))).toBeNull();
+});
 
 it.each(["pause", "join"])("ends the round before a %s between its deadline and the next tick", async action => {
   let now = Date.now();

@@ -59,6 +59,7 @@ export class MatchAuthority extends DurableObject<Env> {
     ctx.blockConcurrencyWhile(async () => {
       this.record = await loadRecord(ctx.storage);
       if (this.record) {
+        if (Date.now() >= this.record.expiresAtMs) { await this.expire(); return; }
         const engine = restoreEngine(this.record.checkpoint, Date.now());
         const frame = awardFrameFor(engine);
         const record = { ...this.record, checkpoint: checkpointEngine(engine, engine.last_at),
@@ -695,9 +696,9 @@ export class MatchAuthority extends DurableObject<Env> {
     for (const socket of this.ctx.getWebSockets()) {
       try { await this.error(socket, "expired", "Match expired."); } catch { /* Close even if the final reply cannot be sent. */ }
     }
+    await this.ctx.storage.deleteAll();
     this.record = null; this.engine = null;
     this.protocols.clear(); this.connections.clear();
-    await this.ctx.storage.deleteAll();
     for (const socket of this.ctx.getWebSockets()) socket.close(1008, "Match expired");
     if (this.timer !== null) clearTimeout(this.timer);
     this.timer = null; this.trial = null; this.clearMeasurements(); this.reports.clear(); this.clocks.clear(); this.lastKnownPositions.clear();
