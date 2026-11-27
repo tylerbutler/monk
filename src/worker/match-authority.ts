@@ -367,9 +367,8 @@ export class MatchAuthority extends DurableObject<Env> {
           ],
           events: [], outcomes: [], feedback: [],
         };
-        await commitRecord(this.ctx.storage, record, []);
+        await commitRecord(this.ctx.storage, record, [], record.expiresAtMs);
         this.record = record; this.engine = engine;
-        await this.ctx.storage.setAlarm(record.expiresAtMs);
         return Response.json({ matchCode: code, hostToken: credential.token, playerToken: playerCredential.token },
           { status: 201, headers: { "Cache-Control": "no-store" } });
       }

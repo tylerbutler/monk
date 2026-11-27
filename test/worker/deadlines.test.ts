@@ -8,6 +8,25 @@ import { loadRecord } from "../../src/worker/storage";
 
 afterEach(async () => { await closeSockets(); vi.restoreAllMocks(); await reset(); });
 
+it("does not create a room if its expiry alarm cannot be saved", async () => {
+  const code = "ABCDEFGH";
+  const stub = env.MATCHES.get(env.MATCHES.idFromName(code));
+  await runInDurableObject(stub, async (instance, state) => {
+    const transaction = state.storage.transaction.bind(state.storage);
+    const reject = () => Promise.reject(new Error("Cannot save expiry"));
+    vi.spyOn(state.storage, "setAlarm").mockImplementation(reject);
+    vi.spyOn(state.storage, "transaction").mockImplementation(fn => transaction(async tx => {
+      vi.spyOn(tx, "setAlarm").mockImplementation(reject);
+      return fn(tx);
+    }));
+    await expect(instance.fetch(new Request(`https://monk.test/api/matches/${code}/create`, {
+      method: "POST", body: "{}",
+    }))).rejects.toThrow("Cannot save expiry");
+    expect(await loadRecord(state.storage)).toBeNull();
+    expect(await state.storage.getAlarm()).toBeNull();
+  });
+});
+
 it("discards expired rooms during wake-up without waiting for an alarm or request", async () => {
   let now = Date.now();
   vi.spyOn(Date, "now").mockImplementation(() => now);
