@@ -1,11 +1,35 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { env } from "cloudflare:workers";
-import { reset, runInDurableObject } from "cloudflare:test";
-import { closeSockets, connect, createMatch, hostCommand, joinMatch } from "./helpers";
+import { SELF, reset, runInDurableObject } from "cloudflare:test";
+import { closeSockets, connect, createMatch, hostCommand, joinMatch, runningMatch } from "./helpers";
 import { receivePush } from "./phoenix-transport";
 import type { MatchRecord } from "../../src/worker/storage";
 
 afterEach(async () => { await closeSockets(); vi.restoreAllMocks(); await reset(); });
+
+it.each(["pause", "join"])("ends the round before a %s between its deadline and the next tick", async action => {
+  let now = Date.now();
+  vi.spyOn(Date, "now").mockImplementation(() => now);
+  const { host, credentials } = await runningMatch(1000);
+  const stub = env.MATCHES.get(env.MATCHES.idFromName(credentials.matchCode));
+  await runInDurableObject(stub, instance => {
+    clearTimeout(Reflect.get(instance, "timer"));
+    Reflect.set(instance, "timer", null);
+  });
+  now += 1000;
+  if (action === "pause") {
+    const result = await hostCommand(host, { type: "pause" });
+    expect(result.outcome?.accepted).toBe(false);
+    expect(result.snapshot.phase).toBe("ended");
+  } else {
+    const reply = await SELF.fetch(`https://monk.test/api/matches/${credentials.matchCode}/join`, { method: "POST", body: "{}" });
+    expect(reply.status).toBe(409);
+  }
+  host.send({ version: 1, type: "snapshot_request" });
+  const { snapshot } = await host.next("snapshot");
+  expect(snapshot).toMatchObject({ phase: "ended", remainingMs: 0 });
+  expect(snapshot.roundResults?.players).toHaveLength(2);
+});
 
 it("keeps the existing wake-up when a position broadcast changes no deadline", async () => {
   const credentials = await createMatch();

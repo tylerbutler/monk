@@ -403,7 +403,13 @@ export class MatchAuthority extends DurableObject<Env> {
           nowMs: Date.now(), actor: { id: this.record.checkpoint.hostId, host: true, playerId: null },
           commands: [{ type: "join", playerId, label, faction }], observations: [],
         });
-        if (next.rejections.length) return Response.json({ error: next.rejections[0].reason }, { status: 409 });
+        if (next.rejections.length) {
+          if (next.events.length) {
+            await this.accept(next);
+            await this.broadcast(next.events);
+          }
+          return Response.json({ error: next.rejections[0].reason }, { status: 409 });
+        }
         await this.accept(next, null, [...this.record.sessions,
           { id: playerId, host: false, playerId, verifier: credential.verifier }]);
         await this.broadcast(next.events);

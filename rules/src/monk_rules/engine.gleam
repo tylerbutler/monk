@@ -351,6 +351,10 @@ pub fn step(state: Match, input: StepInput) -> StepResult {
         observations: list.filter(observations, fn(p) { p.expires_at > now }),
       ),
     )
+  let initial = case state.phase == "running" && state.remaining == 0 {
+    True -> phase(initial, "ended", "Round time elapsed.", now)
+    False -> initial
+  }
   let applied =
     list.fold(input.commands, initial, fn(r, c) { apply_command(r, c, input) })
   let applied = case applied.state.phase, applied.state.resume_at {
@@ -365,26 +369,14 @@ pub fn step(state: Match, input: StepInput) -> StepResult {
       }
     _, _ -> applied
   }
-  let applied = case applied.state.phase {
-    "running" ->
-      case applied.state.remaining == 0 {
-        True -> phase(applied, "ended", "Round time elapsed.", now)
-        False ->
-          case
-            applied.state.mode == "normal"
-            && !populations(active(applied.state, now))
-          {
-            True ->
-              phase(
-                applied,
-                "paused",
-                "A faction has no fresh active player.",
-                now,
-              )
-            False -> applied
-          }
-      }
-    _ -> applied
+  let applied = case
+    applied.state.phase == "running"
+    && applied.state.mode == "normal"
+    && !populations(active(applied.state, now))
+  {
+    True ->
+      phase(applied, "paused", "A faction has no fresh active player.", now)
+    False -> applied
   }
   let resolved = conversion.resolve(applied, now)
   case
