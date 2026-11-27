@@ -52,6 +52,7 @@ export class MatchAuthority extends DurableObject<Env> {
   private lastReceipts = new Map<string, number>();
   private trial: TrialStatus | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private alarmRetry: ReturnType<typeof setTimeout> | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -91,8 +92,21 @@ export class MatchAuthority extends DurableObject<Env> {
       }
     });
   }
-  private serialize<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.queue.then(operation);
+  private serialize<T>(operation: () => Promise<T>, alarmEvent = false): Promise<T> {
+    const result = this.queue.then(async () => {
+      const value = await operation();
+      try {
+        await this.scheduleAlarm();
+      } catch (error) {
+        if (alarmEvent) throw error; // The runtime retries failed alarm handlers.
+        console.warn("monk", "alarm_schedule_failed");
+        if (this.alarmRetry === null) this.alarmRetry = setTimeout(() => {
+          this.alarmRetry = null;
+          this.ctx.waitUntil(this.serialize(async () => {}));
+        }, 1000);
+      }
+      return value;
+    });
     this.queue = result.then(() => undefined, () => undefined);
     return result;
   }
@@ -186,7 +200,6 @@ export class MatchAuthority extends DurableObject<Env> {
         socket.close(1000, action.reason);
       }
     }
-    await this.scheduleAlarm();
   }
   private async failConnection(socket: WebSocket): Promise<void> {
     try { await this.cleanupConnection(socket); } finally {
@@ -271,7 +284,6 @@ export class MatchAuthority extends DurableObject<Env> {
     if (record.checkpoint.phase === "ended" || (record.checkpoint.phase === "paused" && !this.view({ id: "", host: false, playerId: null }).resumeChecking)) {
       this.trial = null; this.clearMeasurements();
     }
-    await this.scheduleAlarm();
     this.scheduleTick();
   }
   private trialFor(actor: VerifiedActor): TrialStatus | null {
@@ -294,7 +306,9 @@ export class MatchAuthority extends DurableObject<Env> {
         if (deadline >= 0) deadlines.push(deadline);
       }
     }
-    await this.ctx.storage.setAlarm(Math.min(...deadlines));
+    const next = Math.min(...deadlines), current = await this.ctx.storage.getAlarm();
+    // An earlier wake-up can check the new deadline without moving the alarm.
+    if (current === null || next < current) await this.ctx.storage.setAlarm(next);
   }
   private scheduleTick(): void {
     if (this.timer !== null || !this.engine) return;
@@ -403,7 +417,6 @@ export class MatchAuthority extends DurableObject<Env> {
         this.protocols.set(server, unwrap(channels.new_connection(crypto.randomUUID(), Date.now())));
         this.checkpointConnection(server);
         this.ctx.acceptWebSocket(server);
-        await this.scheduleAlarm();
         return new Response(null, { status: 101, webSocket: client });
       }
       return Response.json({ error: "Unknown match route." }, { status: 404 });
@@ -667,7 +680,6 @@ export class MatchAuthority extends DurableObject<Env> {
       } catch { await this.failConnection(socket); }
       this.connections.delete(socket); this.protocols.delete(socket); this.clocks.delete(socket);
       if (socket.readyState !== WebSocket.CLOSED) socket.close(1000, "Connection closed");
-      await this.scheduleAlarm();
     });
   }
   async webSocketError(socket: WebSocket): Promise<void> {
@@ -700,8 +712,7 @@ export class MatchAuthority extends DurableObject<Env> {
         }
         const snapshot = snapshotFor(this.engine, null, Date.now());
         if (snapshot.phase === "running" || snapshot.resumeChecking) await this.tick();
-        await this.scheduleAlarm();
       }
-    });
+    }, true);
   }
 }
