@@ -51,7 +51,6 @@ const manifestSchema = z.strictObject({
 type Manifest = z.infer<typeof manifestSchema>;
 type Stored = { manifest: Manifest; values: Map<string, string | number> };
 const cache = new WeakMap<DurableObjectStorage, Stored>();
-const retiredSchema = z.strictObject({ version: z.literal(2), retired: z.literal(true) });
 const invalid = () => new Error("Stored match record is invalid.");
 const itemKey = (collection: Collection, index: number) => `${prefix}${collection}:${String(index).padStart(12, "0")}`;
 const partKey = (key: string, part: number) => `${key}:${String(part).padStart(6, "0")}`;
@@ -152,13 +151,12 @@ async function readStored(transaction: DurableObjectTransaction, raw: unknown): 
 export async function loadRecord(storage: DurableObjectStorage): Promise<MatchRecord | null> {
   const stored = await storage.transaction(async transaction => {
     const raw = await transaction.get("record");
-    if (retiredSchema.safeParse(raw).success) return null;
-    // Old-format rooms are unavailable after deployment. Keep only a tombstone so
-    // their credentials are erased, their alarm cannot strand data, and creation
-    // cannot reuse the old room identity. Malformed records remain errors.
+    // Old-format rooms are unavailable after deployment. Drop their data and
+    // alarm on first wake, just as for an expired room; keep no reservation.
+    // Malformed records remain errors.
     if (raw !== undefined && recordSchema.safeParse(raw).success) {
       if ((await transaction.list({ prefix, limit: 1 })).size) throw invalid();
-      await transaction.put("record", { version: 2, retired: true });
+      await transaction.delete("record");
       await transaction.deleteAlarm();
       return null;
     }

@@ -52,11 +52,12 @@ it("writes only changed collections and appended history without re-reading unch
     const before = await state.storage.list();
     const transaction = state.storage.transaction.bind(state.storage);
     const writes: string[] = [];
-    const lists = vi.spyOn(state.storage, "list");
+    const lists: (DurableObjectListOptions | undefined)[] = [];
     vi.spyOn(state.storage, "transaction").mockImplementation(callback => transaction(async tx => {
       const put = tx.put.bind(tx);
       return callback(new Proxy(tx, { get(target, property) {
         if (property === "put") return async (key: string, value: unknown) => { writes.push(key); await put(key, value); };
+        if (property === "list") return async (options?: DurableObjectListOptions) => { lists.push(options); return target.list(options); };
         const value = Reflect.get(target, property, target);
         return typeof value === "function" ? value.bind(target) : value;
       } }));
@@ -64,7 +65,7 @@ it("writes only changed collections and appended history without re-reading unch
     record.feedback[0].recipients[0].seenAfterMs = 12;
     record.checkpoint.eventSeq = 2;
     await commitRecord(state.storage, record, [event(2)]);
-    expect(lists).not.toHaveBeenCalled();
+    expect(lists).toEqual([]);
     expect(writes.some(key => key.includes("outcomes"))).toBe(false);
     expect(writes).not.toContain("record:v2:events:000000000000:000000");
     expect(await loadRecord(state.storage)).toEqual({ ...record, events: [...record.events, event(2)] });
@@ -90,16 +91,24 @@ it("splits retained award summaries and oversized individual peer lists lossless
   });
 });
 
-it("retires valid old rooms without credentials, alarms, or identity reuse", async () => {
+it.each([false, true])("disposes old rooms without data, alarms, or permanent reservations (expired: %s)", async expired => {
   await runInDurableObject(stub(), async (_, state) => {
     const record = fixture();
+    record.sessions = [{ id: "old-host", host: true, playerId: null, verifier: "a".repeat(64) }];
+    if (expired) {
+      record.createdAtMs -= 86400001;
+      record.expiresAtMs -= 86400001;
+      record.checkpoint.createdAtMs = record.createdAtMs;
+    }
     await state.storage.put("record", record);
     await state.storage.setAlarm(Date.now() + 86400000);
     expect(await loadRecord(state.storage)).toBeNull();
-    expect(await state.storage.list()).toEqual(new Map([["record", { version: 2, retired: true }]]));
+    expect((await state.storage.list()).size).toBe(0);
     expect(await state.storage.getAlarm()).toBeNull();
     expect(await loadRecord(state.storage)).toBeNull();
-    await expect(commitRecord(state.storage, record, [])).rejects.toThrow("Stored match record is invalid");
+    const replacement = fixture();
+    await commitRecord(state.storage, replacement, [], replacement.expiresAtMs);
+    expect(await loadRecord(state.storage)).toEqual(replacement);
   });
 });
 
@@ -115,6 +124,23 @@ it("fails closed on corrupt records and missing split values, and never truncate
     await expect(commitRecord(state.storage, record, [])).rejects.toThrow("history");
     await state.storage.delete("record:v2:events:000000000000:000000");
     await expect(loadRecord(state.storage)).rejects.toThrow("Stored match record is invalid");
+    await state.storage.delete("record");
+    await expect(loadRecord(state.storage)).rejects.toThrow("Stored match record is invalid");
+    await expect(commitRecord(state.storage, record, [])).rejects.toThrow("Stored match record is invalid");
+  });
+
+});
+
+it("keeps escaped and multibyte individual event values below the KV limit", async () => {
+  await runInDurableObject(stub(), async (_, state) => {
+    const record = fixture();
+    const largeEvent = { ...event(1), reason: "\"\\\u0000😀".repeat(12000) };
+    record.checkpoint.eventSeq = 1;
+    await commitRecord(state.storage, record, [largeEvent]);
+    expect((await loadRecord(state.storage))?.events).toEqual([largeEvent]);
+    for (const value of (await state.storage.list()).values()) {
+      expect(new TextEncoder().encode(JSON.stringify(value)).length).toBeLessThan(128 * 1024);
+    }
   });
 });
 
