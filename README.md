@@ -266,6 +266,7 @@ all collected participants, including departed players and zero scores.
 Starting and **Resume round** do not request permission or wait for GPS.
 A player without location does not block another player's encounter.
 The round ends when its timer expires or the host selects **End round**.
+Once time runs out, the host cannot pause the round and new players cannot join.
 
 Complete rounds award Hat Trick, Comeback Kid, Social Butterfly, Hot Streak,
 and Conversion Champion when players qualify. Ties share trophies, and one
@@ -398,6 +399,10 @@ Agree on safe routes and a bounded play area in person.
 
 Private tokens stay in `sessionStorage` and authenticate the first WebSocket
 frame, not the URL. Invite links contain only the room code. Do not share tokens.
+**Leave room** stops the phone's sensors immediately. If the connection is
+down, keep the tab or reopen it in the same session. The app retries the
+departure before it resumes any play. Once the room expires, the phone
+discards its saved session instead of trying to reconnect.
 
 ## Award data collection
 
@@ -519,9 +524,9 @@ An authority restart recovers a running round as paused with its last committed
 remaining duration. It discards locations and dwell. Resume is direct;
 clients share available positions after reconnecting with prior consent.
 Leaving removes that player's position; ending or expiry clears all positions.
-Saved legacy rooms migrate to flexible joining and the 30-second policy,
-preserving credentials, names, factions, remaining time, and other saved settings.
-Clients open during an upgrade must reload the new interface.
+The checkpoint and history use separate storage keys and commit in one
+transaction. This storage format does not load rooms from the previous
+single-record format. After upgrading, reload the app and create a new room.
 All match records and credentials expire within 24 hours of creation.
 
 The design scope is in
