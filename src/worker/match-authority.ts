@@ -369,7 +369,7 @@ export class MatchAuthority extends DurableObject<Env> {
         };
         await commitRecord(this.ctx.storage, record, [], record.expiresAtMs);
         this.record = record; this.engine = engine;
-        return Response.json({ matchCode: code, hostToken: credential.token, playerToken: playerCredential.token },
+        return Response.json({ matchCode: code, hostToken: credential.token, playerToken: playerCredential.token, expiresAtMs: record.expiresAtMs },
           { status: 201, headers: { "Cache-Control": "no-store" } });
       }
       if (!this.record || !this.engine) return Response.json({ error: "Match not found." }, { status: 404 });
@@ -413,7 +413,8 @@ export class MatchAuthority extends DurableObject<Env> {
         await this.accept(next, null, [...this.record.sessions,
           { id: playerId, host: false, playerId, verifier: credential.verifier }]);
         await this.broadcast(next.events);
-        return Response.json({ matchCode: code, hostToken: null, playerToken: credential.token }, { status: 201, headers: { "Cache-Control": "no-store" } });
+        return Response.json({ matchCode: code, hostToken: null, playerToken: credential.token, expiresAtMs: this.record.expiresAtMs },
+          { status: 201, headers: { "Cache-Control": "no-store" } });
       }
       if (action === "socket" && request.headers.get("Upgrade")?.toLowerCase() === "websocket") {
         const pair = new WebSocketPair(), client = pair[0], server = pair[1];

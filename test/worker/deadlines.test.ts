@@ -8,6 +8,17 @@ import { loadRecord } from "../../src/worker/storage";
 
 afterEach(async () => { await closeSockets(); vi.restoreAllMocks(); await reset(); });
 
+it("returns the same room deadline on create and late join, before either socket opens", async () => {
+  let now = Date.now();
+  vi.spyOn(Date, "now").mockImplementation(() => now);
+  const deadline = now + 86_400_000;
+  const host = await createMatch();
+  now += 86_399_000;
+  const guest = await joinMatch(host.matchCode);
+  expect(host).toMatchObject({ expiresAtMs: deadline });
+  expect(guest).toMatchObject({ expiresAtMs: deadline });
+});
+
 it("does not create a room if its expiry alarm cannot be saved", async () => {
   const code = "ABCDEFGH";
   const stub = env.MATCHES.get(env.MATCHES.idFromName(code));
