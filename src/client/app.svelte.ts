@@ -12,7 +12,7 @@ import { addTrialSample, exportTrialSummary, newTrialSummary } from "./trial";
 import { describeEvent } from "./views";
 import { destroyMatch, renderActivity, renderMatch, setRadarHeading, syncAwardDialog } from "./match-view.svelte";
 import { deviceSchema, isFactionChange, sessionCredentialsSchema } from "../shared/protocol";
-import type { ConnectionStatus, EngineEvent, HostCommand, LocationStatus, MatchConnection, PlayerSnapshot, ServerMessage, SessionCredentials, TrialSample, TrialStatus, TrialSummary } from "../shared/protocol";
+import type { ConnectionStatus, EngineEvent, HostCommand, LocationStatus, MatchConnection, PlayerSnapshot, ServerMessage, TrialSample, TrialStatus, TrialSummary } from "../shared/protocol";
 
 export function mountApp(root: HTMLElement): () => void {
   root.replaceChildren();
@@ -275,6 +275,13 @@ export function mountApp(root: HTMLElement): () => void {
     connection = connectMatch(next, {
       onMessage: receive,
       onLeft: finishLeave,
+      onJoin(expiresAtMs) {
+        if (!credentials) return;
+        credentials = { ...credentials, expiresAtMs, savedAtMs: credentials.savedAtMs ?? Date.now() };
+        try { sessionStorage.setItem("monk-session", JSON.stringify(credentials)); }
+        catch { showError("Room expiry could not be saved on this phone. Keep this page open."); }
+      },
+      onSessionEnded(reason) { finishLeave(); error = reason; render(); },
       onReady() {
         if (leaving) return;
         for (const [commandId, pending] of pendingCommands) {
@@ -343,7 +350,7 @@ export function mountApp(root: HTMLElement): () => void {
       }
     }));
   }
-  async function request(path: string, body: object): Promise<SessionCredentials> {
+  async function request(path: string, body: object): Promise<SavedSession> {
     const response = await fetch(path, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
@@ -353,8 +360,8 @@ export function mountApp(root: HTMLElement): () => void {
       throw new Error(failure);
     }
     const parsed = sessionCredentialsSchema.safeParse(raw);
-    if (!parsed.success) throw new Error("Match credentials are invalid. Create or join again.");
-    return parsed.data;
+    if (!parsed.success || parsed.data.expiresAtMs === undefined) throw new Error("Match credentials are invalid. Create or join again.");
+    return { ...parsed.data, savedAtMs: Date.now() };
   }
   function leave() {
     if (!credentials) return;

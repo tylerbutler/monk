@@ -563,6 +563,50 @@ it("persists pending leave through reload without replaying commands or restarti
   }
 });
 
+it("persists joined expiry and clears expired saved credentials on reload without an upgrade", () => {
+  vi.useFakeTimers();
+  const app = browserApp(snapshotFor(runningFixture(["rock", "paper"]), "p1", 0));
+  const restoredRoot = document.createElement("main");
+  let restoredCleanup: (() => void) | null = null;
+  try {
+    const saved = JSON.parse(sessionStorage.getItem("monk-session")!);
+    expect(saved.expiresAtMs).toBe(Date.now() + 86400000);
+    vi.setSystemTime(Date.now() + 86400001);
+    const count = app.sockets.length;
+    document.body.append(restoredRoot);
+    restoredCleanup = mountApp(restoredRoot);
+    expect(app.sockets).toHaveLength(count);
+    expect(sessionStorage.getItem("monk-session")).toBeNull();
+    expect(restoredRoot.querySelector(".join-form")).not.toBeNull();
+    expect(restoredRoot.textContent).toMatch(/expired/i);
+  } finally { restoredCleanup?.(); restoredRoot.remove(); app.cleanup(); vi.useRealTimers(); }
+});
+
+it.each([false, true])("expires HTTP credentials before their first join (pending leave: %s)", async pendingLeave => {
+  sessionStorage.clear(); vi.useFakeTimers(); vi.setSystemTime(2000000);
+  TestSocket.instances = []; vi.stubGlobal("WebSocket", TestSocket);
+  vi.stubGlobal("fetch", async () => new Response(JSON.stringify({
+    matchCode: "ABCDEFGH", hostToken: "h".repeat(64), playerToken: "p".repeat(64), expiresAtMs: 2001000,
+  }), { status: 201 }));
+  const root = document.createElement("main"); document.body.append(root);
+  let cleanup = mountApp(root);
+  try {
+    root.querySelector<HTMLButtonElement>('[data-action="create"]')!.click();
+    await vi.waitFor(() => expect(root.querySelector('[data-action="leave"]')).not.toBeNull());
+    if (pendingLeave) root.querySelector<HTMLButtonElement>('[data-action="leave"]')!.click();
+    const saved = JSON.parse(sessionStorage.getItem("monk-session")!);
+    expect(saved.expiresAtMs).toBe(2001000);
+    expect(TestSocket.instances[0].decoded()).toHaveLength(0);
+    cleanup();
+    vi.setSystemTime(2001000);
+    const count = TestSocket.instances.length;
+    cleanup = mountApp(root);
+    expect(TestSocket.instances).toHaveLength(count);
+    expect(sessionStorage.getItem("monk-session")).toBeNull();
+    expect(root.querySelector(".join-form")).not.toBeNull();
+  } finally { cleanup(); root.remove(); sessionStorage.clear(); vi.useRealTimers(); vi.unstubAllGlobals(); }
+});
+
 function trophyFixture() {
   const running = snapshotFor(runningFixture(["rock", "scissors"]), "p1", 0);
   const roundResults: RoundResults = { coverage: "complete", players: [

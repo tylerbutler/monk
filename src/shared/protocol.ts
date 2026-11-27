@@ -147,6 +147,7 @@ export const channelJoinSchema = z.strictObject({ hostToken: token.nullable(), p
 export type ChannelJoin = z.infer<typeof channelJoinSchema>;
 export const sessionCredentialsSchema = z.strictObject({
   matchCode: z.string().regex(/^[A-Z2-9]{8}$/), hostToken: token.nullable(), playerToken: token.nullable(),
+  expiresAtMs: time.optional(),
 });
 export type SessionCredentials = z.infer<typeof sessionCredentialsSchema>;
 export const clockSchema = z.strictObject({ offsetMs: z.number().finite(), uncertaintyMs: z.number().nonnegative().max(1000), measuredAtMs: time });
@@ -218,6 +219,8 @@ export type ConnectionHandlers = {
   onMessage(message: ServerMessage): void; onStatus(status: ConnectionStatus): void;
   onReady(): void; onCommandUnconfirmed(commandId: string): void;
   onLeft?(): void;
+  onJoin?(expiresAtMs: number): void;
+  onSessionEnded?(reason: string): void;
 };
 export type MatchConnection = { send(message: ClientMessage): void; close(): void };
 export type LocationStatus = {

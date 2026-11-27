@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { connectMatch } from "./connection";
 import type { ConnectionHandlers, ConnectionStatus, ServerMessage } from "../shared/protocol";
+import type { SavedSession } from "./session";
 import { snapshotFor } from "../worker/engine";
 import { lobbyFixture } from "../../test/fixtures";
 import { TestSocket, joinReply } from "../../test/phoenix-socket";
@@ -19,7 +20,7 @@ function snapshot(streamId = "stream-a", streamSeq = 1): Extract<ServerMessage, 
   return { version: 1, type: "snapshot", streamId, streamSeq,
     snapshot: snapshotFor(lobbyFixture(["rock", "paper"]), null, 0), trial: null, startChecking: false };
 }
-function setup(overrides: Partial<ConnectionHandlers> = {}, session = credentials) {
+function setup(overrides: Partial<ConnectionHandlers> = {}, session: SavedSession = credentials) {
   const statuses: ConnectionStatus[] = [], messages: ServerMessage[] = [];
   const handlers: ConnectionHandlers = {
     onMessage: message => messages.push(message), onStatus: status => statuses.push(status),
@@ -349,4 +350,57 @@ it.each(["unauthorized", "expired"])("finishes a lost leave acknowledgement when
     { code, reason: "Session ended." }, "error");
   expect(departed).toHaveBeenCalledOnce();
   expect(handlers.onReady).toHaveBeenCalledOnce();
+});
+
+it("expires an offline saved session without opening another socket", () => {
+  const ended = vi.fn();
+  const { connection, socket, statuses } = setup({ onSessionEnded: ended });
+  socket.open();
+  const reply = joinReply(snapshot());
+  reply.identity.expiresAtMs = Date.now() + 1000;
+  socket.reply(socket.decoded()[0], reply);
+  socket.close(1006);
+  vi.advanceTimersByTime(1000);
+  const count = TestSocket.instances.length;
+  vi.advanceTimersByTime(120000);
+  connection.send(position);
+  expect(TestSocket.instances).toHaveLength(count);
+  expect(statuses.at(-1)?.state).toBe("failed");
+  expect(ended).toHaveBeenCalledOnce();
+});
+
+it("does not attempt an upgrade with already expired saved credentials", () => {
+  const ended = vi.fn();
+  const { statuses } = setup({ onSessionEnded: ended }, {
+    ...credentials, expiresAtMs: Date.now() - 1, savedAtMs: Date.now() - 1000,
+  });
+  expect(TestSocket.instances).toHaveLength(0);
+  expect(statuses.at(-1)?.state).toBe("failed");
+  expect(ended).toHaveBeenCalledOnce();
+});
+
+it("a backward wall-clock adjustment cannot extend a joined session", () => {
+  const ended = vi.fn();
+  const { socket } = setup({ onSessionEnded: ended });
+  socket.open();
+  const reply = joinReply(snapshot());
+  reply.identity.expiresAtMs = Date.now() + 1000;
+  socket.reply(socket.decoded()[0], reply);
+  vi.setSystemTime(Date.now() - 60000);
+  vi.advanceTimersByTime(1000);
+  expect(ended).toHaveBeenCalledOnce();
+  expect(socket.readyState).toBe(TestSocket.CLOSED);
+});
+
+it("keeps a pending leave when the server closes only for an authorization timeout", () => {
+  const departed = vi.fn(), ended = vi.fn();
+  const { connection, socket } = setup({ onLeft: departed, onSessionEnded: ended });
+  authorize(socket); connection.send({ version: 1, type: "leave" });
+  socket.close(1008, "Authorization timeout");
+  expect(departed).not.toHaveBeenCalled();
+  expect(ended).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(10);
+  const replacement = TestSocket.instances.at(-1)!;
+  authorize(replacement, "retry");
+  expect(replacement.applicationFrames().map(frame => frame.type)).toEqual(["leave"]);
 });

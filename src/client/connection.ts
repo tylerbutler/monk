@@ -3,15 +3,29 @@ import type { Channel, Push } from "phoenix";
 import { joinReplySchema, parseClientMessage, parseServerMessage } from "../shared/protocol";
 import type { ClientMessage, ConnectionHandlers, MatchConnection, ServerMessage } from "../shared/protocol";
 import type { SavedSession } from "./session";
+import { remainingSessionMs } from "./session";
 
 type CancellablePush = Push & { cancelTimeout(): void; cancelRefEvent(): void };
 
 export function connectMatch(credentials: SavedSession, handlers: ConnectionHandlers): MatchConnection {
+  const expiredReason = "Room expired. Create or join another room.";
+  const remainingMs = remainingSessionMs(credentials);
+  if (remainingMs === 0) {
+    if (credentials.leaving) handlers.onLeft?.();
+    else {
+      handlers.onStatus({ state: "failed", reason: expiredReason });
+      handlers.onSessionEnded?.(expiredReason);
+    }
+    return { send() {}, close() {} };
+  }
   const socket = new Socket(`/api/matches/${credentials.matchCode}/socket`, {
     transport: WebSocket, heartbeatIntervalMs: 25_000, timeout: 5000,
   });
   let channel: Channel, stopped = false, baseline = false, generation = 0, restarting = false;
   let leaving = credentials.leaving === true, leaveRequest: object | null = null;
+  let session = credentials;
+  let expiryMonotonicMs = remainingMs === null ? null : performance.now() + remainingMs;
+  let expiryTimer: ReturnType<typeof setTimeout> | null = null;
   let streamId: string | null = null, cursor = 0;
   let snapshotRequest: object | null = null;
   let clockProbe: { nonce: string; wallMs: number; monotonicMs: number } | null = null;
@@ -30,7 +44,7 @@ export function connectMatch(credentials: SavedSession, handlers: ConnectionHand
     if (!stopped) handlers.onStatus({ state, reason });
   }
   function joined() { return !stopped && baseline && socket.isConnected() && channel.state === "joined"; }
-  function ready() { return !leaving && joined(); }
+  function ready() { return !leaving && !checkExpiry() && joined(); }
   function clearProbe() {
     clockProbe = null;
     if (probeTimeout !== null) clearTimeout(probeTimeout);
@@ -70,12 +84,15 @@ export function connectMatch(credentials: SavedSession, handlers: ConnectionHand
     activePushes.clear();
   }
   function invalidate() {
+    if (checkExpiry()) return;
     generation += 1; baseline = false; snapshotRequest = null; leaveRequest = null; requests.clear(); stopDiagnostics(); cancelRequests();
     status("reconnecting", "Connection lost. Location sharing is stopped.");
   }
   function close() {
     if (stopped) return;
     stopped = true; generation += 1; baseline = false;
+    if (expiryTimer !== null) clearTimeout(expiryTimer);
+    expiryTimer = null;
     requests.clear(); attempts.clear(); unconfirmed.clear(); snapshotRequest = null; stopDiagnostics(); cancelRequests();
     channel.leave(); socket.disconnect();
   }
@@ -83,7 +100,21 @@ export function connectMatch(credentials: SavedSession, handlers: ConnectionHand
   function departed() { if (!stopped) { close(); handlers.onLeft?.(); } }
   function sessionEnded(reason: string) {
     if (leaving) departed();
-    else fail(reason);
+    else { fail(reason); handlers.onSessionEnded?.(reason); }
+  }
+  function checkExpiry() {
+    if (stopped) return true;
+    if (remainingSessionMs(session) === 0 || expiryMonotonicMs !== null && performance.now() >= expiryMonotonicMs) {
+      sessionEnded(expiredReason); return true;
+    }
+    return false;
+  }
+  function scheduleExpiry() {
+    const remaining = remainingSessionMs(session);
+    if (remaining === null) return;
+    expiryMonotonicMs = Math.min(expiryMonotonicMs ?? Infinity, performance.now() + remaining);
+    if (expiryTimer !== null) clearTimeout(expiryTimer);
+    expiryTimer = setTimeout(() => sessionEnded(expiredReason), Math.max(0, expiryMonotonicMs - performance.now()));
   }
   function sendLeave() {
     if (!leaving || stopped || !socket.isConnected() || channel.state !== "joined" || leaveRequest) return;
@@ -106,11 +137,11 @@ export function connectMatch(credentials: SavedSession, handlers: ConnectionHand
       .receive("timeout", () => { if (valid()) reconnect(); });
   }
   function reconnect() {
-    if (stopped || restarting) return;
+    if (checkExpiry() || restarting) return;
     restarting = true; invalidate();
     socket.disconnect(() => {
       restarting = false;
-      if (stopped) return;
+      if (checkExpiry()) return;
       if (channel.state === "closed") createChannel();
       socket.connect();
     });
@@ -127,9 +158,10 @@ export function connectMatch(credentials: SavedSession, handlers: ConnectionHand
     const parsed = parseServerMessage(raw);
     if (!parsed.ok) { fail(parsed.error); return; }
     const message = parsed.value;
-    if (message.type === "error" && ["expired", "unauthorized", "auth_timeout"].includes(message.code)) {
+    if (message.type === "error" && ["expired", "unauthorized"].includes(message.code)) {
       handlers.onMessage(message); sessionEnded(message.reason); return;
     }
+    if (message.type === "error" && message.code === "auth_timeout") { reconnect(); return; }
     if (leaving) return;
     if (message.type === "snapshot") {
       if (message.streamId === streamId && message.streamSeq <= cursor) return;
@@ -244,9 +276,13 @@ export function connectMatch(credentials: SavedSession, handlers: ConnectionHand
     currentChannel.onError(() => { if (!stopped && currentChannel === channel) invalidate(); });
     currentChannel.onClose(() => { if (!stopped && currentChannel === channel) reconnect(); });
     currentChannel.join(5000).receive("ok", raw => {
-      if (stopped || currentChannel !== channel || !socket.isConnected()) return;
+      if (checkExpiry() || currentChannel !== channel || !socket.isConnected()) return;
       const parsed = joinReplySchema.safeParse(raw);
       if (!parsed.success) { fail("Join response is invalid. Reconnect to this match."); return; }
+      session = { ...session, expiresAtMs: parsed.data.identity.expiresAtMs, savedAtMs: session.savedAtMs ?? Date.now() };
+      scheduleExpiry();
+      handlers.onJoin?.(session.expiresAtMs!);
+      if (checkExpiry()) return;
       generation += 1; attempts.clear(); requests.clear(); unconfirmed.clear();
       streamId = parsed.data.state.streamId; cursor = parsed.data.state.streamSeq;
       if (!leaving) {
@@ -262,15 +298,17 @@ export function connectMatch(credentials: SavedSession, handlers: ConnectionHand
   }
   socket.onClose(event => {
     if (stopped) return;
-    if (event.code === 1008) { sessionEnded("Session ended or credentials expired."); return; }
+    if (event.code === 1008 && /\b(expired|revoked)\b/i.test(event.reason)) {
+      sessionEnded("Session ended or credentials expired."); return;
+    }
     invalidate();
   });
   socket.onError(() => { if (!stopped) invalidate(); });
   status("connecting");
-  createChannel(); socket.connect();
+  createChannel(); scheduleExpiry(); socket.connect();
   return {
     send(message) {
-      if (stopped) return;
+      if (checkExpiry()) return;
       const parsed = parseClientMessage(message);
       if (!parsed.ok) { status("failed", parsed.error); return; }
       if (message.type === "leave") {
