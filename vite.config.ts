@@ -1,9 +1,13 @@
+import { execFileSync } from "node:child_process";
 import { cpSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 
 export default defineConfig({
+  define: {
+    "import.meta.env.VITE_BUILD_REVISION": JSON.stringify(execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).slice(0, 7)),
+  },
   resolve: {
     alias: {
       "lottie-web": fileURLToPath(new URL("./node_modules/lottie-web/build/player/lottie_light.js", import.meta.url)),

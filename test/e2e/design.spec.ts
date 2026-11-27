@@ -1,4 +1,11 @@
+import { execFileSync } from "node:child_process";
 import { test, expect } from "@playwright/test";
+
+test("shows the built Git revision in the footer with safe play closed", async ({ page }) => {
+  const revision = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).slice(0, 7);
+  await page.goto("/");
+  await expect(page.locator("footer").getByText(`Build ${revision}`, { exact: true })).toBeVisible();
+});
 
 for (const viewport of [
   { width: 1280, height: 900 },

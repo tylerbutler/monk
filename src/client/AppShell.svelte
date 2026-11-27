@@ -134,6 +134,7 @@
     <p>Share location uses browser permission. Players and the host see approximate direction and distance, not raw opponent coordinates. Last-known positions stay on radar, but influence stops after 30 seconds without a new position. Sharing stops when this app is hidden or disconnected. Locations stay only in temporary server memory, not match records or exports. Rooms and credentials expire within 24 hours.</p>
     <p>At round end, room members can see player names, conversion totals, and earned trophies.</p>
   </details>
+  <small>Build {import.meta.env.VITE_BUILD_REVISION}</small>
 </footer>
 
 <style>
